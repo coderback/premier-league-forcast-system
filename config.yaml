@@ -163,6 +163,30 @@ backtest:
   fdr_alpha: 0.05
 
 # ---------------------------------------------------------------------------------------------
+# AUDIT — the calibration slices
+#
+# Slices are diagnostics, never gates. A model well calibrated overall and badly calibrated on
+# promoted teams is not failing the acceptance rule; it is showing where its next improvement is.
+# ---------------------------------------------------------------------------------------------
+audit:
+  # Reliability-diagram bins. Ten gives ~380 matches per bin on the test decade — enough for a
+  # stable observed frequency, few enough that an empty bin means something.
+  # WEAK-EVIDENCE: conventional choice, not tuned. The Murphy decomposition is mildly sensitive to
+  # it, which is why the report carries both the direct Brier score and the decomposed one.
+  calibration_bins: 10
+
+  # The persistent-strength partition. A judgment call, so it lives here rather than in code: this
+  # is the conventional "big six" of the Premier League era, the clubs with sustained title and
+  # European qualification. Spellings are the corpus's own (see data/static/team_roster.yaml).
+  big_six:
+    - Arsenal
+    - Chelsea
+    - Liverpool
+    - Man City
+    - Man United
+    - Tottenham
+
+# ---------------------------------------------------------------------------------------------
 # SEASON SIMULATION (populated with the season simulator)
 #
 # Team strengths are drawn from the posterior ONCE PER SEASON REPLICATE, never per match:

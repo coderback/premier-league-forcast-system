@@ -67,6 +67,14 @@ class BacktestConfig:
 
 
 @dataclass(frozen=True)
+class AuditConfig:
+    """The calibration slices. Diagnostics, never gates."""
+
+    calibration_bins: int
+    big_six: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class Config:
     """The whole config.yaml, typed where a phase has populated it."""
 
@@ -78,6 +86,7 @@ class Config:
     data: DataConfig
     odds: OddsConfig
     backtest: BacktestConfig
+    audit: AuditConfig
     # Sections not yet populated are carried as raw mappings so nothing invents a default.
     model: dict[str, Any] = field(default_factory=dict)
     season: dict[str, Any] = field(default_factory=dict)
@@ -151,6 +160,11 @@ def load_config(path: Path | str | None = None) -> Config:
     if missing_backtest:
         raise ConfigError(f"config.yaml backtest section missing: {missing_backtest}")
 
+    a = _section(raw, "audit")
+    missing_audit = [k for k in ("calibration_bins", "big_six") if k not in a]
+    if missing_audit:
+        raise ConfigError(f"config.yaml audit section missing: {missing_audit}")
+
     return Config(
         acceptance_rule=rule,
         seed=int(_require(raw, "seed")),
@@ -178,6 +192,10 @@ def load_config(path: Path | str | None = None) -> Config:
             min_train_matches=int(b["min_train_matches"]),
             n_boot=int(b["n_boot"]),
             fdr_alpha=float(b["fdr_alpha"]),
+        ),
+        audit=AuditConfig(
+            calibration_bins=int(a["calibration_bins"]),
+            big_six=tuple(str(x) for x in a["big_six"]),
         ),
         model=_section(raw, "model"),
         season=_section(raw, "season"),

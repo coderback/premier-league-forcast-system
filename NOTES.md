@@ -484,3 +484,95 @@ returned null three separate times, and that was only knowable because it was me
 **DoD met:** `LeakageError` fires on a deliberately corrupted split; the walk is deterministic
 (`walk_forward(df) == walk_forward(df)`); all 1,153 real splits pass `validate_splits`. 154 tests
 green.
+
+---
+
+## 2026-08-17 — MILESTONE: the harness runs end to end, before any model exists
+
+`pl compare --arms uniform,home-always` emits a full JSON report with the acceptance rule embedded
+verbatim, paired deltas with CIs, DM statistics, the market gate, coverage, and calibration slices.
+This was the point of the phase ordering: the WC2026 project built model machinery against a
+yardstick that could not resolve any two reasonable football models, and lost roughly half its
+calendar time to results that had to be re-measured.
+
+```
+walk      : 1153 barriers, 2016-08-13 -> 2026-05-24 (refit every 1)
+pool      : 3,800 matches
+market    : avg_closing (shin) RPS 0.1968 on 2,660 covered
+
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+uniform            0.2390    1.0986    0.0%   0.00000    +0.0416   (baseline)
+home-rate          0.2335    1.0684    2.3%   0.00000    +0.0379   -0.0056 [-0.0082, -0.0030] P=1.000
+home-always        0.4375   19.1236  -83.0%   0.00000    +0.2508   +0.1985 [+0.1841, +0.2127] P=0.000
+```
+
+### The market number is an independent check on the entire odds path
+
+**Market RPS 0.1968** on the 2,660 covered matches. The research report predicts a de-vigged
+closing line at **0.19–0.20** (Pitcan's Serie A 0.1905; Baboota & Kaur's EPL 0.2012). Landing
+inside that band is meaningful external validation: it means the column ladder, the Shin de-vig,
+the outcome coding, the barrier construction and the pooling are all jointly correct. A bug in any
+one of them would almost certainly have pushed this outside the band.
+
+It also sets the target concretely. **The model has to get from 0.2390 (uniform) to somewhere near
+0.20 to be worth having, and 0.1968 is the ceiling it will not beat.**
+
+### Three baselines, and what each is for
+
+`uniform` scores 0.2390, not the oft-quoted 0.2222 — the latter is uniform's expectation against a
+*balanced* outcome mix, and the Premier League's is not balanced. `home-always` scores 0.4375 with
+a log loss of 19.1, the clipping made visible rather than hidden. `home-rate` — the league's own
+home/draw/away split, estimated from data before each barrier — scores 0.2335, so **simply knowing
+the base rate is worth 2.3% skill**. That is the real floor a model must clear, not uniform.
+
+### Two corrections to the brief's expectations, from the data
+
+**Promoted-team fixtures are ~28% of the pool, not ~15%.** The brief estimates 15%; the slice
+counts 1,080 of 3,800. The arithmetic is straightforward once stated: three promoted teams play 38
+matches each, minus the handful they play against one another, so ≈108 of a season's 380 fixtures
+involve one. This roughly doubles the expected value of the multi-tier promoted-team arm, and
+doubles the cost of getting promoted teams wrong.
+
+**Home advantage in the test decade is well below its 25-season average.** Observed base rates on
+2016-17..2025-26: **home 44.6%, draw 23.2%, away 32.1%**. The report quotes ~46.2 / 27.5 / 26.3
+across 25 seasons. Away wins are ~6 points higher and draws ~4 points lower than the long-run
+figures. That is a substantial drift within the very span the model is judged on, and it raises the
+prior on the time-varying home-advantage arm well above "small positive".
+
+The by-season slice also caught the natural experiment unprompted: **2020-21 is the only season
+where `home-rate` scores *negative* skill (−3.1%)** — a fixed home-weighted forecast is actively
+harmful in the empty-stadium season.
+
+### The guards
+
+- **Alignment guard**: identical match identities across arms, asserted; the run fails rather than
+  reindexing, because a paired comparison on mismatched rows is meaningless.
+- **The does-it-do-anything guard** (`assert_arms_differ`): every non-baseline arm's probability
+  vector must differ from the baseline's, and the baseline must be reproducible bit for bit. This
+  is the WC2026 false-null trap — a broken experiment returning "no effect" is indistinguishable
+  from a correct one — and an assertion is the only defence.
+- **An arm may not have partial coverage.** A forecaster that cannot cover the pool is a benchmark,
+  not an arm; the market is therefore the gate-2 benchmark rather than an arm.
+- **Both gates are computed and reported**, never auto-applied. `gate_verdicts` is tested against
+  the `rsfit` shape specifically: better on the pool, worse against the market, correctly rejected.
+
+### A vacuous guard, found and removed
+
+`freeze_matchday` originally asserted that the training frame did not reach the barrier — *after*
+filtering it to `date < barrier`. The assertion could never fire, and a test written to prove it
+would fire failed correctly. Replaced with something informative: same-day results are excluded
+(barriers are date-granular because kickoff times only exist from 2019/20) and the exclusion is
+**counted** in the frozen block. Recorded because a guard that cannot fail is worse than no guard —
+it reads as protection while providing none.
+
+### The live ledger
+
+`pl live` freezes the next unplayed matchday's forecasts to a dated JSON and refuses to rewrite
+one. Currently a no-op: the 2026/27 fixture list is not published yet, so it reports that and exits
+cleanly. Honest note recorded in the module: for these three model-free arms a ledger rebuilt in
+September is numerically identical to one frozen in August, so this is operational rehearsal. The
+discipline becomes load-bearing the moment a fitted model exists.
+
+**DoD met:** `pl compare --arms uniform,home-always` emits a JSON report containing the acceptance
+rule, a paired delta with CI, a DM statistic, a coverage report and calibration slices. 188 tests
+green.
