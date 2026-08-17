@@ -34,6 +34,18 @@ class DataConfig:
 
 
 @dataclass(frozen=True)
+class OddsConfig:
+    """Which market benchmark the acceptance rule's second gate is scored against, and how the
+    bookmaker's margin is removed. The column names live in data/odds.py; only decisions here."""
+
+    devig_primary: str
+    devig_sensitivity: str
+    gate_benchmark: str
+    diagnostic_benchmarks: tuple[str, ...]
+    sum_tolerance: float
+
+
+@dataclass(frozen=True)
 class Config:
     """The whole config.yaml, typed where a phase has populated it."""
 
@@ -43,8 +55,8 @@ class Config:
     static_dir: Path
     output_dir: Path
     data: DataConfig
+    odds: OddsConfig
     # Sections not yet populated are carried as raw mappings so nothing invents a default.
-    odds: dict[str, Any] = field(default_factory=dict)
     model: dict[str, Any] = field(default_factory=dict)
     backtest: dict[str, Any] = field(default_factory=dict)
     season: dict[str, Any] = field(default_factory=dict)
@@ -94,6 +106,12 @@ def load_config(path: Path | str | None = None) -> Config:
     if missing_data:
         raise ConfigError(f"config.yaml data section missing: {missing_data}")
 
+    o = _section(raw, "odds")
+    odds_keys = ("devig_primary", "devig_sensitivity", "gate_benchmark", "sum_tolerance")
+    missing_odds = [k for k in odds_keys if k not in o]
+    if missing_odds:
+        raise ConfigError(f"config.yaml odds section missing: {missing_odds}")
+
     return Config(
         acceptance_rule=rule,
         seed=int(_require(raw, "seed")),
@@ -106,7 +124,13 @@ def load_config(path: Path | str | None = None) -> Config:
             first_season=str(d["first_season"]),
             min_expected_rows={str(k): int(v) for k, v in (d.get("min_expected_rows") or {}).items()},
         ),
-        odds=_section(raw, "odds"),
+        odds=OddsConfig(
+            devig_primary=str(o["devig_primary"]),
+            devig_sensitivity=str(o["devig_sensitivity"]),
+            gate_benchmark=str(o["gate_benchmark"]),
+            diagnostic_benchmarks=tuple(str(x) for x in (o.get("diagnostic_benchmarks") or ())),
+            sum_tolerance=float(o["sum_tolerance"]),
+        ),
         model=_section(raw, "model"),
         backtest=_section(raw, "backtest"),
         season=_section(raw, "season"),

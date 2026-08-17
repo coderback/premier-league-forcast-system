@@ -64,9 +64,27 @@ def test_paths_are_absolute(cfg: Config) -> None:
         assert path.is_absolute()
 
 
+def test_odds_section(cfg: Config) -> None:
+    from plmodel.data.odds import DEVIG_METHODS, FAMILIES
+
+    assert cfg.odds.devig_primary in DEVIG_METHODS
+    assert cfg.odds.devig_sensitivity in DEVIG_METHODS
+    assert cfg.odds.devig_primary != cfg.odds.devig_sensitivity
+    assert cfg.odds.gate_benchmark in FAMILIES
+    assert all(name in FAMILIES for name in cfg.odds.diagnostic_benchmarks)
+    assert cfg.odds.sum_tolerance > 0
+
+
+def test_gate_benchmark_is_a_closing_line(cfg: Config) -> None:
+    """A pre-close benchmark would measure the model against a stale market."""
+    from plmodel.data.odds import FAMILIES
+
+    assert FAMILIES[cfg.odds.gate_benchmark].is_closing
+
+
 def test_unpopulated_sections_stay_empty(cfg: Config) -> None:
-    """Phases populate these. An empty section must load empty, never default-filled."""
-    for section in (cfg.odds, cfg.model, cfg.backtest, cfg.season):
+    """Later work populates these. An empty section must load empty, never default-filled."""
+    for section in (cfg.model, cfg.backtest, cfg.season):
         assert isinstance(section, dict)
 
 

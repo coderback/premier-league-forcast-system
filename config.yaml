@@ -72,20 +72,36 @@ data:
     E3: 440
 
 # ---------------------------------------------------------------------------------------------
-# ODDS AND DE-VIG (populated with the odds loader)
+# ODDS AND DE-VIG
 #
-# Shin (1993) is the primary de-vig: Strumbelj (2016, IJF 32(2):462-472) finds Shin probabilities
-# lowest-RPS across 412 bookmaker/competition pairs, and Koning & Zijm (2023) find Shin unbiased
-# for the EPL specifically. Proportional is kept as a sensitivity and BOTH appear in every report.
-#
-# Column availability differs by era (verified 2026-08-16). The gate-2 benchmark is the
-# market-AVERAGE CLOSING family, which is the only closing benchmark that is both 100%-covered
-# and still being published:
-#   AvgCH/AvgCD/AvgCA  2019/20 ->            100% coverage, live
-#   PSCH/PSCD/PSCA     2012/13 -> 2026-01-08 Pinnacle; stops dead mid-2025/26 (55% that season)
+# Column availability differs by era (verified 2026-08-16 against the live source, E0 counts):
+#   AvgCH/AvgCD/AvgCA  2019/20 ->            market-average CLOSING; 2,660 matches, still live
+#   PSCH/PSCD/PSCA     2012/13 -> 2026-01-08 Pinnacle CLOSING; 5,150 matches, then stops dead
 #   BbAvH/BbAvD/BbAvA  2005/06 -> 2018/19    Betbrain average, PRE-CLOSE not closing
+# The column names themselves live in data/odds.py (a property of the source); only decisions here.
 # ---------------------------------------------------------------------------------------------
-odds: {}
+odds:
+  # Shin (1993) is primary: Strumbelj (2016, IJF 32(2):462-472) finds Shin probabilities lowest-RPS
+  # across 412 bookmaker/competition pairs, and Koning & Zijm (2023) find them unbiased for the EPL
+  # specifically. The theoretical case is contested (Whelan calls it "relatively weak"), which is
+  # why proportional is kept as a sensitivity rather than dropped. BOTH appear in every report.
+  devig_primary: shin
+  devig_sensitivity: proportional
+
+  # The acceptance rule's gate 2 is scored against this family. Chosen over the sharper Pinnacle
+  # closing line because Pinnacle's feed stops after 2026-01-08: a benchmark that dies mid-season
+  # cannot judge a model that has to score the 2026/27 season. Gate 1 keeps the full decade; the
+  # rule scopes gate 2 to "the odds-covered subset", so the two pools differ by design.
+  gate_benchmark: avg_closing
+
+  # Reported alongside the gate, never as it. Pinnacle reaches back to 2012/13 (3,630 of the 3,800
+  # test-decade matches vs avg_closing's 2,660) and is the sharper line, so a disagreement between
+  # the two is worth seeing rather than hiding.
+  diagnostic_benchmarks: [pinnacle_closing]
+
+  # De-vigged probabilities must sum to 1. Tight because the de-vig is exact arithmetic followed by
+  # an explicit renormalisation, not an approximation — anything above float noise is a bug.
+  sum_tolerance: 1.0e-9
 
 # ---------------------------------------------------------------------------------------------
 # MODEL (populated with the Dixon-Coles fit)

@@ -47,7 +47,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     divisions = tuple(args.divisions.split(",")) if args.divisions else None
     corpus, metas = load_matches(cfg, divisions=divisions, refresh=args.refresh)
-    report = build_report(corpus, metas, skipped=corpus.attrs.get("skipped_seasons"))
+    report = build_report(
+        corpus, metas, skipped=corpus.attrs.get("skipped_seasons"), cfg=cfg
+    )
 
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     report_path = cfg.output_dir / "coverage.json"
@@ -67,6 +69,15 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         print(f"\nskipped {len(report['skipped_seasons'])} season file(s):")
         for line in report["skipped_seasons"]:
             print(f"  {line}")
+    market = report["market_benchmark"]
+    print(f"\nmarket benchmark: {market['gate_benchmark']} "
+          f"(de-vig {market['devig_primary']}, sensitivity {market['devig_sensitivity']})")
+    for name, block in market["families"].items():
+        role = "GATE" if name == market["gate_benchmark"] else (
+            "diag" if name in market["diagnostic_benchmarks"] else "    ")
+        span = f"{block['first_priced']} -> {block['last_priced']}" if block["n_priced"] else "-"
+        print(f"  {role} {name:18} {block['n_priced']:>6,} priced  {block['settlement']:<10} {span}")
+
     print("\nknown discontinuities:")
     for d in report["known_discontinuities"]:
         print(f"  {d['date']}  {d['source']}: {d['field']}")

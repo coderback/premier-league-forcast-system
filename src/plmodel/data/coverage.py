@@ -48,8 +48,50 @@ KNOWN_DISCONTINUITIES: tuple[dict[str, str], ...] = (
 )
 
 
+def market_benchmark_block(corpus: pd.DataFrame, cfg) -> dict[str, Any]:
+    """What each market family prices, and which one the acceptance rule's gate 2 uses.
+
+    Emitted on every run so the benchmark behind a reported market gap is never implicit — and so
+    the Pinnacle termination shows up as a coverage number, not just as prose.
+    """
+    from plmodel.data.odds import FAMILIES, resolve_family
+
+    families: dict[str, Any] = {}
+    for name, family in FAMILIES.items():
+        if not all(c in corpus.columns for c in family.columns):
+            continue
+        _, covered, n_invalid = resolve_family(corpus, name)
+        priced = corpus.loc[covered]
+        families[name] = {
+            "columns": list(family.columns),
+            "settlement": family.settlement,
+            "kind": family.kind,
+            "note": family.note,
+            "n_priced": int(covered.sum()),
+            "n_invalid": n_invalid,
+            "coverage": float(covered.mean()),
+            "first_priced": str(priced["date"].min().date()) if len(priced) else None,
+            "last_priced": str(priced["date"].max().date()) if len(priced) else None,
+            "by_division": {
+                str(div): int(g.sum())
+                for div, g in corpus.assign(_c=covered).groupby("division")["_c"]
+            },
+        }
+    return {
+        "gate_benchmark": cfg.odds.gate_benchmark,
+        "diagnostic_benchmarks": list(cfg.odds.diagnostic_benchmarks),
+        "devig_primary": cfg.odds.devig_primary,
+        "devig_sensitivity": cfg.odds.devig_sensitivity,
+        "families": families,
+    }
+
+
 def build_report(
-    corpus: pd.DataFrame, metas: list["SeasonMeta"], *, skipped: list[str] | None = None
+    corpus: pd.DataFrame,
+    metas: list["SeasonMeta"],
+    *,
+    skipped: list[str] | None = None,
+    cfg=None,
 ) -> dict[str, Any]:
     """Assemble the coverage report for a loaded corpus."""
     played = corpus[corpus["played"]]
@@ -70,6 +112,8 @@ def build_report(
         for m in metas
     ]
 
+    report_market = market_benchmark_block(corpus, cfg) if cfg is not None else None
+
     return {
         "totals": {
             "n_rows": int(len(corpus)),
@@ -85,6 +129,7 @@ def build_report(
         "encodings": _value_counts(per_season, "encoding"),
         "column_group_first_seen": _first_seen_groups(per_season),
         "market_column_coverage": _market_coverage(per_season),
+        "market_benchmark": report_market,
         "per_season": per_season,
         "skipped_seasons": list(skipped or []),
         "known_discontinuities": [dict(d) for d in KNOWN_DISCONTINUITIES],

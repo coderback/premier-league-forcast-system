@@ -353,3 +353,71 @@ defaults instead of reading config.
 
 **DoD met:** byte-identity against the WC2026 fixture; DM and the bootstrap agree in sign on the
 fixture pair. 93 tests green.
+
+---
+
+## 2026-08-17 — Odds and de-vig
+
+`data/odds.py`. Shin and proportional de-vig ported verbatim from WC2026; both appear in every
+report. Shin is primary (Štrumbelj 2016: lowest RPS across 412 bookmaker/competition pairs; Koning
+& Zijm 2023: unbiased for the EPL specifically), with proportional retained as a sensitivity
+because Shin's theoretical case is contested (Whelan: "relatively weak").
+
+### The gate-2 benchmark, confirmed on measured coverage
+
+| Family | Settlement | E0 priced | Span | Role |
+|---|---|---:|---|---|
+| `avg_closing` (`AvgC*`) | closing | 2,660 | 2019-20 → live | **gate 2** |
+| `pinnacle_closing` (`PSC*`) | closing | 5,150 | 2012-13 → **2026-01-08** | diagnostic |
+| `betbrain_avg` (`BbAv*`) | **pre-close** | — | 2005-06 → 2018-19 | not comparable |
+
+`avg_closing` covers exactly **2,660** E0 matches from 2019-20 — the figure the plan committed to,
+now measured rather than estimated. Pinnacle reaches further (3,630 of the 3,800 test-decade
+matches vs 2,660) and is the sharper line, but its last priced match is **2026-01-08**; a benchmark
+that dies mid-season cannot judge a model that must score 2026/27. It is reported as a diagnostic
+so a disagreement between the two is visible rather than hidden.
+
+**Settlement timing is recorded on every family and mixing it is refused** (`assert_comparable`).
+A pool that is closing odds for one era and pre-close for another silently changes what the gate
+measures partway through — which would read as a model effect. This is the odds-side analogue of
+the division-substitution guard: a well-formed benchmark that is quietly the wrong benchmark.
+
+### Shin's correction measured on real data, not assumed
+
+On the 2,660 gate matches, Shin moves probability from longshots to favourites, monotonically
+across the whole probability range:
+
+| Proportional p | mean(Shin − proportional) |
+|---|---:|
+| < 0.05 | **−0.0084** |
+| 0.05–0.10 | −0.0077 |
+| 0.10–0.20 | −0.0056 |
+| 0.20–0.35 | −0.0021 |
+| 0.35–0.50 | +0.0028 |
+| 0.50–0.70 | +0.0082 |
+| > 0.70 | **+0.0134** |
+
+Exactly the favourite–longshot correction Shin exists to make, and the monotonicity is asserted as
+a test rather than the direction alone. On the most extreme fixture in the corpus (odds 1.04 /
+19.42 / 40.86) Shin cuts the longshot's probability from 0.0236 to 0.0155 — a third. Mean absolute
+difference between the methods is 0.0044, so the de-vig choice is a real decision, not a formality.
+
+### Two source behaviours found and handled
+
+**`0.0` is the source's "no price" sentinel, not a price.** Six rows corpus-wide carry
+`B365H = 0.0` alongside plausible draw and away prices. They are counted as invalid and excluded —
+never imputed, never silently dropped from the count. The ported de-vig functions keep their strict
+contract (finite, > 1.0) precisely so a sentinel cannot pass for a price; sanitising happens before
+they are called.
+
+**Negative overrounds are real.** Averaging decimal odds across bookmakers can push the implied sum
+below 1, and the lower divisions contain such rows (`avg_closing` min −0.0446, `pinnacle_closing`
+min −0.0665). **E0 contains none** — the gate pool is unaffected — but the sub-fair branch is live
+code for the multi-tier work, and is tested.
+
+Also noted, not acted on: `william_hill` stops after 2025-03-27, a third feed discontinuity. It is
+not a benchmark here, so it is recorded and left alone.
+
+**DoD met:** de-vigged probabilities sum to 1.0 within 1e-9 (observed worst 2.2e-16); Shin ≠
+proportional on a favourite–longshot fixture, with the direction and monotonicity asserted on real
+data. 123 tests green.
