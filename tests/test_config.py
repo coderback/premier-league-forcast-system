@@ -106,10 +106,24 @@ def test_inverted_span_raises(tmp_path: Path) -> None:
         load_config(bad)
 
 
+def test_model_section(cfg: Config) -> None:
+    m = cfg.model
+    assert m.max_goals > 0 and m.decay_half_life_days > 0
+    assert set(m.param_bounds) >= {"intercept", "home_advantage", "rho", "strength"}
+    lo, hi = m.param_bounds["rho"]
+    # rho must stay inside the region where every tau cell is positive; 1 - lam*mu*rho fails
+    # around 0.4 at football rates.
+    assert -0.4 < lo < 0 < hi < 0.4
+
+
+def test_every_seam_ships_off(cfg: Config) -> None:
+    """The production configuration is the one the byte-identity tests pin."""
+    assert cfg.model.seams_are_inert()
+
+
 def test_unpopulated_sections_stay_empty(cfg: Config) -> None:
     """Later work populates these. An empty section must load empty, never default-filled."""
-    for section in (cfg.model, cfg.season):
-        assert isinstance(section, dict)
+    assert isinstance(cfg.season, dict)
 
 
 def test_missing_config_raises(tmp_path: Path) -> None:

@@ -49,7 +49,8 @@ def freeze_matchday(
     existing file for the same barrier: a frozen forecast that can be rewritten after the fact is
     not frozen, and silently replacing one would destroy the only thing this file is for.
     """
-    from plmodel.eval.compare import ArmSpec, _REGISTRY
+    from plmodel.eval.backtest import Split
+    from plmodel.eval.compare import ArmContext, ArmSpec, _REGISTRY
 
     barrier = next_barrier(fixtures)
     if barrier is None:
@@ -65,10 +66,21 @@ def freeze_matchday(
     train = history[history["date"] < barrier]
     n_excluded_same_day = int((history["date"] == barrier).sum())
 
+    # The live barrier expressed as a Split, so forecasters take exactly the same path here as in
+    # the backtest. Indices describe `train` followed by `day`; `is_refit` is always True because
+    # a live forecast has no earlier fit in this process to reuse.
+    split = Split(
+        index=0, barrier=barrier, fit_barrier=barrier,
+        train_end=len(train), test_start=len(train), test_stop=len(train) + len(day),
+        is_refit=True,
+    )
     specs = [ArmSpec.parse(name) for name in arm_names]
     forecasts: dict[str, np.ndarray] = {}
+    state: dict = {}
     for spec in specs:
-        probs = np.asarray(_REGISTRY[spec.forecaster](day, train, cfg), dtype=float)
+        probs = np.asarray(
+            _REGISTRY[spec.forecaster](ArmContext(split, day, train, cfg, state)), dtype=float
+        )
         forecasts[spec.name] = probs
 
     block = {

@@ -104,19 +104,69 @@ odds:
   sum_tolerance: 1.0e-9
 
 # ---------------------------------------------------------------------------------------------
-# MODEL (populated with the Dixon-Coles fit)
+# MODEL
 #
-# Production baseline: per-team Dixon-Coles with attack alpha_i, defence beta_j, fitted global
-# home advantage gamma, tau low-score correction rho, weighted MLE with exponential decay
-# w = exp(-xi * delta_days).
-#
-# The decay half-life is RE-TUNED FROM SCRATCH on PL data. Do not inherit 1825 days from the
-# WC2026 project and do not inherit any figure suggested in conversation. Published club-football
-# optima cluster near xi = 0.0018-0.0033 per day (half-life ~210-385 days); the grid is set wider
-# than that so the data can choose, and a winner sitting at a grid edge is treated as a red flag
-# that the measurement was optimised rather than the model.
+# Production baseline: per-team Dixon-Coles.
+#   log lam_home = c + h + A[home] - D[away]
+#   log mu_away  = c     + A[away] - D[home]
+# with sum-to-zero attack A and defensive solidity D imposed by construction, a fitted global home
+# advantage h, and the tau low-score correction rho. Weighted MLE, exponential time decay.
 # ---------------------------------------------------------------------------------------------
-model: {}
+model:
+  # Scoreline grid truncation. P(a side scores >12) is ~1e-9 at football rates, and the grid is
+  # renormalised after the tau correction, so this is inert well below its value.
+  max_goals: 12
+
+  # Exponential decay half-life in days. SELECTED by the grid on backtest.tuning_span
+  # (1996-97..2005-06), a window neither evaluation span touches. Deliberately NOT inherited: the
+  # WC2026 project's 1825 days was fitted to international football, where squads turn over far
+  # more slowly than club squads do.
+  #
+  # Read this value as "somewhere in 240-1095", not as a precise optimum. The curve is almost flat
+  # across that range on BOTH the tuning window (0.20048 at 730 vs 0.20061 at 548 — a margin of
+  # 0.00013) and the independent sensitivity window (0.19651 at 548 vs 0.19671 at 730). 730 is the
+  # tuning window's winner and is taken for that reason alone; the sensitivity window confirms the
+  # region without being consulted for the choice. Short half-lives are genuinely bad — 30 days
+  # scores 0.2237 and 0.2411 — so the flatness is a real plateau, not an absence of signal.
+  # See NOTES.md for both full grids.
+  decay_half_life_days: 730
+
+  # A team needs this share of the MEDIAN team's effective (decay-weighted) history before its own
+  # attack and defence are identified; below it the team is pinned at league average and reported
+  # by name. Relative rather than absolute because an absolute bar does not survive a half-life
+  # sweep: at a 30-day half-life a regular team accumulates only ~4.6 effective matches in total,
+  # so a fixed bar of 5 would pin the entire league and score that grid point badly for a reason
+  # unrelated to the model. See NOTES.md.
+  # WEAK-EVIDENCE: not tuned. 15% of a normal league member's history is a wide margin for
+  # "this club is effectively new here".
+  min_effective_share: 0.15
+
+  # L-BFGS-B iteration cap. Real fits converge in 30-40 iterations from a warm start; this exists
+  # only so a pathological grid point cannot stall a walk.
+  max_iter: 500
+
+  param_bounds:
+    intercept: [-2.0, 2.0]        # base log goal rate; exp(2) = 7.4 goals is far outside football
+    home_advantage: [-1.0, 1.0]   # signed: an empty-stadium regime may genuinely push it negative
+    # rho must keep every tau cell positive, but the binding constraint 1 - lam*mu*rho > 0 is
+    # RATE-DEPENDENT, so no fixed bound can guarantee it: at lam = mu = 2.5 it already fails above
+    # rho = 0.16. This is an outer box that keeps the optimiser sensible at rates football
+    # produces; the guarantee is enforced at runtime, where an invalid rho makes the likelihood
+    # return an invalid value (steering the optimiser away) and the scoreline raise. Fitted rho in
+    # club football is small and negative — measured at about -0.045 here — so the positive edge
+    # is far from binding in practice.
+    rho: [-0.2, 0.2]
+    strength: [-3.0, 3.0]         # log attack / defence; exp(3) = 20x the league average
+
+  # Extension seams. Every one is OFF here and has a regression test asserting byte-identical
+  # output when off, so turning one on is a deliberate act with a measurable effect.
+  seams:
+    covariates: []                      # extra additive strength terms
+    dynamics: {enabled: false}          # score-driven / GAS time-varying states
+    observation: {channels: [goals]}    # add xG or shots-on-target as a second channel
+    ensemble: {enabled: false}          # blend with an ML goals regressor
+    home_advantage: {mode: global}      # global | time_varying
+    tiers: [E0]                         # divisions in the joint fit
 
 # ---------------------------------------------------------------------------------------------
 # BACKTEST
@@ -142,6 +192,21 @@ backtest:
   sensitivity_span:
     first_season: "2006-07"
     last_season: "2015-16"
+
+  # Hyperparameter searches run HERE and nowhere else. A third, older window so that neither the
+  # test span nor the sensitivity span is ever optimised against — the WC2026 project's standing
+  # lesson was "never tune against your acceptance instrument", and a sensitivity check that has
+  # been tuned on is not a sensitivity check either. Opens in 1996-97 to leave three seasons of
+  # training history behind the first barrier.
+  tuning_span:
+    first_season: "1996-97"
+    last_season: "2005-06"
+
+  # Half-life grid, in days. Published club-football optima cluster near xi = 0.0018-0.0033 per
+  # day, i.e. half-lives of roughly 210-385 days. The grid is set deliberately WIDER on both sides
+  # so the data can choose rather than be steered, and so a winner sitting at an edge is visible
+  # as the red flag it is.
+  half_life_grid_days: [30, 60, 90, 120, 180, 240, 365, 548, 730, 1095, 1460, 1825]
 
   # Refit cadence in barriers. 1 = refit at every matchday, which is the honest default; larger
   # values reuse the most recent fit and stay leak-free (a stale fit saw strictly less data).

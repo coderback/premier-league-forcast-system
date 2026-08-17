@@ -60,10 +60,36 @@ class BacktestConfig:
     prediction_division: str
     test_span: SeasonSpan
     sensitivity_span: SeasonSpan
+    tuning_span: SeasonSpan
+    half_life_grid_days: tuple[float, ...]
     refit_every: int
     min_train_matches: int
     n_boot: int
     fdr_alpha: float
+
+
+@dataclass(frozen=True)
+class ModelConfig:
+    """The production Dixon-Coles specification and its extension seams."""
+
+    max_goals: int
+    decay_half_life_days: float
+    min_effective_share: float
+    max_iter: int
+    param_bounds: dict[str, tuple[float, float]]
+    seams: dict[str, Any]
+
+    def seams_are_inert(self) -> bool:
+        """True when every seam is off — the configuration the byte-identity tests pin."""
+        s = self.seams
+        return (
+            not s.get("covariates")
+            and not (s.get("dynamics") or {}).get("enabled", False)
+            and list((s.get("observation") or {}).get("channels", ["goals"])) == ["goals"]
+            and not (s.get("ensemble") or {}).get("enabled", False)
+            and (s.get("home_advantage") or {}).get("mode", "global") == "global"
+            and list(s.get("tiers", ["E0"])) == ["E0"]
+        )
 
 
 @dataclass(frozen=True)
@@ -87,8 +113,8 @@ class Config:
     odds: OddsConfig
     backtest: BacktestConfig
     audit: AuditConfig
+    model: ModelConfig
     # Sections not yet populated are carried as raw mappings so nothing invents a default.
-    model: dict[str, Any] = field(default_factory=dict)
     season: dict[str, Any] = field(default_factory=dict)
 
 
@@ -153,8 +179,8 @@ def load_config(path: Path | str | None = None) -> Config:
 
     b = _section(raw, "backtest")
     backtest_keys = (
-        "prediction_division", "test_span", "sensitivity_span", "refit_every",
-        "min_train_matches", "n_boot", "fdr_alpha",
+        "prediction_division", "test_span", "sensitivity_span", "tuning_span",
+        "half_life_grid_days", "refit_every", "min_train_matches", "n_boot", "fdr_alpha",
     )
     missing_backtest = [k for k in backtest_keys if k not in b]
     if missing_backtest:
@@ -164,6 +190,17 @@ def load_config(path: Path | str | None = None) -> Config:
     missing_audit = [k for k in ("calibration_bins", "big_six") if k not in a]
     if missing_audit:
         raise ConfigError(f"config.yaml audit section missing: {missing_audit}")
+
+    m = _section(raw, "model")
+    model_keys = ("max_goals", "decay_half_life_days", "min_effective_share", "max_iter",
+                  "param_bounds", "seams")
+    missing_model = [k for k in model_keys if k not in m]
+    if missing_model:
+        raise ConfigError(f"config.yaml model section missing: {missing_model}")
+    required_bounds = ("intercept", "home_advantage", "rho", "strength")
+    missing_bounds = [k for k in required_bounds if k not in m["param_bounds"]]
+    if missing_bounds:
+        raise ConfigError(f"config.yaml model.param_bounds missing: {missing_bounds}")
 
     return Config(
         acceptance_rule=rule,
@@ -188,6 +225,8 @@ def load_config(path: Path | str | None = None) -> Config:
             prediction_division=str(b["prediction_division"]),
             test_span=_span(b["test_span"], "test_span"),
             sensitivity_span=_span(b["sensitivity_span"], "sensitivity_span"),
+            tuning_span=_span(b["tuning_span"], "tuning_span"),
+            half_life_grid_days=tuple(float(x) for x in b["half_life_grid_days"]),
             refit_every=int(b["refit_every"]),
             min_train_matches=int(b["min_train_matches"]),
             n_boot=int(b["n_boot"]),
@@ -197,6 +236,15 @@ def load_config(path: Path | str | None = None) -> Config:
             calibration_bins=int(a["calibration_bins"]),
             big_six=tuple(str(x) for x in a["big_six"]),
         ),
-        model=_section(raw, "model"),
+        model=ModelConfig(
+            max_goals=int(m["max_goals"]),
+            decay_half_life_days=float(m["decay_half_life_days"]),
+            min_effective_share=float(m["min_effective_share"]),
+            max_iter=int(m["max_iter"]),
+            param_bounds={
+                k: (float(v[0]), float(v[1])) for k, v in m["param_bounds"].items()
+            },
+            seams=dict(m["seams"] or {}),
+        ),
         season=_section(raw, "season"),
     )

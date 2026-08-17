@@ -576,3 +576,132 @@ discipline becomes load-bearing the moment a fitted model exists.
 **DoD met:** `pl compare --arms uniform,home-always` emits a JSON report containing the acceptance
 rule, a paired delta with CI, a DM statistic, a coverage report and calibration slices. 188 tests
 green.
+
+---
+
+## 2026-08-17 — Production Dixon–Coles: the baseline lands where it was predicted to
+
+```
+walk      : 1153 barriers, 2016-08-13 -> 2026-05-24
+pool      : 3,800 matches | market avg_closing (shin) RPS 0.1968 on 2,660 covered
+
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+home-rate          0.2335    1.0684    2.3%   0.00000    +0.0379   (baseline)
+dixon-coles        0.2005    0.9718   16.1%   0.00202    +0.0082   -0.0330 [-0.0373, -0.0288] P=1.000
+
+fits: 1153/1153 converged, 17.2 mean iterations, half-life 730d, rho clamped 0 times
+```
+
+**Pooled RPS 0.2005**, inside the pre-registered 0.196–0.206 band and within 0.001 of Koopman &
+Lit's semi-dynamic EPL row (0.2014) — the specification this model actually is. **Market gap
++0.0082** against a prior of +0.006–0.007: slightly wider, and wider is the reassuring direction.
+The entry above recorded in advance that a materially *smaller* gap would be a leakage signal
+rather than a triumph, so this is the outcome that requires no investigation.
+
+### Half-life: selected at 730 days, but read it as a plateau
+
+Grid on `tuning_span` (1996-97..2005-06), a window neither evaluation span touches:
+
+| half-life | 30 | 60 | 90 | 120 | 180 | 240 | 365 | 548 | **730** | 1095 | 1460 | 1825 |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| tuning RPS | .2237 | .2080 | .2053 | .2037 | .2018 | .2008 | .2006 | .2006 | **.2005** | .2007 | .2011 | .2014 |
+| sensitivity RPS | .2411 | .2142 | .2120 | .2086 | .2040 | .1971 | .1967 | **.1965** | .1967 | .1975 | .1983 | .1990 |
+
+The winner is interior (not at a grid edge) but wins by **0.00013**. Across 240–1095 the curve is
+flat in *both* eras, so the honest statement is that the half-life is **weakly identified above
+~240 days**, not that 730 is optimal. 730 is taken because it is the designated selection window's
+winner; the sensitivity window (which prefers 548 by 0.0002) confirms the *region* without being
+consulted for the choice, which is what keeps it a sensitivity check.
+
+Short half-lives are genuinely bad — 0.2237 and 0.2411 at 30 days — so the plateau is a real one,
+not an absence of signal. Against the research report's expectation of a "6-month-to-1-year"
+optimum, the data mildly prefers longer memory, but 365 sits 0.0002 from the winner, so this is not
+a disagreement worth arguing about.
+
+### Two findings that raise the prior on later arms
+
+**Home advantage is in continuous, monotone decline across twenty years.** The two backtests were
+run independently and their fitted home-advantage parameters trace one line:
+
+| window | first barrier | last barrier | multiplier on the home rate |
+|---|---|---|---|
+| 2006-07 → 2015-16 | +0.3240 | +0.2709 | ×1.38 → ×1.31 |
+| 2016-17 → 2025-26 | +0.2711 | +0.1774 | ×1.31 → ×1.19 |
+
+The handover agrees to four decimal places (+0.2709 against +0.2711) despite coming from separate
+walks — a continuity check nobody arranged. A *global* home advantage is therefore fitting an
+average over regimes that differ visibly within the very span the model is judged on. Combined with
+the base-rate drift already recorded (away wins ~6 points above their 25-season norm), the
+time-varying home-advantage arm now has a far stronger prior than "small positive".
+
+**rho is negative, decisively: mean −0.0326, negative in 92% of 1,153 fits, and negative at every
+half-life on both windows** (−0.041 to −0.058 on tuning, −0.050 to −0.058 on sensitivity in the
+stable region). This is the free falsifier gating Arm 9. The research report cited a five-league
+study finding dependence *positive* in four leagues and negative only in Ligue 1, which would have
+made a negative-dependence copula the wrong tool for the Premier League. Measured here, the
+Premier League behaves like Ligue 1 and like the WC2026 corpus. **Arm 9's premise survives** — the
+opposite of what the report's §A implied, and it cost nothing to find out.
+
+### Three implementation decisions, and what each bought
+
+**Analytic gradient.** Checked against `approx_fprime` to ~1e-7 relative error across random
+parameter draws. A ~100-long parameter vector would need ~100 likelihood evaluations per gradient
+step numerically; with the closed form a fit takes 131 ms cold.
+
+**Warm starting.** Mean iterations fall from ~40 cold to **17.2** along the walk, putting a full
+1,153-barrier arm at ~2.3 minutes. A test asserts warm and cold starts reach the same optimum, so
+it is a speed device and not a modelling change.
+
+**Sum-to-zero by construction.** Verified by simulating from known strengths and recovering them.
+The recovery test asserts *unbiasedness across seeds* rather than accuracy on one draw: a single
+fit's per-team error is dominated by Poisson noise (SE ~0.03–0.07 on 1,800 matches), so a tight
+single-draw bound would have been testing luck. Mean error across six seeds is ~0.01–0.04 against
+an SD of 0.02–0.07, and home advantage recovers 0.26 from a truth of 0.26.
+
+### Two bugs found by building, both about scale-dependence
+
+**A fixed cold-start threshold silently biases a half-life sweep.** The first design pinned a team
+below 5 *effective* (decay-weighted) matches. At a 30-day half-life a team playing every nine days
+accumulates only ~4.6 effective matches in total, so the bar pinned the entire league and the fit
+raised. The grid point would have scored badly for a reason with nothing to do with how well a
+30-day memory forecasts football. Replaced with a **share of the median team's effective history**
+(15%), which means the same thing at every decay rate. This is the kind of interaction that only
+shows up when a hyperparameter sweep actually runs.
+
+**The valid range for rho is rate-dependent, so no fixed bound can guarantee it.** The
+configuration bound of ±0.2 is safe at typical rates but not universally: the binding cell
+`1 − λμρ` goes negative above ρ = 0.16 at λ = μ = 2.5. A fit valid on its own training rates can
+still meet an extreme matchup at prediction time that puts the same rho out of range — which is
+exactly what happened, at 30- and 60-day half-lives where the fit is degenerate (rho pinned at its
+bound in 227 of 342 fits, implied λμ reaching 13.1). Handled by clamping rho **per match** into
+that match's valid range and **counting every clamp** into the report. At the production half-life
+it triggers zero times, so the counter doubles as a degeneracy detector: a non-zero count means the
+configuration is wrong, not the fixture. The config comment claiming "0.2 is a comfortable margin"
+was itself wrong and has been corrected.
+
+### Seams
+
+All six (`covariates`, `dynamics`, `observation`, `ensemble`, `home_advantage`, `tiers`) ship off,
+each with a byte-identity regression test asserting a SHA-256 digest of the probability matrix is
+unchanged when the seam is absent, set explicitly off, or the run is simply repeated. A companion
+test flips each seam and asserts the inertness detector *notices* — a detector that never fires
+would prove nothing.
+
+### The sensitivity decade agrees
+
+`pl backtest --sensitivity` on 2006-07..2015-16 (995 barriers, 3,800 matches):
+
+```
+home-rate          0.2255    3.9% skill   (baseline)
+dixon-coles        0.1967   16.2% skill   -0.0288 [-0.0327, -0.0247] P=1.000
+rho: mean -0.0539, 100% of 995 fits negative
+```
+
+**Skill is 16.2% against the test decade's 16.1%** — indistinguishable. The lower RPS (0.1967 vs
+0.2005) is therefore not the model working better in that era; it is that era's outcomes being more
+predictable, and the skill figure is what strips that out. Worth remembering when any future arm
+appears to do better on one window than the other. The market gate is absent here because
+`avg_closing` does not reach back before 2019/20, which is the coverage limit already recorded.
+
+**DoD met:** `pl backtest` reports pooled RPS 0.2005 (band 0.196–0.206) with a market gap of
++0.0082 (prior +0.006–0.007, and on the safe side of it). 239 tests green.

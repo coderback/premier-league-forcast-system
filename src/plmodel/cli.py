@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 
 from plmodel import __version__
@@ -16,8 +17,6 @@ from plmodel.config import ConfigError, load_config
 # The intended command surface. Entries are removed from here as they are built, so this mapping
 # is both the roadmap and the single place an unbuilt command is documented.
 _PLANNED: dict[str, str] = {
-    "fit": "fit the production model; dump params, ratings, fixture probabilities",
-    "backtest": "rolling-origin walk-forward; metrics + calibration",
     "simulate": "season Monte Carlo -> title / top-4 / relegation / points distribution",
     "reproduce": "re-run an external claim on our data",
 }
@@ -227,6 +226,102 @@ def cmd_audit(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_fit(args: argparse.Namespace) -> int:
+    """Fit the production model on everything available, and dump what it believes."""
+    import pandas as pd
+
+    from plmodel.model.dixon_coles import fit_dixon_coles, fit_summary
+
+    cfg = load_config(args.config)
+    _, matches = _load_corpus(cfg)
+    ref = pd.Timestamp(args.asof) if args.asof else matches["date"].max() + pd.Timedelta(days=1)
+    train = matches[matches["date"] < ref]
+    if train.empty:
+        print(f"no matches before {ref.date()}", file=sys.stderr)
+        return 2
+
+    fit = fit_dixon_coles(
+        train,
+        half_life_days=args.half_life or cfg.model.decay_half_life_days,
+        ref_date=ref,
+        max_goals=cfg.model.max_goals,
+        param_bounds=cfg.model.param_bounds,
+        min_effective_share=cfg.model.min_effective_share,
+        max_iter=cfg.model.max_iter,
+    )
+    summary = fit_summary(fit)
+
+    print(f"as of     : {ref.date()}   ({fit.n_obs:,} matches, effective {fit.effective_n:.0f})")
+    print(f"half-life : {fit.half_life_days:.0f} days")
+    print(f"intercept : {fit.intercept:+.4f}   home advantage {fit.home_advantage:+.4f} "
+          f"(x{math.exp(fit.home_advantage):.3f} on the home rate)")
+    print(f"rho       : {fit.rho:+.4f} ({summary['rho_sign']})")
+    print(f"converged : {fit.converged} in {fit.n_iterations} iterations")
+    if fit.cold_start_teams:
+        print(f"cold start: {len(fit.cold_start_teams)} team(s) pinned at league average")
+
+    table = fit.team_table()
+    current = set(matches[matches["season"] == matches["season"].max()]["home_team"])
+    table = table[table["team"].isin(current)]
+    print(f"\n{'team':18}{'attack':>9}{'defence':>9}{'exp goals for':>15}{'against':>9}")
+    for row in table.itertuples(index=False):
+        lam = math.exp(fit.intercept + fit.home_advantage + row.attack)
+        mu = math.exp(fit.intercept - row.defence)
+        print(f"{row.team:18}{row.attack:>+9.3f}{row.defence:>+9.3f}{lam:>15.2f}{mu:>9.2f}")
+
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.output_dir / "fit.json"
+    out_path.write_text(
+        json.dumps({"summary": summary, "teams": fit.team_table().to_dict("records")},
+                   indent=2, default=str),
+        encoding="utf-8",
+    )
+    print(f"\nparams    : {out_path}")
+    return 0
+
+
+def cmd_backtest(args: argparse.Namespace) -> int:
+    """Walk-forward the production model and report against the baseline and the market."""
+    from plmodel.eval.compare import report_json, run_compare
+
+    cfg = load_config(args.config)
+    corpus, matches = _load_corpus(cfg)
+    span = cfg.backtest.sensitivity_span if args.sensitivity else cfg.backtest.test_span
+    splits = _build_splits(cfg, matches, span=span)
+    report = run_compare(
+        matches, splits, cfg, ["home-rate", "dixon-coles"],
+        history=corpus[corpus["division"] == cfg.backtest.prediction_division],
+        n_bins=cfg.audit.calibration_bins, big_six=cfg.audit.big_six,
+    )
+    payload = report_json(report)
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.output_dir / (args.out or "backtest.json")
+    out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+
+    _print_compare(payload, report)
+    dc = payload["arms"].get("dixon-coles", {})
+    if dc.get("fit"):
+        f = dc["fit"]
+        print(f"\nfits      : {f['n_fits']} ({f['n_converged']} converged, "
+              f"{f['mean_iterations']:.1f} mean iterations), half-life {f['half_life_days']:.0f}d")
+        print(f"rho       : mean {f['rho']['mean']:+.4f}, "
+              f"{f['rho']['share_negative']:.0%} of fits negative "
+              f"[{f['rho']['min']:+.4f}, {f['rho']['max']:+.4f}]")
+        print(f"home adv  : mean {f['home_advantage']['mean']:+.4f} "
+              f"({f['home_advantage']['first']:+.4f} -> {f['home_advantage']['last']:+.4f})")
+        print(f"cold start: {f['cold_start']['mean_per_fit']:.1f} teams/fit, "
+              f"rho clamped {f['rho_clamped']} time(s)")
+    if payload["market"] and payload["market"].get("rps_market") is not None:
+        gap = dc.get("vs_market", {}).get("delta_rps")
+        if gap is not None:
+            print(f"\nmarket gap: {gap:+.4f} "
+                  f"(model {dc['pooled']['rps']:.4f} vs market "
+                  f"{payload['market']['rps_market']:.4f})")
+            print("  A materially SMALLER gap than +0.006 is a leakage signal, not a triumph.")
+    print(f"\nreport    : {out_path}")
+    return 0
+
+
 def cmd_live(args: argparse.Namespace) -> int:
     """Freeze a matchday's forecasts before kickoff, or score previously frozen ones."""
     from plmodel.eval.live import freeze_matchday, score_ledger
@@ -291,6 +386,16 @@ def build_parser() -> argparse.ArgumentParser:
                       help="run on the earlier decade instead of the test span")
     pcmp.add_argument("--out", default=None, help="report filename within the output directory")
     pcmp.set_defaults(func=cmd_compare)
+
+    pf = sub.add_parser("fit", help="fit the production model and dump its parameters")
+    pf.add_argument("--asof", default=None, help="fit as of this date (default: after the last match)")
+    pf.add_argument("--half-life", type=float, default=None, help="override the configured half-life")
+    pf.set_defaults(func=cmd_fit)
+
+    pb = sub.add_parser("backtest", help="walk-forward the production model")
+    pb.add_argument("--sensitivity", action="store_true", help="run on the earlier decade")
+    pb.add_argument("--out", default=None, help="report filename within the output directory")
+    pb.set_defaults(func=cmd_backtest)
 
     pa = sub.add_parser("audit", help="calibration slices for one arm")
     pa.add_argument("--arm", default="uniform", help="arm to audit")

@@ -39,9 +39,25 @@ from plmodel.eval.slices import add_slice_columns, all_slices
 # Columns that identify a match. Two arms disagreeing on these are not comparable.
 ALIGN_COLUMNS: tuple[str, ...] = ("date", "division", "home_team", "away_team")
 
-# A forecaster takes the test rows of one split plus the training rows available at its barrier,
-# and returns (n, 3) probabilities. Model-free arms ignore the training frame.
-Forecaster = Callable[[pd.DataFrame, pd.DataFrame, Config], np.ndarray]
+@dataclass(frozen=True)
+class ArmContext:
+    """Everything a forecaster is allowed to see at one barrier.
+
+    ``state`` is a per-arm scratch dict that persists across the walk — the seam a fitted model
+    uses to warm-start from its previous solution and to honour the refit cadence. Model-free arms
+    ignore it. Nothing here reaches past the barrier: ``train`` is already filtered by the
+    splitter, and ``split.is_refit`` is decided from the barrier's position, never from results.
+    """
+
+    split: Split
+    test: pd.DataFrame
+    train: pd.DataFrame
+    cfg: Config
+    state: dict
+
+
+# A forecaster returns (n, 3) probabilities for the context's test rows.
+Forecaster = Callable[[ArmContext], np.ndarray]
 
 _REGISTRY: dict[str, Forecaster] = {}
 
@@ -63,25 +79,48 @@ def registered_arms() -> tuple[str, ...]:
 
 
 @register("uniform")
-def _uniform(test: pd.DataFrame, train: pd.DataFrame, cfg: Config) -> np.ndarray:
+def _uniform(ctx: ArmContext) -> np.ndarray:
     from plmodel.model.baselines import uniform
 
-    return uniform(test)
+    return uniform(ctx.test)
 
 
 @register("home-always")
-def _home_always(test: pd.DataFrame, train: pd.DataFrame, cfg: Config) -> np.ndarray:
+def _home_always(ctx: ArmContext) -> np.ndarray:
     from plmodel.model.baselines import home_always
 
-    return home_always(test)
+    return home_always(ctx.test)
 
 
 @register("home-rate")
-def _home_rate(test: pd.DataFrame, train: pd.DataFrame, cfg: Config) -> np.ndarray:
+def _home_rate(ctx: ArmContext) -> np.ndarray:
     """The league's long-run home/draw/away split, estimated from data before the barrier."""
     from plmodel.model.baselines import empirical_base_rate, home_rate
 
-    return home_rate(test, rate=empirical_base_rate(train))
+    return home_rate(ctx.test, rate=empirical_base_rate(ctx.train))
+
+
+@register("dixon-coles")
+def _dixon_coles(ctx: ArmContext) -> np.ndarray:
+    """Per-team Dixon-Coles, warm-started along the walk and refit on the configured cadence."""
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
 
 
 @dataclass(frozen=True)
@@ -105,6 +144,7 @@ class ArmResult:
     pooled: dict[str, float] = field(default_factory=dict)
     calibration: dict[str, object] = field(default_factory=dict, repr=False)
     slices: pd.DataFrame | None = field(default=None, repr=False)
+    fit_summary: dict[str, object] | None = None
     vs_baseline: dict[str, float] | None = None
     vs_baseline_dm: dict[str, float] | None = None
     vs_market: dict[str, float] | None = None
@@ -130,20 +170,26 @@ def _pooled_block(probs: np.ndarray, outcomes: np.ndarray) -> dict[str, float]:
 
 def run_arm(
     spec: ArmSpec, matches: pd.DataFrame, splits: Sequence[Split], cfg: Config
-) -> np.ndarray:
-    """Run one arm over the walk, returning probabilities aligned to the concatenated test rows."""
+) -> tuple[np.ndarray, dict]:
+    """Run one arm over the walk.
+
+    Returns the probabilities aligned to the concatenated test rows, and the arm's end state (a
+    fitted arm leaves its fits there for the report).
+    """
     forecaster = _REGISTRY[spec.forecaster]
+    state: dict = {}
     blocks = []
     for split in splits:
         test = split.test(matches)
-        probs = forecaster(test, split.train(matches), cfg)
-        probs = np.asarray(probs, dtype=float)
+        probs = np.asarray(
+            forecaster(ArmContext(split, test, split.train(matches), cfg, state)), dtype=float
+        )
         if probs.shape != (len(test), metrics.AWAY + 1):
             raise ValueError(
                 f"arm {spec.name!r} returned {probs.shape} for {len(test)} test rows"
             )
         blocks.append(probs)
-    return np.vstack(blocks)
+    return np.vstack(blocks), state
 
 
 def build_pool(matches: pd.DataFrame, splits: Sequence[Split]) -> pd.DataFrame:
@@ -227,7 +273,7 @@ def run_compare(
 
     results: list[ArmResult] = []
     for spec in specs:
-        probs = run_arm(spec, matches, splits, cfg)
+        probs, state = run_arm(spec, matches, splits, cfg)
         if np.isnan(probs).any():
             raise ValueError(
                 f"arm {spec.name!r} produced NaN probabilities; an arm must cover the whole pool. "
@@ -240,6 +286,7 @@ def run_compare(
                 pooled=_pooled_block(probs, outcomes),
                 calibration=calibration_report(probs, outcomes, n_bins=n_bins),
                 slices=all_slices(rows, probs, outcomes, n_bins=n_bins),
+                fit_summary=_fit_summary(state),
             )
         )
     assert_arms_differ(results)
@@ -272,6 +319,42 @@ def run_compare(
         market=market_block,
         fdr=fdr,
     )
+
+
+def _fit_summary(state: dict) -> dict[str, object] | None:
+    """Aggregate what a fitted arm's walk produced. None for model-free arms.
+
+    The rho block is the one that matters beyond diagnostics: its sign over the walk decides
+    whether a negative-dependence copula arm is worth building at all.
+    """
+    fits = state.get("fits")
+    if not fits:
+        return None
+    rho = np.array([f.rho for f in fits])
+    return {
+        "n_fits": len(fits),
+        "n_converged": int(sum(f.converged for f in fits)),
+        "half_life_days": fits[-1].half_life_days,
+        "mean_iterations": float(np.mean([f.n_iterations for f in fits])),
+        "home_advantage": {
+            "mean": float(np.mean([f.home_advantage for f in fits])),
+            "first": fits[0].home_advantage,
+            "last": fits[-1].home_advantage,
+        },
+        "rho": {
+            "mean": float(rho.mean()),
+            "min": float(rho.min()),
+            "max": float(rho.max()),
+            "share_negative": float((rho < 0).mean()),
+        },
+        "cold_start": {
+            "mean_per_fit": float(np.mean([len(f.cold_start_teams) for f in fits])),
+            "max_per_fit": int(max(len(f.cold_start_teams) for f in fits)),
+        },
+        # Non-zero means rho had to be pulled into its valid range for an extreme matchup, which
+        # in practice signals a degenerate half-life rather than an unusual fixture.
+        "rho_clamped": int(sum(f.diagnostics.get("rho_clamped", 0) for f in fits)),
+    }
 
 
 def _market_block(
@@ -377,6 +460,7 @@ def report_json(report: CompareReport) -> dict[str, object]:
                     outcome: block["decomposition"]
                     for outcome, block in arm.calibration.items()
                 },
+                "fit": arm.fit_summary,
                 "slices": (
                     arm.slices.to_dict("records") if arm.slices is not None else None
                 ),

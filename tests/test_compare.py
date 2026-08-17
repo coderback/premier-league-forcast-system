@@ -70,7 +70,7 @@ def test_duplicate_arms_are_refused(cfg) -> None:
 
 def test_registering_a_name_twice_is_refused() -> None:
     with pytest.raises(ValueError, match="already registered"):
-        register("uniform")(lambda test, train, cfg: None)
+        register("uniform")(lambda ctx: None)
 
 
 # --- the guards ---------------------------------------------------------------------------------
@@ -110,8 +110,8 @@ def test_baseline_is_reproducible_bit_for_bit(cfg) -> None:
 def test_an_arm_with_partial_coverage_is_refused(cfg) -> None:
     """A forecaster that cannot cover the pool is a benchmark, not an arm."""
     @register("_holey")
-    def _holey(test, train, config):
-        probs = np.full((len(test), 3), 1.0 / 3.0)
+    def _holey(ctx):
+        probs = np.full((len(ctx.test), 3), 1.0 / 3.0)
         probs[0] = np.nan
         return probs
 
