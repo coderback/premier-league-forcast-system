@@ -93,6 +93,32 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class EloRatingConfig:
+    """Elo scheme parameters. Used by the elo-dc comparison arm only, never by production."""
+
+    initial_rating: float
+    k: float
+    home_advantage: float
+    gd_two_goal: float
+    gd_slope_offset: float
+    gd_slope_divisor: float
+    decay_half_life_days: float
+
+    def to_scheme(self):
+        """The dataclass the replay itself takes."""
+        from plmodel.ratings.elo import EloConfig
+
+        return EloConfig(
+            initial_rating=self.initial_rating,
+            k=self.k,
+            home_advantage=self.home_advantage,
+            gd_two_goal=self.gd_two_goal,
+            gd_slope_offset=self.gd_slope_offset,
+            gd_slope_divisor=self.gd_slope_divisor,
+        )
+
+
+@dataclass(frozen=True)
 class AuditConfig:
     """The calibration slices. Diagnostics, never gates."""
 
@@ -114,6 +140,7 @@ class Config:
     backtest: BacktestConfig
     audit: AuditConfig
     model: ModelConfig
+    elo: EloRatingConfig
     # Sections not yet populated are carried as raw mappings so nothing invents a default.
     season: dict[str, Any] = field(default_factory=dict)
 
@@ -197,10 +224,17 @@ def load_config(path: Path | str | None = None) -> Config:
     missing_model = [k for k in model_keys if k not in m]
     if missing_model:
         raise ConfigError(f"config.yaml model section missing: {missing_model}")
-    required_bounds = ("intercept", "home_advantage", "rho", "strength")
+    required_bounds = ("intercept", "home_advantage", "rho", "strength", "elo_slope")
     missing_bounds = [k for k in required_bounds if k not in m["param_bounds"]]
     if missing_bounds:
         raise ConfigError(f"config.yaml model.param_bounds missing: {missing_bounds}")
+
+    e = _section(raw, "elo")
+    elo_keys = ("initial_rating", "k", "home_advantage", "gd_two_goal", "gd_slope_offset",
+                "gd_slope_divisor", "decay_half_life_days")
+    missing_elo = [k for k in elo_keys if k not in e]
+    if missing_elo:
+        raise ConfigError(f"config.yaml elo section missing: {missing_elo}")
 
     return Config(
         acceptance_rule=rule,
@@ -246,5 +280,6 @@ def load_config(path: Path | str | None = None) -> Config:
             },
             seams=dict(m["seams"] or {}),
         ),
+        elo=EloRatingConfig(**{k: float(e[k]) for k in elo_keys}),
         season=_section(raw, "season"),
     )

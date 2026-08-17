@@ -123,6 +123,43 @@ def _dixon_coles(ctx: ArmContext) -> np.ndarray:
     return previous.predict_proba(ctx.test)
 
 
+@register("elo-dc")
+def _elo_dixon_coles(ctx: ArmContext) -> np.ndarray:
+    """Dixon-Coles parameterised by one Elo rating difference — the single-scalar comparison.
+
+    The Elo replay is computed once over the whole prediction frame and cached in the arm state: a
+    forward pass is causal by construction, so one global replay is both faster and safer than
+    replaying per barrier. The replay reads only the prediction division, so this arm faces exactly
+    the same promoted-team cold start the production model does — carrying ratings across the
+    promotion boundary is the multi-tier arm's question, not this one's.
+    """
+    from plmodel.model.elo_dc import fit_elo_dixon_coles
+
+    cfg, model = ctx.cfg, ctx.cfg.model
+    replay = ctx.state.get("replay")
+    if replay is None:
+        from plmodel.ratings.elo import compute_elo
+
+        replay = compute_elo(ctx.state["matches"], cfg.elo.to_scheme())
+        ctx.state["replay"] = replay
+
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        history = replay.history.iloc[: ctx.split.train_end]
+        previous = fit_elo_dixon_coles(
+            history,
+            replay,
+            half_life_days=cfg.elo.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            max_iter=model.max_iter,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
+
+
 @register("dixon-coles-sot")
 def _dixon_coles_sot(ctx: ArmContext) -> np.ndarray:
     """The shots-on-target variant: same machinery, chance-creation target, no tau correction."""
@@ -201,7 +238,9 @@ def run_arm(
     fitted arm leaves its fits there for the report).
     """
     forecaster = _REGISTRY[spec.forecaster]
-    state: dict = {}
+    # The full prediction frame, for arms that need a single pass over all of it (an Elo replay is
+    # causal by construction, so computing it once is both faster and safer than per barrier).
+    state: dict = {"matches": matches}
     blocks = []
     for split in splits:
         test = split.test(matches)
@@ -355,15 +394,22 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
     if not fits:
         return None
     rho = np.array([f.rho for f in fits])
+
+    # Arms return different fit types — the production model, the Elo-scalar comparison, the
+    # shots variant — so read only what every fit is guaranteed to carry and probe for the rest.
+    # The Elo fit names its home advantage `h`, in the same log-goal units.
+    def home_adv(fit) -> float:
+        return float(getattr(fit, "home_advantage", None) or getattr(fit, "h", 0.0))
+
     return {
         "n_fits": len(fits),
         "n_converged": int(sum(f.converged for f in fits)),
         "half_life_days": fits[-1].half_life_days,
         "mean_iterations": float(np.mean([f.n_iterations for f in fits])),
         "home_advantage": {
-            "mean": float(np.mean([f.home_advantage for f in fits])),
-            "first": fits[0].home_advantage,
-            "last": fits[-1].home_advantage,
+            "mean": float(np.mean([home_adv(f) for f in fits])),
+            "first": home_adv(fits[0]),
+            "last": home_adv(fits[-1]),
         },
         "rho": {
             "mean": float(rho.mean()),
@@ -371,14 +417,30 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
             "max": float(rho.max()),
             "share_negative": float((rho < 0).mean()),
         },
+        "n_params": int(getattr(fits[-1], "n_params", 0)) or _parameter_count(fits[-1]),
         "cold_start": {
-            "mean_per_fit": float(np.mean([len(f.cold_start_teams) for f in fits])),
-            "max_per_fit": int(max(len(f.cold_start_teams) for f in fits)),
+            "mean_per_fit": float(np.mean([len(getattr(f, "cold_start_teams", ())) for f in fits])),
+            "max_per_fit": int(max(len(getattr(f, "cold_start_teams", ())) for f in fits)),
         },
         # Non-zero means rho had to be pulled into its valid range for an extreme matchup, which
         # in practice signals a degenerate half-life rather than an unusual fixture.
-        "rho_clamped": int(sum(f.diagnostics.get("rho_clamped", 0) for f in fits)),
+        "rho_clamped": int(
+            sum(getattr(f, "diagnostics", {}).get("rho_clamped", 0) for f in fits)
+        ),
     }
+
+
+def _parameter_count(fit) -> int:
+    """How many free parameters a fit carries — the axis Arm 1 is actually about.
+
+    The per-team model grows with the league; the Elo-scalar model does not. Reporting it makes the
+    parsimony side of the comparison visible next to the accuracy side.
+    """
+    teams = getattr(fit, "teams", None)
+    if teams is None:
+        return int(fit.as_dict().get("n_params", 0))
+    # intercept, home advantage, rho, plus (n_teams - 1) free attack and defence parameters.
+    return 3 + 2 * (len(teams) - 1)
 
 
 def _market_block(

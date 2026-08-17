@@ -157,9 +157,10 @@ model:
     # is far from binding in practice.
     rho: [-0.2, 0.2]
     strength: [-3.0, 3.0]         # log attack / defence; exp(3) = 20x the league average
+    # Slope on the scaled Elo difference, for the elo-dc comparison arm only. A 400-point lead is
+    # d = 1, so a slope of 2 would already mean exp(2) = 7x the goal rate — generous.
+    elo_slope: [0.0, 2.0]
 
-  # Extension seams. Every one is OFF here and has a regression test asserting byte-identical
-  # output when off, so turning one on is a deliberate act with a measurable effect.
   seams:
     covariates: []                      # extra additive strength terms
     dynamics: {enabled: false}          # score-driven / GAS time-varying states
@@ -177,6 +178,47 @@ model:
 #   gate 1 (vs baseline): 2016-17..2025-26, 3,800 matches over 1,153 barriers
 #   gate 2 (vs market):   the avg_closing-covered subset, 2019/20+, 2,660 matches
 # ---------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------
+# ELO — the single-strength-scalar alternative, used by the elo-dc comparison arm only.
+#
+# The production model does NOT use these. They exist so "per-team attack/defence versus one
+# rating scalar" can be measured rather than assumed — the WC2026 project chose the scalar because
+# international football is too sparse for 2N parameters, a constraint a 38-round league does not
+# have. The research report notes no clean published head-to-head isolates the two on league data.
+#
+# K and the half-life were tuned together on backtest.tuning_span so the comparison is between two
+# tuned models rather than a tuned one and a default one. See NOTES.md.
+# ---------------------------------------------------------------------------------------------
+elo:
+  initial_rating: 1500.0     # conventional Elo origin; only differences matter
+  # TUNED on the tuning span by one shallow coordinate pass. Interior to its grid (10..60), and a
+  # shallow optimum: 0.19760 at 15 against 0.19766 at 20.
+  k: 15.0
+  # Home advantage in rating points, applied to the expectation so a home win counts for less.
+  # WEAK-EVIDENCE: not tuned. ~65 points is the conventional club-football value and corresponds
+  # to roughly the 59% home expectation the league showed over the fitting era.
+  home_advantage: 65.0
+  # Goal-difference multiplier (World Football Elo): 1 for a one-goal margin, 1.5 for two, and
+  # (11 + |gd|) / 8 beyond. Without it a 5-0 and a 1-0 move the ratings identically.
+  gd_two_goal: 1.5
+  gd_slope_offset: 11.0
+  gd_slope_divisor: 8.0
+  # Decay half-life for the elo-dc likelihood, tuned separately from the production model's —
+  # different strength parameterisations genuinely prefer different memory, and reusing one number
+  # would handicap this arm and make the comparison a test of tuning effort.
+  #
+  # This arm wants NO time decay. The sweep is monotone decreasing across the standard grid, hit
+  # the 1825 edge, and stayed monotone when extended: 0.19760 at 1825 falling to 0.19748 at
+  # effectively-uniform weights. The reason is structural rather than a search failure — the Elo
+  # replay already carries the recency weighting, so the layer above it only calibrates how a
+  # rating difference maps to goal rates, and that relationship is stable enough over time to want
+  # every match equally. 36500 days is far longer than the corpus, so weights are uniform in
+  # practice. The whole effect is worth 0.00012 RPS, so this is a fairness choice, not a lever.
+  decay_half_life_days: 36500
+
+  # Extension seams. Every one is OFF here and has a regression test asserting byte-identical
+  # output when off, so turning one on is a deliberate act with a measurable effect.
 backtest:
   # The division forecasts are scored on. Lower tiers are ingested for the multi-tier arm's
   # training data, never scored themselves.

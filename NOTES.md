@@ -793,3 +793,222 @@ demanding scrutiny rather than a success to be claimed.
 
 The shots-on-target model (`model/shots.py`, arm `dixon-coles-sot`) is retained as production
 groundwork: swapping shots for xG leaves the conversion and pooling unchanged.
+
+---
+
+## 2026-08-17 — PRE-REGISTRATION, Arm 1: per-team attack/defence vs an Elo-difference scalar
+
+*Written before the comparison was run. The tuning-span numbers below were available; no test-span
+result was.*
+
+### Hypothesis
+
+Per-team attack and defence lower pooled RPS relative to a Dixon–Coles parameterised by a single
+Elo rating difference, on the 2016-17..2025-26 test span.
+
+### Why this arm exists at all
+
+The WC2026 project used the Elo scalar **because international football is too sparse for 2N
+parameters** — teams play ~10 matches a year and many pairs never meet. A 20-team league playing 38
+rounds does not have that constraint, so the choice should reverse. This project already assumed
+the reversal and shipped per-team attack/defence as production; this arm is the check that the
+assumption was right, run in the direction that could embarrass it.
+
+The research report states that **no clean published head-to-head isolates the two
+parameterisations on league data** ("treat the magnitude as unknown but the sign as
+well-supported"). So the sign is near-certain and the magnitude is genuinely unmeasured.
+
+### Arm definition — exactly one axis
+
+`elo-dc` changes only how strength enters the goal rates:
+
+```
+elo-dc      : log lam = a + h + c*d,  log mu = a - c*d       (4 parameters)
+dixon-coles : log lam = c + h + A[home] - D[away], ...       (~2N + 3 parameters)
+```
+
+Identical between the two: the τ correction, the exponential decay, the weighted likelihood, the
+analytic-gradient optimiser, the scoreline collapse, the walk-forward splits, the pool.
+
+**Both models are tuned before comparison.** Comparing a tuned model against a default-configured
+one would measure tuning effort rather than parameterisation. `elo-dc` gets its own K and its own
+half-life, selected by one shallow coordinate pass on `tuning_span` (1996-97..2005-06) — the same
+window the production half-life came from, and one neither evaluation span touches. Giving it a
+separate half-life is a direct application of the reproduction's finding that different
+parameterisations genuinely prefer different memory.
+
+**The Elo replay reads only E0.** Ratings could be carried across the promotion boundary from the
+lower tiers, which would hand promoted teams a real rating instead of a cold start. That is a real
+advantage and it belongs to the multi-tier arm; including it here would confound "per-team vs
+scalar" with "one tier vs four" and leave neither interpretable.
+
+### Pre-registered bar
+
+The standing acceptance rule, unchanged. Baseline is **`elo-dc`** and the candidate is
+**`dixon-coles`**, so a favourable delta is evidence that the production choice was correct:
+
+1. paired-bootstrap RPS delta favourable — 95% CI excludes 0, or P(better) ≥ 0.95;
+2. delta vs the Shin de-vigged market must not degrade.
+
+Corroborated by a HAC-corrected Diebold–Mariano, and FDR-controlled across the family of arms.
+
+### What each outcome will mean
+
+* **Accept** — the production parameterisation is justified on measured evidence rather than on an
+  argument about sparsity, and the magnitude fills a gap the literature leaves open.
+* **Null** — the ~40 extra parameters are buying nothing on a decade of Premier League matches.
+  That would be a genuinely surprising and publishable negative, and would argue for reverting
+  production to the four-parameter model on parsimony grounds alone.
+* **Reject (Elo wins)** — the sparsity argument applies to club football too, and production is
+  wrong. This is the outcome I consider least likely and would investigate hardest before
+  believing, starting with whether the per-team model's promoted-team cold start is doing the
+  damage.
+
+A null or a reject would be reported as-is. The point of pre-registering the interpretation is that
+none of these three readings can be chosen after the number appears.
+
+### Prediction, recorded to be scored later
+
+Per-team att/def wins, by −0.002 to −0.006 RPS. Reasoning: the per-team model already scored 0.2005
+against a market at 0.1968, and the scalar cannot express attack/defence asymmetry, which is large
+and persistent in a 20-team league. Against that, the scalar's four parameters are far better
+determined, and Elo ratings are themselves a strong summary — so a delta smaller than 0.002 would
+not shock me.
+
+### Addendum, written after tuning and before the test run
+
+Tuning `elo-dc` on the tuning span produced two things worth recording *before* the confirmatory
+run, so the final entry cannot imply I was surprised only at the end.
+
+**The prediction above already looks wrong.** On the tuning span `elo-dc` scores **0.19760** where
+the per-team model scores **0.20048** — the scalar is ahead by ~0.0029, in the opposite direction.
+The test-span comparison is still the one that counts, and these are unpaired numbers from separate
+runs, but the sign is not what I wrote down.
+
+**The half-life sweep hit a grid edge, which the project treats as a red flag**, so the grid was
+widened rather than the edge adopted. Extended, it stays monotone decreasing to effectively uniform
+weights: 0.19760 at 1825 days → 0.19748 with no decay at all. That is structural rather than a
+failed search — **the Elo replay already carries the recency weighting**, so the layer above it
+only calibrates a rating-difference-to-goal-rate map, and that relationship is stable enough to
+want every match equally. The whole effect is 0.00012 RPS, so it changes nothing material; it is
+set correctly for fairness, not for advantage.
+
+Tuned values: **K = 15** (interior to 10..60, shallow), **no decay**.
+
+---
+
+## 2026-08-17 — RESULT, Arm 1: NULL. The prediction was wrong.
+
+```
+walk      : 1153 barriers, 2016-08-13 -> 2026-05-24 | pool 3,800 | market 0.1968
+
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+elo-dc             0.1996    0.9699   16.5%   0.00163    +0.0071   (baseline)
+dixon-coles        0.2005    0.9718   16.1%   0.00202    +0.0082   +0.0009 [-0.0005, +0.0022] P=0.099
+
+  reject  dixon-coles   gate1 FAIL (P = 0.099), gate2 FAIL
+```
+
+**Per-team attack and defence do not beat a single Elo rating scalar.** The delta is +0.0009 with a
+confidence interval straddling zero, so this is a null rather than a reject — but the point estimate
+runs the *wrong way*, and the scalar is also ahead on the market gap (+0.0071 against +0.0082).
+
+I predicted −0.002 to −0.006 in the per-team model's favour. The research report predicted the same
+direction with more confidence than I did: "expect this to help; the whole lineage is built on it."
+Neither survived contact with the data.
+
+### The result replicates on an independent decade
+
+| span | delta (per-team − Elo) | 95% CI | P(per-team better) |
+|---|---|---|---|
+| test 2016-17..2025-26 | +0.0009 | [−0.0005, +0.0022] | 0.099 |
+| sensitivity 2006-07..2015-16 | +0.0008 | [−0.0003, +0.0018] | 0.079 |
+
+Same sign, near-identical magnitude, both nulls, on two decades that share no matches. Diebold–
+Mariano agrees with the bootstrap on the test span (statistic 1.25, p = 0.21), which is the
+robustness signal the two tests exist to provide.
+
+### The obvious confound was checked and is not the explanation
+
+Elo *retains* a relegated club's rating across its absence, whereas the per-team model resets a
+club with too little effective history to league average. That should hand Elo an advantage exactly
+on promoted-team fixtures. It does not:
+
+| slice | elo-dc | per-team | delta |
+|---|---|---|---|
+| involves a promoted team (n=1,080) | 0.1893 | 0.1899 | +0.0007 |
+| established clubs only (n=2,720) | 0.2037 | 0.2046 | +0.0009 |
+
+The gap is the same on both sides of the partition, so rating retention is not driving it.
+
+### This is a substantive null, not two copies of the same model
+
+The harness's does-it-do-anything guard passed, which for a null result is the load-bearing check —
+it is exactly the WC2026 false-null trap, where a broken arm silently reproducing the baseline
+looks identical to an honest null. Quantified, the two arms disagree a great deal:
+
+| | |
+|---|---|
+| mean absolute probability difference | **0.0331** per outcome |
+| largest single-match difference | 0.3573 |
+| matches differing by >0.05 on some outcome | **39.5%** |
+| correlation of per-match RPS | 0.9535 |
+
+So this is not "two parameterisations that collapse to the same forecast". They disagree materially
+on two matches in five, by up to 36 percentage points, and **still score the same in aggregate**.
+Their per-match errors are highly correlated, which is precisely the condition that makes the
+paired bootstrap sensitive — an unpaired comparison would not have resolved a 0.0009 delta on 3,800
+matches, and the interval would have been wide enough to hide a real effect.
+
+### The comparison was fair, and the asymmetry in tuning is justified by the data
+
+`elo-dc` got an extended half-life grid and the production model did not, which looks like unequal
+effort until the curves are compared. The per-team model's sweep has a genuine **interior**
+optimum — it turns at 730 and rises through 1095, 1460 and 1825 — so extending its grid would have
+found nothing. `elo-dc`'s sweep was monotone to the edge, so extending it was mandatory under the
+project's own grid-edge rule. The asymmetry follows from what the data did, not from how hard each
+model was pushed.
+
+### What the null actually says: 67 parameters, bought nothing
+
+The fits report it directly — **4 parameters against 67** (3 global plus 2×(20−1) team terms), for
+statistically indistinguishable accuracy across two decades. In a 20-team league with a two-year
+memory, per-team attack and defence are **over-parameterised relative to the information
+available**, and the Elo scalar's sequential update is acting as a very effective regulariser.
+
+That reading is supported by where the per-team model does win. It is ahead in 2018-19 through
+2021-22 and behind in 2022-23 and 2024-25 — season-level noise of ±0.005 around a zero effect, not
+a stable edge. Its largest single-season win is **2020-21 (−0.0046)**, the empty-stadium season,
+which is consistent with per-team parameters adapting faster than Elo when home advantage collapses.
+
+### Decision: production stays per-team, and that is a choice about utility, not accuracy
+
+**Neither direction clears the bar.** Reversed — elo-dc as the candidate against per-team as
+baseline — the delta is −0.0009 with P(better) = 0.901, still short of 0.95. The acceptance rule
+declines to move production in either direction, which is the correct answer when two models are
+indistinguishable.
+
+Production therefore stays on per-team attack/defence, on these grounds and no others:
+
+* most of the remaining roadmap is built on per-team structure — the dynamic-states arm is per-team
+  by construction, and the xG channel, multi-tier fit and time-varying home advantage all attach to
+  team parameters rather than to a scalar;
+* the season simulator needs per-team strengths to propagate;
+* accuracy is equal, so keeping it costs nothing measurable.
+
+What must **not** be claimed is that the data justified it. It did not. Recorded here so no later
+entry can imply otherwise.
+
+### The lead this opens
+
+If the per-team model is over-parameterised and the Elo scalar under-expressive, the synthesis is
+**per-team attack/defence shrunk toward a scalar-derived prior** — a hierarchical fit rather than
+either extreme. Baio & Blangiardo's over-shrinkage mixture is the published precedent, and the
+research report lists hierarchical Bayes in the state-space lineage. This is a recorded lead, not
+an adopted change; it goes into the backlog rather than into production, because point estimates
+from a losing arm are exactly what the standing discipline says not to act on.
+
+Also worth noting for the dynamics arm: **elo-dc's likelihood prefers no time decay at all**,
+because the Elo replay already carries the recency weighting. A score-driven dynamic model does the
+same job more principledly, which strengthens the case that the dynamics arm is competing with Elo
+rather than with the static per-team fit.
