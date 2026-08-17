@@ -1,0 +1,17 @@
+/docs/
+/.mcp.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# IDE
+.idea/
+
+# Generated: downloaded source CSVs + parquet cache, and every run's reports.
+# data/static/ IS committed — the team alias map is an input, not an output.
+/data/cache/
+/output/

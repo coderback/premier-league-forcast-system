@@ -1,0 +1,287 @@
+# NOTES — dated decision ledger
+
+Every hypothesis, hyperparameter and modelling decision, with its date, its number, and its
+verdict. Entries are dated, never phase-labelled: the WC2026 project's "P2b" and "P2B-live"
+collided in its own log and had to be disambiguated after the fact.
+
+**WEAK-EVIDENCE** marks a choice whose evidence is thin. Every such marker appears both here and
+at the code site that reads the value.
+
+Grounding documents (in `docs/`): `RETROSPECTIVE-PLAYBOOK.md` (the WC2026 record — ~25 arms
+tested, 2 adopted, with root causes) and `Model Architecture for a Premier League Forecasting
+System…md` (the deep-research report — ranked candidates with published effect sizes). Where the
+build brief conflicts with either, **the brief wins**; it encodes four corrections to them, all
+recorded below.
+
+---
+
+## 2026-08-17 — Entry #1: the acceptance rule, four corrections, and the intended baseline
+
+### The acceptance rule
+
+Stated in `config.yaml`, embedded verbatim in every harness JSON report, and asserted
+character-for-character by `tests/test_config.py`:
+
+```
+Accept a candidate change iff BOTH:
+  (1) its paired-bootstrap RPS delta vs baseline on the test pool is favourable
+      (95% CI excludes 0, OR P(better) >= 0.95), AND
+  (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade.
+An accepted variant earns a hyperparameter retune BEFORE production wiring.
+```
+
+Why two gates: WC2026's `rsfit` arm passed gate 1 decisively (−0.0011, P=0.99) while degrading the
+market scoreboard (+0.0065 → +0.0077). It improved the instrument's own distribution at the expense
+of the target's. Gate 2 exists to catch exactly that.
+
+**The two gates deliberately use different pools.** The rule scopes gate 2 to "the odds-covered
+subset", so gate 1 keeps full-decade statistical power while gate 2 uses the only closing-market
+benchmark that is both 100%-covered and still being published:
+
+| Gate | Pool | Size |
+|---|---|---|
+| 1 — vs baseline | 2016/17–2025/26, all matches | ~3,800 |
+| 2 — vs market | `AvgC*` Shin-de-vigged, 2019/20+ | ~2,660 at 100% coverage |
+
+Pinnacle (`PSC*`) is reported as a wider historical diagnostic back to 2012/13 but is **not** the
+gate — see the data survey below for why.
+
+### The intended baseline
+
+Per-team Dixon–Coles: attack αᵢ, defence βⱼ, fitted global home advantage γ, τ low-score correction
+ρ, weighted MLE with exponential decay `w = exp(−ξ·Δdays)`. Half-life re-tuned from scratch on PL
+data — **1825 days is not inherited from WC2026, and no figure suggested in conversation is
+inherited either.**
+
+### Correction 1 — the dynamic-model effect size is inflated by a baseline substitution
+
+The report headlines Koopman & Lit (2019) as 0.2062 → 0.1982 ≈ −0.008 RPS for "going dynamic". But
+0.2062 is a **static bivariate Poisson with no time decay**. The same paper's semi-dynamic,
+DC-exponentially-weighted variant scores **0.2014** — and that is the model corresponding to our
+intended baseline. The honest expected gain of a score-driven dynamic model over a properly
+time-decayed per-team DC is therefore **≈ −0.003 RPS, not −0.008**. Most of the advertised gain is
+time decay, which we are building anyway.
+
+*Verified:* all three numbers appear in the report's own §B, so this correction is arithmetic on
+the report's table rather than a disputed claim. The report's TL;DR nonetheless headlines the
+−0.008.
+
+**Consequence:** the dynamic arm is pre-registered against a *tuned time-decayed DC*, expecting
+≈ −0.003. The −0.008 figure must not appear in any config comment or ledger entry.
+
+### Correction 2 — Pitcan (2026) is load-bearing and was unverified
+
+Source-checked directly on 2026-08-17. arXiv **2608.11505**, *"Does a Structural Model Add Anything
+to the Closing Price? Calibrated forecasting, incremental information, and match leverage in the
+Italian Serie A"*, **Yannik Pitcan, submitted 2026-08-11** — six days before this entry. Code and
+data pipeline published at `github.com/pitcany/seriea-leverage`.
+
+What it actually reports, from the abstract:
+
+- **Serie A, 19 complete seasons, 7,220 matches** — not the Premier League.
+- Dixon–Coles with tuned exponential decay: 53.4% accuracy, RPS **0.1972** vs the market's
+  **0.1905**; paired difference **+0.0067, 95% CI [0.0046, 0.0088]**, market wins all seven test
+  seasons.
+- Fitted logarithmic-pool weight on the structural model **0.000** against the market, with a
+  log-loss profile monotone increasing in that weight on validation and test alike — **a genuine
+  boundary solution, not an optimisation artefact.**
+- Refitting the same machinery to shots on target yields a variant earning weight **0.35 against
+  the goals model** — it carries information the goals model lacks — **and 0.000 against the
+  market.**
+- The structural model is *better calibrated* than the market on the home-win margin (slope 0.995
+  vs 1.103) while clearly less sharp: "the market's advantage is discrimination rather than
+  honesty".
+
+**The two weights are against different references.** The brief's compressed phrasing reads as
+though 0.35 and 0.000 come from one comparison. They do not: 0.000 is model-vs-*market*, 0.35 is
+shots-on-target-vs-*goals model*. `pl reproduce --paper pitcan2026` must therefore estimate **both
+weights against both references** or it tests the wrong thing.
+
+**Consequence for Arm 4 (xG as second observation channel):** the paper predicts the chance-creation
+channel **passes gate 1 and leaves the market gap untouched** — adoptable under the rule, while
+closing none of the information gap. That must be built and reported before Arm 4 is scheduled.
+
+The calibration finding independently corroborates WC2026's `cal3` null from the other direction:
+the market gap is information, not calibration. Two independent confirmations that no transform of
+our own probabilities can close it.
+
+### Correction 3 — RPS is not comparable across competitions
+
+The PL baseline target is ≈ 0.196–0.206. The WC2026 production model scored 0.1835. This will look
+like regression and is not: international tournament fields are more lopsided than a 20-team top
+division, so outcomes are more predictable and RPS is mechanically lower. **A PL RPS is never
+compared to a WC RPS in any report, chart or ledger entry.** Recorded as a comment in
+`eval/metrics.py`.
+
+### Correction 4 — data-source reality as of August 2026
+
+FBref lost its Opta advanced-stats licence in January 2026. Its archive through 2025 is intact and
+usable for backtesting; it does **not** update. Understat is therefore the **single live xG
+source**. No code path may assume cross-provider xG redundancy. The coverage discontinuity at
+2026-01 is flagged explicitly in the coverage report rather than smoothed over.
+
+---
+
+## 2026-08-16 — Data survey: football-data.co.uk, checked live
+
+Every season file for E0–E3 was downloaded and inspected before any ingest code was written. These
+facts drive the ingest and are the difference between a working one and a silently wrong one.
+
+| Fact | Detail |
+|---|---|
+| URL pattern | `https://www.football-data.co.uk/mmz4281/{SSSS}/{E0..E3}.csv`, `9394`→`2526` |
+| Span | E0 1993/94→2025/26 = 33 seasons; E1–E3 the same span |
+| Row counts | E0: 462 (93/94, 94/95 — 22-team league), 380 thereafter. E1–E3: 552/season |
+| Corpus | E0 ≈ 12,704 matches; E0–E3 ≈ 66,000 |
+| **Encoding** | utf-8 (some with BOM) **except 2004/05, which is cp1252** (byte 0xa0) |
+| **Dates** | always dayfirst, but **mixed 2-digit and 4-digit years** |
+| **Round column** | **none exists** — the calendar structure must be derived |
+| `Time` column | only from 2019/20 → **the walk-forward barrier is date-granular, not kickoff** |
+| `HST`/`AST` | shots on target from 2000/01 — a pre-xG chance-creation channel, free in the spine |
+
+Odds column availability, which is what settles the gate-2 choice:
+
+| Family | Span | Note |
+|---|---|---|
+| `WHH/WHD/WHA` | 2000/01→2024/25 | William Hill, pre-close |
+| `B365H/…` | 2002/03→ | pre-close |
+| `BbAvH/…` | 2005/06–2018/19 | Betbrain average — **pre-close, not closing** |
+| `PSCH/…` | 2012/13→ | Pinnacle **closing**; 100% covered **until 2026-01-08, then absent** |
+| `AvgCH/…` | 2019/20→ | market-average **closing**; **100% covered, still live** |
+
+**Pinnacle's feed stops dead mid-season.** Present for every match through 2026-01-08, entirely
+absent from 2026-01-17 to the end of 2025/26 (55% season coverage). It is therefore unusable as the
+forward-looking benchmark for a model that must score 2026/27 live, despite being the sharper line.
+`AvgC*` is the gate-2 benchmark; `PSC*` is a historical diagnostic with its termination flagged.
+
+There are now **two independent data discontinuities at 2026-01**: FBref's Opta licence loss and
+Pinnacle leaving this feed. Both are flagged in the coverage report.
+
+*Also verified:* Understat's **league** pages no longer embed their JSON payload in the initial
+HTML, but **match** pages still do. The xG loader needs a match-id discovery path — a spike before
+Arm 4, not a blocker.
+
+---
+
+## 2026-08-17 — Expectation-setting from the report, with two adjustments
+
+**The 0.196–0.206 band is EPL-grounded; the +0.006–0.007 gap is not.** The band traces to Koopman &
+Lit's 2,660 EPL matches (static biv-Poisson 0.2062, semi-dynamic DC-weighted 0.2014, dynamic
+0.1982) and Constantinou's EPL work (0.195–0.203, range 0.184–0.213). The gap comes from Pitcan's
+Serie A (+0.0067), corroborated by WC2026's own +0.0061 — two competitions, neither the PL. Trust
+the level; treat the gap as a strong prior rather than a measured PL quantity.
+
+**Our baseline is Koopman & Lit's semi-dynamic row, 0.2014.** A per-team DC with exponential decay
+is precisely that specification. So landing at **0.201–0.206 is on target**, and **landing at 0.196
+from a static model is suspicious** — it triggers the leakage hunt before any celebration. This is
+recorded now, before the number exists, so it cannot be rationalised afterwards.
+
+**Arm 9's premise is probably false for the PL.** The brief premises Weibull + Frank copula on
+*negative* low-score dependence, inherited from the WC corpus's fitted ρ < 0. But the report's §A
+notes the five-league study found dependence **positive in four leagues, negative only in Ligue 1**.
+The Dixon-Coles fit therefore reports ρ with its sign by era as a free falsifier gating whether Arm 9
+is ever scheduled. Cost: zero — the DC fit produces ρ anyway.
+
+---
+
+## 2026-08-17 — Repo skeleton, config, and the magic-number check
+
+Repo skeleton, `config.yaml` carrying the acceptance rule plus deliberately empty tunable sections,
+this ledger, and the magic-number test.
+
+**`data.matchweek_gap_days = 3`** — **WEAK-EVIDENCE**: chosen by inspection of the fixture calendar,
+not tuned. Within a (division, season), a new matchweek block starts when the gap from the previous
+match date exceeds this. 3 days groups a Fri–Mon round into one block while leaving a midweek round
+as its own, yielding ~38–42 blocks/season. The per-team round index is kept as a documented
+sensitivity, not the primary derivation.
+
+**`seed = 20260822`** — the 2026/27 opening date. Chosen only to be memorable and fixed.
+
+**The magic-number test** (`tests/test_no_magic_numbers.py`) is new; WC2026 had no equivalent. It
+AST-walks `model/` and `eval/` and fails on any numeric literal that is not a structural value
+(`{0, 1, 2, 3, -1}` — indices, `ndim` checks, arithmetic identities), a literal marked `# MATH:`, or
+a documented module-level `UPPER_CASE` constant. It carries eight self-tests against synthetic
+clean and dirty sources, so it has teeth while `model/` and `eval/` are still empty rather than
+passing vacuously.
+
+One tension recorded in advance: the brief requires `eval/metrics.py` to be ported **verbatim**, and
+that file's `paired_delta` carries `n_boot=10000, seed=0` defaults — bare literals the checker will
+flag. Resolution: a named `VERBATIM_PORTS` exemption carrying its reason, plus a companion test
+asserting every call site passes `n_boot`/`seed` explicitly from config. Both non-negotiables
+survive; neither is quietly dropped.
+
+**DoD met:** `uv run pytest -q` green, 22 tests.
+
+---
+
+## 2026-08-17 — Data spine: the football-data.co.uk ingest
+
+`pl ingest` loads **66,908 matches** across E0–E3, 1993-08-14 → 2026-05-24, 33 seasons, 116 clubs.
+E0 is 12,704 (462 + 462 + 31 × 380), E1 18,216, E2 18,064, E3 17,924. Coverage report at
+`output/coverage.json`; corpus cached as parquet.
+
+### Four source quirks found by building against the live data, not by assuming
+
+**1. The source substitutes another competition's file for an unpublished season — silently.**
+Requesting `mmz4281/2627/E0.csv` on 2026-08-17 returns **HTTP 200 and a valid CSV of the National
+League** (`Div` = `EC`). `raise_for_status()` does not catch it (the underlying status is 300
+"Multiple Choices", not an error), the body parses cleanly, and every column is where it should
+be. Ingested unguarded, the 2026/27 Premier League would have consisted of Altrincham, Boreham
+Wood and Hartlepool. E1 and E2 returned an HTML page instead, which is the *benign* version of the
+same behaviour.
+
+Three guards, all in `data/football_data.py`: the status must be exactly 200; the body must start
+with `Div`; and **the served division must equal the requested one**, checked before the file
+reaches the cache and again on read. A `MissingSeasonError` distinguishes "not published yet"
+(normal near a season boundary — all four 2026/27 files are legitimately absent today) from
+"published but wrong".
+
+This is the same failure class as WC2026's two worst bugs — a silent key miss that produces a
+well-formed, wrong result — arriving at the file level rather than the config level.
+
+**2. The date-gap matchweek rule failed on contact with the real calendar, and is gone.** The
+plan's derivation started a new block whenever consecutive match dates were more than 3 days
+apart. Measured on E0 it produced **19–31 blocks per season instead of ~38**: English league
+football has matches on most days, so the rule chains transitively and merges whole months. Every
+prediction in a merged block would have been made without weeks of available information.
+
+Replaced by **one barrier per distinct match date**, which needs no threshold. E0 averages 106
+match dates per season (min 95, max 135), giving **1,153 barriers across the ten-season test
+span** — exact, deterministic, and affordable under the planned warm-start. `matchweek_gap_days`
+is deleted from config: the ingest now has no WEAK-EVIDENCE tunable at all.
+
+**3. A reconstructed "matchweek" is not recoverable from results, so it is not claimed.** A first
+attempt assigned each match `max(games played by either side) + 1`; it inflated E0 seasons to
+**40–53 rounds instead of 38**, because rearranged fixtures ratchet both sides forward. There is no
+correct single round number for a match whose two teams have played different numbers of games.
+Replaced by two exact numbers — `home_match_index` and `away_match_index`, each side's own match
+count. Reporting only; the barrier is always the matchday.
+
+Validation of the replacement: across all four divisions, every deviation from the standard season
+length is real history — E0/E3 1993-94 and 1994-95 at 42 (22-team divisions), and **E2 at 36 and
+E3 at 37 in 2019-20**, which is League One and League Two being abandoned by COVID rather than
+completed. E0 2019-20 is 38, correctly, because the Premier League resumed in June.
+
+**4. Structural quirks, all verified across the whole corpus.** 2004/05 is cp1252 in **all four
+divisions** (not just E0 as first surveyed) — decoding falls back and records the codec used. 17
+files across 1993/94–2004/05 carry rows wider than their own header; every extra field was checked
+across the corpus and is empty, so they are absorbed and dropped, and a non-empty one raises rather
+than being discarded. Dates mix two- and four-digit years and are parsed with both explicit
+formats, never inferred.
+
+### Column availability confirmed on the full corpus
+
+Half-time scores from 1995-96; match statistics, referee and odds from 2000-01; kickoff time only
+from 2019-20 — which is why the barrier is date-granular rather than kickoff-granular.
+
+### Team roster
+
+116 distinct spellings, curated into a **closed roster** (`data/static/team_roster.yaml`); an
+unrecognised name raises. The source is internally consistent — `find_near_duplicates` reports
+nothing — so canonical names are the source's own spellings and the alias file is empty until
+Understat and FPL arrive. `Wimbledon`, `Milton Keynes Dons` and `AFC Wimbledon` are deliberately
+three separate entries: fuzzy matching would merge them and splice together the histories of
+different clubs.
+
+**DoD met:** `pl ingest` produces a validated frame and coverage report; an unmapped team name
+raises; row-count floors hold for every completed division-season. 66 tests green.

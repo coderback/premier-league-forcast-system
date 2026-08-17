@@ -1,0 +1,89 @@
+"""config.yaml loads, and the acceptance rule survives the trip intact.
+
+The acceptance rule is embedded verbatim in every harness report. If it can drift between the
+config and the code, a report can claim a rule the project does not hold — so the rule's exact
+text is asserted here, character for character.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from plmodel.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
+
+# The rule as the build brief states it. Any edit to config.yaml's wording must be a deliberate
+# change to this constant too — that is the point.
+EXPECTED_ACCEPTANCE_RULE = """\
+Accept a candidate change iff BOTH:
+  (1) its paired-bootstrap RPS delta vs baseline on the test pool is favourable
+      (95% CI excludes 0, OR P(better) >= 0.95), AND
+  (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade.
+An accepted variant earns a hyperparameter retune BEFORE production wiring."""
+
+
+@pytest.fixture(scope="module")
+def cfg() -> Config:
+    return load_config()
+
+
+def test_default_config_exists() -> None:
+    assert DEFAULT_CONFIG_PATH.exists(), f"config.yaml not found at {DEFAULT_CONFIG_PATH}"
+
+
+def test_acceptance_rule_is_verbatim(cfg: Config) -> None:
+    assert cfg.acceptance_rule == EXPECTED_ACCEPTANCE_RULE
+
+
+def test_acceptance_rule_states_both_gates(cfg: Config) -> None:
+    """A rule that lost a gate would still load; these assert it still says what it must."""
+    rule = cfg.acceptance_rule
+    assert "paired-bootstrap RPS delta vs baseline" in rule
+    assert "Shin de-vigged market" in rule
+    assert "does not degrade" in rule
+    assert "retune BEFORE production wiring" in rule
+
+
+def test_seed_is_set(cfg: Config) -> None:
+    assert isinstance(cfg.seed, int)
+
+
+def test_data_section(cfg: Config) -> None:
+    assert cfg.data.base_url.startswith("https://")
+    assert cfg.data.divisions[0] == "E0"
+    assert set(cfg.data.divisions) <= {"E0", "E1", "E2", "E3"}
+    assert cfg.data.first_season == "9394"
+    # Row-count floors back the ingest smoke test; without them a truncated download reads as a
+    # real dip in a division's fixture count.
+    assert set(cfg.data.min_expected_rows) == set(cfg.data.divisions)
+    assert all(v > 0 for v in cfg.data.min_expected_rows.values())
+
+
+def test_paths_are_absolute(cfg: Config) -> None:
+    for path in (cfg.cache_dir, cfg.static_dir, cfg.output_dir):
+        assert path.is_absolute()
+
+
+def test_unpopulated_sections_stay_empty(cfg: Config) -> None:
+    """Phases populate these. An empty section must load empty, never default-filled."""
+    for section in (cfg.odds, cfg.model, cfg.backtest, cfg.season):
+        assert isinstance(section, dict)
+
+
+def test_missing_config_raises(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="config not found"):
+        load_config(tmp_path / "nope.yaml")
+
+
+def test_missing_acceptance_rule_raises(tmp_path: Path) -> None:
+    bad = tmp_path / "config.yaml"
+    bad.write_text("seed: 1\n", encoding="utf-8")
+    with pytest.raises(ConfigError, match="acceptance_rule"):
+        load_config(bad)
+
+
+def test_empty_acceptance_rule_raises(tmp_path: Path) -> None:
+    bad = tmp_path / "config.yaml"
+    bad.write_text('acceptance_rule: "   "\nseed: 1\n', encoding="utf-8")
+    with pytest.raises(ConfigError, match="acceptance_rule is empty"):
+        load_config(bad)

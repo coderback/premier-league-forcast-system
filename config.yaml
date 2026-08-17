@@ -1,0 +1,122 @@
+# Central hyperparameter config for the Premier League forecasting model.
+#
+# No magic numbers in code: every tunable lives here, with an inline justification. Values whose
+# evidence is thin carry a `WEAK-EVIDENCE:` marker HERE and at the code site that reads them.
+# See NOTES.md for the dated decision ledger behind each value.
+#
+# Sections are populated phase by phase. A section marked "(populated in Phase N)" is deliberately
+# empty until that phase lands — an empty tunable section is honest; a placeholder value that later
+# gets mistaken for a tuned one is not.
+
+# ---------------------------------------------------------------------------------------------
+# THE ACCEPTANCE RULE
+#
+# This is the project's single standing decision instrument. It is loaded from here and embedded
+# verbatim into every harness JSON report — never re-typed in code, so a report can never claim a
+# rule the config does not state.
+#
+# Why two gates, not one: in the WC2026 project the `rsfit` arm passed gate 1 decisively
+# (-0.0011, P=0.99) while DEGRADING the market scoreboard (+0.0065 -> +0.0077). It improved the
+# instrument's own distribution at the expense of the target distribution. Gate 2 exists to catch
+# exactly that.
+# ---------------------------------------------------------------------------------------------
+acceptance_rule: |
+  Accept a candidate change iff BOTH:
+    (1) its paired-bootstrap RPS delta vs baseline on the test pool is favourable
+        (95% CI excludes 0, OR P(better) >= 0.95), AND
+    (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade.
+  An accepted variant earns a hyperparameter retune BEFORE production wiring.
+
+# Explicit seed for every stochastic step (bootstrap resampling, Monte Carlo season sim).
+# Value = the 2026/27 Premier League opening date, chosen only to be memorable and fixed.
+seed: 20260822
+
+paths:
+  cache_dir: data/cache      # downloaded football-data.co.uk CSVs + parquet cache (gitignored)
+  static_dir: data/static    # team alias map and other committed static inputs
+  output_dir: output         # reports, fitted params, calibration plots (gitignored)
+
+# ---------------------------------------------------------------------------------------------
+# DATA
+#
+# Source: football-data.co.uk, free for personal/research use with attribution.
+# URL pattern https://www.football-data.co.uk/mmz4281/{season}/{division}.csv
+#
+# Verified against the live source on 2026-08-16 (see NOTES.md entry #1 for the full survey):
+#   - E0 spans 1993/94 -> 2025/26 (33 seasons); E1-E3 available for the same span.
+#   - Row counts: E0 462 for 1993/94 and 1994/95 (22-team league), 380 thereafter; E1-E3 552.
+#   - Encoding is utf-8 (sometimes with BOM) EXCEPT 2004/05, which is cp1252.
+#   - Dates are always dayfirst but mix 2-digit and 4-digit years.
+#   - There is NO matchweek/round column; the calendar structure is derived (data/fixtures.py).
+#   - A `Time` column exists only from 2019/20, so the walk-forward barrier is date-granular.
+#   - The source SUBSTITUTES another division's file for a season it has not published yet, with
+#     a valid CSV and a non-error status. Guarded in data/football_data.py; see NOTES.md.
+#
+# The walk-forward barrier is one distinct match date (a "matchday"), which needs no tunable:
+# E0 averages ~106 match dates per season, so per-date barriers are exact and affordable. An
+# earlier date-gap grouping rule was measured and discarded — it chained transitively and merged
+# whole months. The per-team round index ("matchweek") is retained for REPORTING only.
+# ---------------------------------------------------------------------------------------------
+data:
+  base_url: https://www.football-data.co.uk/mmz4281
+  divisions: [E0, E1, E2, E3]
+  first_season: "9394"       # earliest season directory the source publishes for these divisions
+  # Row-count floors for the ingest smoke test: the minimum matches a completed season file must
+  # carry, per division. Set from the verified corpus (2026-08-16): a 20-team league plays 380,
+  # a 24-team league 552. Floors rather than exact counts because the lower tiers had smaller
+  # fields in the 1990s (E2 falls to 400, E3 to 440), and the in-progress season is exempt.
+  min_expected_rows:
+    E0: 380
+    E1: 552
+    E2: 400
+    E3: 440
+
+# ---------------------------------------------------------------------------------------------
+# ODDS AND DE-VIG (populated with the odds loader)
+#
+# Shin (1993) is the primary de-vig: Strumbelj (2016, IJF 32(2):462-472) finds Shin probabilities
+# lowest-RPS across 412 bookmaker/competition pairs, and Koning & Zijm (2023) find Shin unbiased
+# for the EPL specifically. Proportional is kept as a sensitivity and BOTH appear in every report.
+#
+# Column availability differs by era (verified 2026-08-16). The gate-2 benchmark is the
+# market-AVERAGE CLOSING family, which is the only closing benchmark that is both 100%-covered
+# and still being published:
+#   AvgCH/AvgCD/AvgCA  2019/20 ->            100% coverage, live
+#   PSCH/PSCD/PSCA     2012/13 -> 2026-01-08 Pinnacle; stops dead mid-2025/26 (55% that season)
+#   BbAvH/BbAvD/BbAvA  2005/06 -> 2018/19    Betbrain average, PRE-CLOSE not closing
+# ---------------------------------------------------------------------------------------------
+odds: {}
+
+# ---------------------------------------------------------------------------------------------
+# MODEL (populated with the Dixon-Coles fit)
+#
+# Production baseline: per-team Dixon-Coles with attack alpha_i, defence beta_j, fitted global
+# home advantage gamma, tau low-score correction rho, weighted MLE with exponential decay
+# w = exp(-xi * delta_days).
+#
+# The decay half-life is RE-TUNED FROM SCRATCH on PL data. Do not inherit 1825 days from the
+# WC2026 project and do not inherit any figure suggested in conversation. Published club-football
+# optima cluster near xi = 0.0018-0.0033 per day (half-life ~210-385 days); the grid is set wider
+# than that so the data can choose, and a winner sitting at a grid edge is treated as a red flag
+# that the measurement was optimised rather than the model.
+# ---------------------------------------------------------------------------------------------
+model: {}
+
+# ---------------------------------------------------------------------------------------------
+# BACKTEST (populated with the walk-forward splitter)
+#
+# Rolling-origin walk-forward by derived matchweek block. Gate 1 and gate 2 deliberately use
+# DIFFERENT pools: the acceptance rule scopes gate 2 to "the odds-covered subset", so gate 1 keeps
+# full-decade statistical power while gate 2 uses the only live closing-market benchmark.
+#   gate 1 (vs baseline): 2016/17-2025/26, ~3,800 matches
+#   gate 2 (vs market):   AvgC-covered subset, 2019/20+, ~2,660 matches at 100% coverage
+# ---------------------------------------------------------------------------------------------
+backtest: {}
+
+# ---------------------------------------------------------------------------------------------
+# SEASON SIMULATION (populated with the season simulator)
+#
+# Team strengths are drawn from the posterior ONCE PER SEASON REPLICATE, never per match:
+# per-match resampling collapses the points spread and produces overconfident title probabilities.
+# ---------------------------------------------------------------------------------------------
+season: {}
