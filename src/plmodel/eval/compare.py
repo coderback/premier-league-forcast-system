@@ -123,6 +123,30 @@ def _dixon_coles(ctx: ArmContext) -> np.ndarray:
     return previous.predict_proba(ctx.test)
 
 
+@register("dixon-coles-sot")
+def _dixon_coles_sot(ctx: ArmContext) -> np.ndarray:
+    """The shots-on-target variant: same machinery, chance-creation target, no tau correction."""
+    from plmodel.model.shots import fit_shots_model
+
+    model = ctx.cfg.model
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_shots_model(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            max_iter=model.max_iter,
+            warm_start=ctx.state.get("fit"),
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous.shot_fit)
+        ctx.state.setdefault("kappas", []).append((previous.kappa_home, previous.kappa_away))
+    return previous.predict_proba(ctx.test)
+
+
 @dataclass(frozen=True)
 class ArmSpec:
     """One arm of the comparison: exactly one axis changed from the baseline."""

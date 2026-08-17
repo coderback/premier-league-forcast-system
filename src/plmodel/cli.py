@@ -18,8 +18,10 @@ from plmodel.config import ConfigError, load_config
 # is both the roadmap and the single place an unbuilt command is documented.
 _PLANNED: dict[str, str] = {
     "simulate": "season Monte Carlo -> title / top-4 / relegation / points distribution",
-    "reproduce": "re-run an external claim on our data",
 }
+
+# External claims this project has re-run on its own data, by paper id.
+_REPRODUCIBLE: tuple[str, ...] = ("pitcan2026",)
 
 
 def cmd_config(args: argparse.Namespace) -> int:
@@ -322,6 +324,84 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_reproduce(args: argparse.Namespace) -> int:
+    """Re-run an external claim on our own data."""
+    from plmodel.reproduce import pitcan2026
+
+    if args.paper != pitcan2026.PAPER_ID:
+        print(f"unknown paper {args.paper!r}; available: {list(_REPRODUCIBLE)}", file=sys.stderr)
+        return 2
+
+    cfg = load_config(args.config)
+    _, matches = _load_corpus(cfg)
+    result = pitcan2026.run(matches, cfg, market_family=args.market or pitcan2026.MARKET_FAMILY)
+
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.output_dir / f"reproduce_{args.paper}.json"
+    out_path.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+
+    paper = result["paper_results"]
+    windows, verdict = result["windows"], result["verdict"]
+    print(f"{result['citation']}\n")
+    print(f"market    : {result['market_family']} ({result['devig']}), "
+          f"half-life {result['half_life_days']:.0f}d")
+    for name in ("validation", "test"):
+        w = windows[name]
+        print(f"{name:10}: {w['span'][0]}..{w['span'][1]}  n={w['n']:,} "
+              f"({w['n_covered']:,} priced)   paper n={w['paper_n']:,}")
+
+    print(f"\npool weights fitted on validation{'':6}{'ours':>10}{'paper':>10}")
+    for label, key, model in (
+        ("market + goals  (weight on goals)", "goals_vs_market", "goals"),
+        ("market + shots  (weight on shots)", "shots_vs_market", "shots"),
+        ("goals  + shots  (weight on shots)", "shots_vs_goals", "shots"),
+    ):
+        ours = verdict["weights"][key]
+        theirs = verdict["paper_weights"][key]
+        print(f"  {label:38}{ours:>8.3f}{theirs:>10.2f}")
+
+    three = result["validation_pools"]["three_way"]
+    print(f"  {'market + goals + shots (simplex)':38}"
+          f"{three['market']:>8.3f}/{three['goals']:.3f}/{three['shots']:.3f}"
+          f"{'1.00/0.00/0.00':>16}")
+
+    profile = result["validation_pools"]["goals_profile_admissible"]
+    print(f"\nboundary  : argmin w = {profile['argmin_weight']:.3f}, "
+          f"log loss monotone increasing over [0,1] = {profile['monotone_increasing']}")
+    wide = result["validation_pools"]["goals_profile"]
+    print(f"            unconstrained argmin over [-1,1] = {wide['argmin_weight']:+.3f} "
+          f"(paper {paper['unconstrained_weight']:+.3f})")
+
+    scores = result["test_scores"]
+    print(f"\ntest scores on {scores['n_covered']:,} priced matches"
+          f"{'':10}{'ours':>10}{'paper':>10}")
+    print(f"  {'market RPS':46}{scores['market']['rps']:>10.4f}{paper['rps_market']:>10.4f}")
+    print(f"  {'goals model RPS':46}{scores['goals']['rps']:>10.4f}{paper['rps_goals']:>10.4f}")
+    print(f"  {'shots model RPS':46}{scores['shots']['rps']:>10.4f}{'-':>10}")
+    gap = scores["goals_vs_market"]
+    print(f"  {'gap (goals - market)':46}{gap['delta_rps']:>+10.4f}{paper['gap']:>+10.4f}")
+    print(f"  {'  95% CI':46}[{gap['ci_low']:+.4f}, {gap['ci_high']:+.4f}]"
+          f"   [{paper['gap_ci'][0]:+.4f}, {paper['gap_ci'][1]:+.4f}]")
+
+    if result.get("half_life_sensitivity"):
+        print(f"\ngoals+shots weight on SHOTS, by decay rate (the market is not in this pool):")
+        print(f"  {'half-life':>10}{'w_shots':>10}{'goals RPS':>12}{'shots RPS':>12}")
+        for row in result["half_life_sensitivity"]:
+            print(f"  {row['half_life_days']:>10.0f}{row['weight_on_shots']:>10.3f}"
+                  f"{row['rps_goals']:>12.4f}{row['rps_shots']:>12.4f}")
+        if verdict.get("paper_weight_inside_our_range"):
+            print(f"  The paper's {paper['goals_plus_shots']['shots']:.2f} lies inside this range: "
+                  "the chance-creation channel simply wants a shorter memory than the goals one.")
+
+    print(f"\nreproduces the Serie A pattern: {verdict['reproduces']}")
+    print(f"  goals adds nothing to the price     : {verdict['goals_earns_zero_against_market']}")
+    print(f"  shots informative vs the goals model: {verdict['shots_informative_against_goals']}")
+    print(f"  zero is a genuine minimum, not a bound: {verdict['boundary_is_genuine']}")
+    print(f"\nxG arm gate: {verdict['xg_arm_gate']}")
+    print(f"\nreport    : {out_path}")
+    return 0
+
+
 def cmd_live(args: argparse.Namespace) -> int:
     """Freeze a matchday's forecasts before kickoff, or score previously frozen ones."""
     from plmodel.eval.live import freeze_matchday, score_ledger
@@ -396,6 +476,11 @@ def build_parser() -> argparse.ArgumentParser:
     pb.add_argument("--sensitivity", action="store_true", help="run on the earlier decade")
     pb.add_argument("--out", default=None, help="report filename within the output directory")
     pb.set_defaults(func=cmd_backtest)
+
+    pr = sub.add_parser("reproduce", help="re-run an external claim on our data")
+    pr.add_argument("--paper", required=True, help=f"paper id; available: {list(_REPRODUCIBLE)}")
+    pr.add_argument("--market", default=None, help="override the market family")
+    pr.set_defaults(func=cmd_reproduce)
 
     pa = sub.add_parser("audit", help="calibration slices for one arm")
     pa.add_argument("--arm", default="uniform", help="arm to audit")

@@ -705,3 +705,91 @@ appears to do better on one window than the other. The market gate is absent her
 
 **DoD met:** `pl backtest` reports pooled RPS 0.2005 (band 0.196–0.206) with a market gap of
 +0.0082 (prior +0.006–0.007, and on the safe side of it). 239 tests green.
+
+---
+
+## 2026-08-17 — Reproduction: Pitcan (2026) on Premier League data
+
+`pl reproduce --paper pitcan2026`. Three separate conclusions in the build plan rested on this one
+days-old, un-peer-reviewed preprint about a league that is not ours, whose central result is a
+boundary solution. It is re-run here before anything is built on it.
+
+**The paper's method was read, not guessed.** The arXiv HTML was fetched and §§4, 5.1–5.5 and
+6.3–6.4 transcribed, so the reproduction implements the paper's actual specification rather than a
+plausible reconstruction of it. That mattered: §5.3 specifies a *league-wide* finishing factor
+converting shot rates to goal rates, and specifies that the τ correction is **not** carried across
+(the variant is independent-Poisson on converted rates). Both are things a reimplementation from
+the abstract would have got wrong.
+
+### Result: three of four weights reproduce exactly
+
+Weights fitted on validation (2013-14..2018-19), the paper's own protocol:
+
+| Pool | ours | paper |
+|---|---|---|
+| market + goals — weight on **goals** | **0.000** | 0.00 |
+| market + shots — weight on **shots** | **0.000** | 0.00 |
+| market + goals + shots (simplex) | **1.000 / 0.000 / 0.000** | 1.00 / 0.00 / 0.00 |
+| goals + shots — weight on **shots** | 0.170 | 0.35 |
+
+Sample sizes match the paper exactly — validation n = 2,280, test n = 2,660 — because Serie A and
+the Premier League both play 380-match seasons. Test coverage is 2,490 of 2,660 rather than the
+full set, the missing 170 being the Pinnacle termination at 2026-01-08 already on the record.
+
+**The boundary solution is genuine here too.** Log loss is monotone increasing in the weight on the
+goals model across the whole admissible [0, 1], so zero is the argument minimum rather than where
+an optimiser stopped. Extending to [−1, 1] the unconstrained minimum is **−0.100** against the
+paper's −0.225 — same sign, and the same reading: a negative weight divides the price by the model,
+which sharpens it, so the unconstrained optimum acts as a temperature correction rather than as an
+information channel.
+
+**The market gap agrees.** Ours +0.0082 [+0.0055, +0.0107]; the paper's +0.0067 [+0.0046, +0.0088].
+Overlapping intervals. Our own production backtest independently gave +0.0082 on a different market
+family and pool, so three routes now agree the gap is real and near +0.007.
+
+Finishing factors: PL **κ_home 0.304, κ_away 0.290** against Serie A's 0.309 / 0.317. Nearly
+identical at home; Premier League away sides convert slightly less.
+
+### The one number that didn't match is a finding, not a failure
+
+`goals + shots` returned 0.170 against the paper's 0.35. The market is not in that pool, so the
+odds cannot explain it. Re-estimating across decay rates:
+
+| half-life | weight on shots | goals RPS | shots RPS |
+|---|---|---|---|
+| 180 | **0.630** | 0.1980 | **0.1975** |
+| 365 | 0.433 | 0.1969 | 0.1985 |
+| 730 (production) | 0.170 | 0.1969 | 0.2000 |
+| 1460 | 0.086 | 0.1987 | 0.2020 |
+
+**The paper's 0.35 sits inside our range.** The discrepancy is the decay rate: the paper fits ξ on
+its validation window, while we deliberately carried the production half-life rather than refit on
+a window that overlaps our acceptance test span.
+
+The mechanism is visible in the RPS columns. As memory shortens the **shots model improves
+monotonically (0.2000 → 0.1975) while the goals model does not (0.1969 → 0.1980)** — and at 180
+days the shots model actually *beats* the goals model. Shot counts are a denser signal than goals,
+roughly three per goal, so they can be estimated from a shorter window without paying the variance
+penalty that sparse goal counts impose.
+
+**Design consequence for the xG arm: a second observation channel must get its own decay rate.**
+Inheriting the goals model's half-life understates what the channel carries by a factor of about
+four. Neither the paper nor the build brief anticipates this; the research report's §J lists
+per-parameter time decay as under-tried and unpublished, and this is adjacent evidence for it.
+
+### Verdict and gate
+
+The Premier League reproduces the Serie A pattern. **Arm 4 (xG as a second observation channel) is
+cleared to PROCEED**, with two pre-registered expectations that follow directly:
+
+1. It should **pass gate 1** — the chance-creation channel demonstrably carries information the
+   goals model lacks (weight 0.17–0.63 depending on decay).
+2. It should **leave the market gap untouched** — against the price the same signal earns 0.000,
+   and in the three-way pool both structural models collapse to zero simultaneously.
+
+That combination is adoptable under the acceptance rule, since gate 2 requires only that the gap
+not *degrade*. Recording the expectation now means a market-gap improvement would be a surprise
+demanding scrutiny rather than a success to be claimed.
+
+The shots-on-target model (`model/shots.py`, arm `dixon-coles-sot`) is retained as production
+groundwork: swapping shots for xG leaves the conversion and pooling unchanged.
