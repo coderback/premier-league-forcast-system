@@ -1,0 +1,134 @@
+# The closed set of canonical team names.
+#
+# Every team name in the corpus must resolve to an entry here (via team_aliases.yaml where the
+# source spelling differs). An unrecognised name RAISES — see plmodel/data/teams.py for why the
+# roster is closed rather than open.
+#
+# Curated 2026-08-17 from all 132 cached season files (E0-E3, 1993/94-2025/26): 116 distinct
+# spellings, checked for near-duplicates with `find_near_duplicates`. The source is internally
+# consistent — no club is spelled two ways — so canonical names are the source's own spellings.
+# Cross-source aliases (Understat, FPL) go in team_aliases.yaml when those loaders land.
+#
+# Three entries look like duplicates and are NOT:
+#   Wimbledon           - Wimbledon FC, the original club, to 2003/04
+#   Milton Keynes Dons  - the relocated continuation of Wimbledon FC, from 2004/05
+#   AFC Wimbledon       - the 2002 phoenix club, a separate entity
+# Merging any of these would splice together the histories of different clubs. This is precisely
+# the mistake fuzzy matching would make, and the reason it is never used.
+
+- AFC Wimbledon
+- Accrington
+- Aldershot
+- Arsenal
+- Aston Villa
+- Barnet
+- Barnsley
+- Barrow
+- Birmingham
+- Blackburn
+- Blackpool
+- Bolton
+- Boston
+- Bournemouth
+- Bradford
+- Brentford
+- Brighton
+- Bristol City
+- Bristol Rvs
+- Bromley
+- Burnley
+- Burton
+- Bury
+- Cambridge
+- Cardiff
+- Carlisle
+- Charlton
+- Chelsea
+- Cheltenham
+- Chester
+- Chesterfield
+- Colchester
+- Coventry
+- Crawley Town
+- Crewe
+- Crystal Palace
+- Dag and Red
+- Darlington
+- Derby
+- Doncaster
+- Everton
+- Exeter
+- Fleetwood Town
+- Forest Green
+- Fulham
+- Gillingham
+- Grimsby
+- Halifax
+- Harrogate
+- Hartlepool
+- Hereford
+- Huddersfield
+- Hull
+- Ipswich
+- Kidderminster
+- Leeds
+- Leicester
+- Leyton Orient
+- Lincoln
+- Liverpool
+- Luton
+- Macclesfield
+- Man City
+- Man United
+- Mansfield
+- Middlesbrough
+- Millwall
+- Milton Keynes Dons
+- Morecambe
+- Newcastle
+- Newport County
+- Northampton
+- Norwich
+- Nott'm Forest
+- Notts County
+- Oldham
+- Oxford
+- Peterboro
+- Plymouth
+- Port Vale
+- Portsmouth
+- Preston
+- QPR
+- Reading
+- Rochdale
+- Rotherham
+- Rushden & D
+- Salford
+- Scarborough
+- Scunthorpe
+- Sheffield United
+- Sheffield Weds
+- Shrewsbury
+- Southampton
+- Southend
+- Stevenage
+- Stockport
+- Stoke
+- Sunderland
+- Sutton
+- Swansea
+- Swindon
+- Torquay
+- Tottenham
+- Tranmere
+- Walsall
+- Watford
+- West Brom
+- West Ham
+- Wigan
+- Wimbledon
+- Wolves
+- Wrexham
+- Wycombe
+- Yeovil
+- York
