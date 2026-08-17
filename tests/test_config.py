@@ -82,9 +82,33 @@ def test_gate_benchmark_is_a_closing_line(cfg: Config) -> None:
     assert FAMILIES[cfg.odds.gate_benchmark].is_closing
 
 
+def test_backtest_section(cfg: Config) -> None:
+    bt = cfg.backtest
+    assert bt.prediction_division in cfg.data.divisions
+    assert bt.test_span.first_season <= bt.test_span.last_season
+    assert bt.refit_every >= 1
+    assert bt.n_boot > 0 and 0 < bt.fdr_alpha < 1
+
+
+def test_sensitivity_span_does_not_overlap_the_test_span(cfg: Config) -> None:
+    """An earlier decade is only a check on era-dependence if it is a different decade."""
+    assert cfg.backtest.sensitivity_span.last_season < cfg.backtest.test_span.first_season
+
+
+def test_inverted_span_raises(tmp_path: Path) -> None:
+    import yaml
+
+    raw = yaml.safe_load(DEFAULT_CONFIG_PATH.read_text(encoding="utf-8"))
+    raw["backtest"]["test_span"] = {"first_season": "2020-21", "last_season": "2016-17"}
+    bad = tmp_path / "config.yaml"
+    bad.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    with pytest.raises(ConfigError, match="is after last_season"):
+        load_config(bad)
+
+
 def test_unpopulated_sections_stay_empty(cfg: Config) -> None:
     """Later work populates these. An empty section must load empty, never default-filled."""
-    for section in (cfg.model, cfg.backtest, cfg.season):
+    for section in (cfg.model, cfg.season):
         assert isinstance(section, dict)
 
 

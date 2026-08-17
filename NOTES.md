@@ -421,3 +421,66 @@ not a benchmark here, so it is recorded and left alone.
 **DoD met:** de-vigged probabilities sum to 1.0 within 1e-9 (observed worst 2.2e-16); Shin ≠
 proportional on a favourite–longshot fixture, with the direction and monotonicity asserted on real
 data. 123 tests green.
+
+---
+
+## 2026-08-17 — Walk-forward splitter: the yardstick exists
+
+`eval/backtest.py`. Rolling-origin by matchday: for each distinct match date in the test span,
+train on everything strictly before it, predict that day, roll forward.
+
+### The yardstick, measured
+
+| Span | Barriers | Matches | First → last | Train rows |
+|---|---:|---:|---|---|
+| test `2016-17..2025-26` | **1,153** | **3,800** | 2016-08-13 → 2026-05-24 | 8,904 → 12,694 |
+| sensitivity `2006-07..2015-16` | 995 | 3,800 | 2006-08-19 → 2016-05-17 | 5,104 → 8,903 |
+
+Gate 1 pool 3,800; gate 2 subset 2,660 — both exactly the figures the plan committed to. Maximum
+matches per barrier is 10, correct for a 20-team round. The earliest barrier already carries 8,904
+training matches, so the decade-long test span never fits on thin history.
+
+### Leak-freedom is structural, in three layers
+
+1. **`assert_no_leakage` runs on every split**, not a sample. It checks more than the two frames'
+   relative order: training must not reach the barrier, *and* the test set must start exactly at
+   it. A split can be internally consistent and still be built at the wrong barrier, and only the
+   second check catches that.
+2. **`training_frame(source, barrier)` is the only way to pull in extra training data** — a second
+   division for the multi-tier fit, or an external feed. Routing every such join through one
+   barrier-checked function means extra data cannot bypass the barrier merely because it did not
+   come from the prediction frame.
+3. **`validate_splits` adds cross-split invariants**: barriers strictly increasing, test slices
+   non-overlapping, no fit dated after its own barrier. These catch a splitter bug that leaves
+   each split individually valid.
+
+The definition-of-done check builds a deliberately corrupted split — barrier moved forward one
+matchday while the training prefix stays put, the exact shape of an off-by-one — and asserts
+`LeakageError` fires. `LeakageError` subclasses `AssertionError` by intent: it is a violated
+invariant, not a recoverable condition, and nothing may catch it.
+
+### Splits are integers, not frames
+
+Because the corpus is date-sorted, a barrier makes training a *prefix* and the test set a
+*contiguous slice*. A split is therefore three integers plus a timestamp. The whole ten-season walk
+costs nothing to hold, and `walk_forward` returns a materialised list rather than a generator so
+that **every arm in a comparison replays literally the same splits** — structural rather than
+conventional. This is the same guarantee the WC2026 harness got from its shared per-edition
+precomputation, obtained more cheaply.
+
+### The refit-cadence seam
+
+Prediction always happens at every matchday; *fitting* may happen less often. `refit_every = n`
+reuses the most recent fit at or before each barrier: 1,153 fits at `n=1`, 289 at `n=4`, 31 at
+`n=38`. Leak-free either way, because a reused fit saw strictly less data, never more — asserted
+across cadences 1, 2, 5 and 100.
+
+The seam is inert at its default: `refit_every = 1` makes every split fit at its own barrier, and
+a test asserts the cadence changes only *which parameters* are used, never *what is predicted*
+(identical barriers and test slices across cadences). Its purpose is to make "does refitting this
+often actually matter?" measurable rather than assumed — the WC2026 project's live-update channel
+returned null three separate times, and that was only knowable because it was measured.
+
+**DoD met:** `LeakageError` fires on a deliberately corrupted split; the walk is deterministic
+(`walk_forward(df) == walk_forward(df)`); all 1,153 real splits pass `validate_splits`. 154 tests
+green.

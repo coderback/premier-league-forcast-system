@@ -119,15 +119,48 @@ odds:
 model: {}
 
 # ---------------------------------------------------------------------------------------------
-# BACKTEST (populated with the walk-forward splitter)
+# BACKTEST
 #
-# Rolling-origin walk-forward by derived matchweek block. Gate 1 and gate 2 deliberately use
-# DIFFERENT pools: the acceptance rule scopes gate 2 to "the odds-covered subset", so gate 1 keeps
-# full-decade statistical power while gate 2 uses the only live closing-market benchmark.
-#   gate 1 (vs baseline): 2016/17-2025/26, ~3,800 matches
-#   gate 2 (vs market):   AvgC-covered subset, 2019/20+, ~2,660 matches at 100% coverage
+# Rolling-origin walk-forward: one barrier per distinct match date. Gate 1 and gate 2 deliberately
+# use DIFFERENT pools — the acceptance rule scopes gate 2 to "the odds-covered subset", so gate 1
+# keeps full-decade statistical power while gate 2 uses the only live closing-market benchmark:
+#   gate 1 (vs baseline): 2016-17..2025-26, 3,800 matches over 1,153 barriers
+#   gate 2 (vs market):   the avg_closing-covered subset, 2019/20+, 2,660 matches
 # ---------------------------------------------------------------------------------------------
-backtest: {}
+backtest:
+  # The division forecasts are scored on. Lower tiers are ingested for the multi-tier arm's
+  # training data, never scored themselves.
+  prediction_division: E0
+
+  # Held-out span. A decade of Premier League football, training from the corpus start (1993/94)
+  # so the earliest barrier still sees 23 seasons of history.
+  test_span:
+    first_season: "2016-17"
+    last_season: "2025-26"
+
+  # Sensitivity check on an earlier decade, to show a result is not an artefact of one era.
+  sensitivity_span:
+    first_season: "2006-07"
+    last_season: "2015-16"
+
+  # Refit cadence in barriers. 1 = refit at every matchday, which is the honest default; larger
+  # values reuse the most recent fit and stay leak-free (a stale fit saw strictly less data).
+  # Exists so "does refitting this often actually matter?" is measurable rather than assumed —
+  # the WC2026 project's live-update channel was null three separate times.
+  refit_every: 1
+
+  # A barrier with less history than this is skipped rather than fitted on almost nothing.
+  # 3,800 is ten full seasons; the test span opens with 23 seasons behind it, so this only bites
+  # if someone points the splitter at the start of the corpus.
+  min_train_matches: 3800
+
+  # Paired-bootstrap resamples for model-vs-model and model-vs-market RPS deltas. 10,000 matches
+  # the WC2026 value so the two projects' CIs are computed the same way.
+  n_boot: 10000
+
+  # Benjamini-Hochberg false-discovery rate across the family of arms tested. Required by the
+  # metrics helper rather than defaulted, because the rate the project tolerates is a decision.
+  fdr_alpha: 0.05
 
 # ---------------------------------------------------------------------------------------------
 # SEASON SIMULATION (populated with the season simulator)

@@ -46,6 +46,27 @@ class OddsConfig:
 
 
 @dataclass(frozen=True)
+class SeasonSpan:
+    """An inclusive span of seasons, labelled as the corpus labels them ("2016-17")."""
+
+    first_season: str
+    last_season: str
+
+
+@dataclass(frozen=True)
+class BacktestConfig:
+    """The walk-forward protocol and the statistics applied to its output."""
+
+    prediction_division: str
+    test_span: SeasonSpan
+    sensitivity_span: SeasonSpan
+    refit_every: int
+    min_train_matches: int
+    n_boot: int
+    fdr_alpha: float
+
+
+@dataclass(frozen=True)
 class Config:
     """The whole config.yaml, typed where a phase has populated it."""
 
@@ -56,9 +77,9 @@ class Config:
     output_dir: Path
     data: DataConfig
     odds: OddsConfig
+    backtest: BacktestConfig
     # Sections not yet populated are carried as raw mappings so nothing invents a default.
     model: dict[str, Any] = field(default_factory=dict)
-    backtest: dict[str, Any] = field(default_factory=dict)
     season: dict[str, Any] = field(default_factory=dict)
 
 
@@ -74,6 +95,15 @@ def _section(raw: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ConfigError(f"config.yaml section {key!r} must be a mapping, got {type(value).__name__}")
     return value
+
+
+def _span(raw: Any, key: str) -> SeasonSpan:
+    if not isinstance(raw, dict) or {"first_season", "last_season"} - set(raw):
+        raise ConfigError(f"config.yaml {key} needs first_season and last_season")
+    first, last = str(raw["first_season"]), str(raw["last_season"])
+    if first > last:
+        raise ConfigError(f"config.yaml {key}: first_season {first} is after last_season {last}")
+    return SeasonSpan(first_season=first, last_season=last)
 
 
 def load_config(path: Path | str | None = None) -> Config:
@@ -112,6 +142,15 @@ def load_config(path: Path | str | None = None) -> Config:
     if missing_odds:
         raise ConfigError(f"config.yaml odds section missing: {missing_odds}")
 
+    b = _section(raw, "backtest")
+    backtest_keys = (
+        "prediction_division", "test_span", "sensitivity_span", "refit_every",
+        "min_train_matches", "n_boot", "fdr_alpha",
+    )
+    missing_backtest = [k for k in backtest_keys if k not in b]
+    if missing_backtest:
+        raise ConfigError(f"config.yaml backtest section missing: {missing_backtest}")
+
     return Config(
         acceptance_rule=rule,
         seed=int(_require(raw, "seed")),
@@ -131,7 +170,15 @@ def load_config(path: Path | str | None = None) -> Config:
             diagnostic_benchmarks=tuple(str(x) for x in (o.get("diagnostic_benchmarks") or ())),
             sum_tolerance=float(o["sum_tolerance"]),
         ),
+        backtest=BacktestConfig(
+            prediction_division=str(b["prediction_division"]),
+            test_span=_span(b["test_span"], "test_span"),
+            sensitivity_span=_span(b["sensitivity_span"], "sensitivity_span"),
+            refit_every=int(b["refit_every"]),
+            min_train_matches=int(b["min_train_matches"]),
+            n_boot=int(b["n_boot"]),
+            fdr_alpha=float(b["fdr_alpha"]),
+        ),
         model=_section(raw, "model"),
-        backtest=_section(raw, "backtest"),
         season=_section(raw, "season"),
     )
