@@ -1012,3 +1012,172 @@ Also worth noting for the dynamics arm: **elo-dc's likelihood prefers no time de
 because the Elo replay already carries the recency weighting. A score-driven dynamic model does the
 same job more principledly, which strengthens the case that the dynamics arm is competing with Elo
 rather than with the static per-team fit.
+
+---
+
+## 2026-08-17 — PRE-REGISTRATION, Arm 2: structural home advantage
+
+*Written before the comparison was run. The regime table below is descriptive statistics used to
+define the arm; no arm result existed.*
+
+### Hypothesis
+
+Giving home advantage explicit structure — a time trend, an empty-stadium term, or both — lowers
+pooled RPS against the production model, which fits a single global `h` per barrier.
+
+### Why the prior is stronger than the brief's "small positive"
+
+The brief expects a small gain. Three measurements already on the record argue for more:
+
+* the fitted `h` falls **+0.3240 → +0.2709 → +0.1774** across two independently-run backtests
+  spanning 2006-2026 (×1.38 → ×1.19 on the home rate), agreeing to four decimals at the handover;
+* test-decade base rates are home 44.6% / draw 23.2% / away 32.1% against a 25-season norm of
+  ~46.2 / 27.5 / 26.3 — away wins some six points above their long-run rate;
+* Pitcan's §4 reports the same trajectory in Serie A, home:away goals **1.38 → 1.14**, so this is
+  not a Premier League quirk.
+
+A single global `h` fitted on 730-day decay is therefore averaging over regimes that differ visibly
+*within the span the model is judged on*.
+
+### The empty-stadium regime, measured
+
+| regime | n | home% | away% | home:away goals | ppg diff |
+|---|---|---|---|---|---|
+| pre-COVID 2015-08..2020-03 | 1,808 | 45.7 | 30.3 | 1.279 | +0.46 |
+| **restart 2020-06..2020-07** | 92 | **46.7** | 31.5 | **1.315** | **+0.46** |
+| **2020-21 season** | 380 | **37.9** | **40.3** | **1.008** | **−0.07** |
+| 2021-22 | 380 | 42.9 | 33.9 | 1.159 | +0.27 |
+| 2022-08..2026-05 | 1,520 | 44.5 | 31.4 | 1.212 | +0.39 |
+
+2020-21 is a collapse — away wins outnumber home wins, for the first time in English top-flight
+history. **But the June–July 2020 restart, also played behind closed doors, shows no effect at
+all**: home 46.7% and a 1.315 goal ratio, indistinguishable from the pre-COVID baseline.
+
+**The window is defined causally anyway** — every match played without a crowd, 2020-06-17 to
+2021-05-23. Dropping the restart because it fails to show the expected effect would be fitting the
+definition to the outcome, and would make the dummy look stronger than the evidence deserves. If
+the restart dilutes the term, that is a finding about the crowd hypothesis. Ninety-two matches is
+in any case too few to conclude the restart was genuinely unaffected. Two known impurities stay in
+for the same reason: partial crowds in December 2020 and again in May 2021.
+
+Note also that home advantage has **not** returned to its pre-COVID level (44.5% against 45.7%),
+which is why the trend term is tested separately rather than folded into the dummy.
+
+### Arm definitions — one axis each, three arms, FDR-controlled
+
+Baseline is `dixon-coles`. Each arm adds parameters that enter the home rate only, are fitted
+jointly by the same weighted likelihood, and **contribute exactly zero at prediction time** — a
+future match is neither in the past nor behind closed doors, so the forecast uses the current `h`
+rather than a window average. That last property is the whole point of the arm.
+
+* **`ha-trend`** — `h(t) = h + h_trend · years_before_barrier`. One parameter.
+* **`ha-empty`** — `h(t) = h + h_empty · 1[no crowd]`. One parameter.
+* **`ha-both`** — both. Two parameters.
+
+Three arms is a family, so Benjamini–Hochberg applies across it. Everything else is shared with the
+baseline through one code path, so a paired delta is attributable to the seam alone.
+
+### Pre-registered bar
+
+The standing rule: paired-bootstrap delta favourable (95% CI excludes 0 or P(better) ≥ 0.95) **and**
+no degradation against the market, with BH-FDR across the three arms and DM as corroboration.
+
+### What each outcome will mean
+
+* **Accept** — home advantage is genuinely non-constant on a decade horizon, and the production
+  model has been leaving a measurable amount on the table by averaging over it.
+* **Null** — the 730-day decay already tracks the drift well enough that stating it explicitly adds
+  nothing. Given the drift is real and large, this would say the *decay* is doing the job, not that
+  the drift does not exist — a distinction the entry must make, because "no detectable effect
+  through this pipe" is not "no effect".
+* **`ha-empty` null while `ha-trend` accepts** — the crowd hypothesis is weaker than the secular
+  decline, consistent with the restart anomaly above.
+
+### Prediction, recorded to be scored later
+
+`ha-trend` gains −0.001 to −0.003; `ha-empty` gains less, −0.000 to −0.002, diluted by the restart
+and by the decay already down-weighting 2020-21 by the time it matters; `ha-both` lands near
+`ha-trend`. I put maybe 50% on any of the three clearing gate 1 — the drift is real but the decay
+is already a crude version of the same correction, and Arm 1 has just taught me that extra
+parameters do not automatically pay for themselves here.
+
+---
+
+## 2026-08-17 — RESULT, Arm 2: NULL, but an informative one — and a bug found mid-arm
+
+```
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+dixon-coles        0.2005    0.9718   16.1%   0.00202    +0.0082   (baseline)
+ha-trend           0.2005    0.9719   16.1%   0.00189    +0.0083   +0.0000 [-0.0001, +0.0002] P=0.306
+ha-empty           0.2003    0.9715   16.2%   0.00200    +0.0081   -0.0001 [-0.0004, +0.0001] P=0.865
+ha-both            0.2004    0.9717   16.2%   0.00188    +0.0082   -0.0000 [-0.0003, +0.0002] P=0.629
+
+  reject  ha-trend   gate1 FAIL (P=0.306)   gate2 FAIL
+  reject  ha-empty   gate1 FAIL (P=0.865)   gate2 pass
+  reject  ha-both    gate1 FAIL (P=0.629)   gate2 pass
+```
+
+All three rejected. Benjamini–Hochberg across the family: 0 of 3, adjusted p 0.66–0.74. Diebold–
+Mariano agrees.
+
+### A mis-specification found and fixed before the result was believed
+
+The first run returned all three arms at exactly +0.0000 — suspiciously clean. The by-season slice
+showed why: **`ha-empty` was *worse* in 2020-21 (+0.0006), the one season it exists for.**
+
+The cause was mine. Structural terms were applied when *fitting* but zeroed when *predicting*, so
+the empty-stadium arm cleaned the crowd effect out of its historical estimate and then forecast the
+2020-21 matches as if crowds were present — the worst of both. Whether an upcoming match is played
+behind closed doors is public before kickoff, so applying it is leak-free; omitting it was simply
+wrong.
+
+After the fix, that season flips from **+0.0006 to −0.0013**, a swing of 0.0019 in the season that
+matters, and `ha-empty` moves from P=0.324 to **P=0.865** and from failing gate 2 to passing it.
+`ha-trend` is unchanged to four decimals, which is the consistency check — the trend *is*
+legitimately zero at prediction, since a match is zero years before its own barrier.
+
+This is the failure mode the harness's does-it-do-anything guard cannot catch: the arms genuinely
+differed, so the guard passed, but one of them was differing *wrongly*. A regression test now pins
+it. Had it gone unnoticed, this entry would have recorded a clean null produced by a broken arm.
+
+### The null is real, and it is a dilution result
+
+`ha_empty` is not a term that failed to find anything. Fitted across barriers it lands consistently
+at **−0.08 to −0.15** in log-goal units — home sides scored roughly 10% fewer goals behind closed
+doors, matching the raw collapse from a 1.279 home:away goal ratio to 1.008. It then improves
+2020-21 by −0.0013.
+
+It fails anyway, because **one season in ten, correctly handled, is worth −0.0001 pooled**. The
+effect is real, the term captures it, and the yardstick is a decade. This is precisely the
+distinction pre-registered above: *no detectable effect through this pipe* is not *no effect*. A
+model forecasting the 2020-21 season specifically should carry this term; a model judged on a
+decade cannot justify it.
+
+### `ha-trend` returns exactly zero, and that answers the other question
+
+The trend term contributes nothing at all (+0.0000, P=0.306). Given the drift is large and
+well-measured — `h` falling ×1.38 → ×1.19 over twenty years — the reading is that **the 730-day
+exponential decay is already tracking it**. Stating the drift explicitly adds nothing the decay was
+not already doing implicitly. That is a satisfying answer to a question the brief left open, and it
+retires the "time-varying home advantage" idea in its simple form rather than leaving it as a
+perpetual maybe.
+
+It also revises the prior I raised after the production backtest. The *measurement* of drift was
+correct and stands; the inference that a model would gain by modelling it explicitly does not.
+
+### Scoring the prediction
+
+I predicted `ha-trend` −0.001 to −0.003 and `ha-empty` −0.000 to −0.002, with ~50% that any arm
+clears gate 1. `ha-trend` came in at +0.0000 — outside my range and on the wrong side.
+`ha-empty` at −0.0001 was inside it. None cleared gate 1, so the scepticism was warranted and the
+specific trend prediction was not. Two arms now, two wrong directional calls: worth noting as a
+pattern rather than as two coincidences.
+
+### On leakage
+
+The empty-stadium window is a calendar fact about public health policy, not an outcome-derived
+quantity, and each match's status was known before its own kickoff. The fixed end date is only used
+to classify training rows, which all lie before the barrier. No path from a result to its own
+forecast.
+
+Seams remain off in production; all four arms leave `dixon-coles` byte-identical.

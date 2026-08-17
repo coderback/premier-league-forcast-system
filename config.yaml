@@ -160,13 +160,28 @@ model:
     # Slope on the scaled Elo difference, for the elo-dc comparison arm only. A 400-point lead is
     # d = 1, so a slope of 2 would already mean exp(2) = 7x the goal rate — generous.
     elo_slope: [0.0, 2.0]
+    # Structural home-advantage terms (model.seams.home_advantage). Both enter the home rate only.
+    # ha_trend is per YEAR before the barrier: home advantage fell ~0.094 in log-goal units over
+    # the last decade, so ~0.01/year, and 0.2 is a wide outer box around that.
+    ha_trend: [-0.2, 0.2]
+    # ha_empty is the whole crowd effect in log-goal units. The 2020-21 collapse is about
+    # -0.10 on the home:away goal ratio, so 1.0 is generous in both directions.
+    ha_empty: [-1.0, 1.0]
 
   seams:
     covariates: []                      # extra additive strength terms
     dynamics: {enabled: false}          # score-driven / GAS time-varying states
     observation: {channels: [goals]}    # add xG or shots-on-target as a second channel
     ensemble: {enabled: false}          # blend with an ML goals regressor
-    home_advantage: {mode: global}      # global | time_varying
+    # global | trend | empty | trend+empty. See model/home_advantage.py.
+    # The empty-stadium window is CAUSAL — every match played without a crowd — not fitted to
+    # where the effect appears. The 2020 restart (2020-06-17 onward) shows no loss of home
+    # advantage at all while 2020-21 collapses, and excluding the restart on those grounds would
+    # be fitting the definition to the outcome.
+    home_advantage:
+      mode: global
+      empty_start: "2020-06-17"    # Project Restart: first match back behind closed doors
+      empty_end: "2021-05-23"      # final day of 2020-21
     tiers: [E0]                         # divisions in the joint fit
 
 # ---------------------------------------------------------------------------------------------

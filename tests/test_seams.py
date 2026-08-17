@@ -84,7 +84,7 @@ def test_seam_is_recognised_as_on_when_flipped(cfg, seam: str) -> None:
         "dynamics": {"enabled": True},
         "observation": {"channels": ["goals", "xg"]},
         "ensemble": {"enabled": True},
-        "home_advantage": {"mode": "time_varying"},
+        "home_advantage": {**cfg.model.seams["home_advantage"], "mode": "trend"},
         "tiers": ["E0", "E1"],
     }[seam]
     flipped = dataclasses.replace(cfg.model, seams={**cfg.model.seams, seam: on})
@@ -110,7 +110,7 @@ def test_each_seam_off_explicitly_is_byte_identical(cfg, corpus, seam: str) -> N
         "dynamics": {"enabled": False},
         "observation": {"channels": ["goals"]},
         "ensemble": {"enabled": False},
-        "home_advantage": {"mode": "global"},
+        "home_advantage": {**cfg.model.seams["home_advantage"], "mode": "global"},
         "tiers": ["E0"],
     }[seam]
     baseline = _run(cfg, corpus)

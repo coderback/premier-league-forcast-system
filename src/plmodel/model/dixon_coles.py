@@ -55,6 +55,9 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import gammaln
 
+from plmodel.model.home_advantage import MODE_GLOBAL as HA_GLOBAL
+from plmodel.model.home_advantage import design as ha_design_matrix
+from plmodel.model.home_advantage import prediction_design
 from plmodel.model.scoreline import clamp_rho_for_rates, three_class_from_rates
 
 # Fixed layout of the non-team parameters at the head of the optimiser vector.
@@ -92,6 +95,11 @@ class DixonColesFit:
     converged: bool
     n_iterations: int
     cold_start_teams: tuple[str, ...] = ()
+    # Structural home-advantage terms (empty under the production `global` mode).
+    ha_names: tuple[str, ...] = ()
+    ha_params: tuple[float, ...] = ()
+    ha_mode: str = HA_GLOBAL
+    ha_window: tuple[str | None, str | None] = (None, None)
     # Mutable on purpose: prediction-time observations that the fit itself cannot know, such
     # as how often rho had to be clamped for an extreme matchup. Surfaced in the report.
     diagnostics: dict[str, int] = field(default_factory=dict)
@@ -99,7 +107,32 @@ class DixonColesFit:
     def _index(self) -> dict[str, int]:
         return {team: i for i, team in enumerate(self.teams)}
 
-    def rates(self, home: pd.Series, away: pd.Series) -> tuple[np.ndarray, np.ndarray]:
+    def _ha_adjustment(self, dates: pd.Series | None, n_rows: int) -> np.ndarray:
+        """Structural home-advantage contribution for rows being predicted.
+
+        Rebuilt with the SAME design used at fit time, evaluated at the barrier. The trend term is
+        therefore zero — a match is zero years before its own barrier — but the empty-stadium term
+        is **not**: whether an upcoming match will be played behind closed doors is public before
+        kickoff, so applying it is leak-free and omitting it is a mis-specification.
+
+        Getting this wrong is not hypothetical. An earlier version zeroed every term at prediction,
+        which meant the empty-stadium arm removed the crowd effect from its historical estimate and
+        then forecast the 2020-21 matches as if crowds were present. It scored *worse* in exactly
+        the season it was built for, and the arm as a whole looked like a clean null.
+        """
+        if not self.ha_names or dates is None:
+            return np.zeros(n_rows)
+        matrix, names = ha_design_matrix(
+            pd.Series(dates), self.ref_date, mode=self.ha_mode,
+            empty_start=self.ha_window[0], empty_end=self.ha_window[1],
+        )
+        if names != self.ha_names:
+            raise ValueError(f"prediction design {names} does not match the fit's {self.ha_names}")
+        return matrix @ np.asarray(self.ha_params)
+
+    def rates(
+        self, home: pd.Series, away: pd.Series, dates: pd.Series | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
         """Expected goals for each side. Unknown teams take the league average."""
         idx = self._index()
         home_i = np.array([idx.get(t, -1) for t in home])
@@ -108,7 +141,8 @@ class DixonColesFit:
         a_away = np.where(away_i >= 0, self.attack[away_i], 0.0)
         d_home = np.where(home_i >= 0, self.defence[home_i], 0.0)
         d_away = np.where(away_i >= 0, self.defence[away_i], 0.0)
-        log_lam = np.clip(self.intercept + self.home_advantage + a_home - d_away,
+        ha = self._ha_adjustment(dates, len(a_home))
+        log_lam = np.clip(self.intercept + self.home_advantage + ha + a_home - d_away,
                           _LOG_RATE_MIN, _LOG_RATE_MAX)
         log_mu = np.clip(self.intercept + a_away - d_home, _LOG_RATE_MIN, _LOG_RATE_MAX)
         return np.exp(log_lam), np.exp(log_mu)
@@ -123,7 +157,10 @@ class DixonColesFit:
         model quietly changing its own dependence parameter is exactly the kind of thing that
         should show up in a report.
         """
-        lam, mu = self.rates(rows["home_team"], rows["away_team"])
+        lam, mu = self.rates(
+            rows["home_team"], rows["away_team"],
+            rows["date"] if "date" in rows.columns else None,
+        )
         rho, n_clamped = clamp_rho_for_rates(lam, mu, self.rho, margin=_RHO_CLAMP_MARGIN)
         if n_clamped:
             self.diagnostics["rho_clamped"] = (
@@ -157,6 +194,7 @@ class DixonColesFit:
             "n_iterations": self.n_iterations,
             "n_cold_start": len(self.cold_start_teams),
             "cold_start_teams": list(self.cold_start_teams),
+            "home_advantage_terms": dict(zip(self.ha_names, self.ha_params)),
             "diagnostics": dict(self.diagnostics),
         }
 
@@ -171,8 +209,15 @@ def decay_weights(dates: pd.Series, ref_date: pd.Timestamp, half_life_days: floa
     return np.exp(-math.log(2.0) * age / half_life_days)
 
 
-def _unpack(theta: np.ndarray, n_teams: int) -> tuple[float, float, float, np.ndarray, np.ndarray]:
-    """Optimiser vector -> (c, h, rho, attack, defence) with the sum-to-zero constraint applied."""
+def _unpack(
+    theta: np.ndarray, n_teams: int, n_ha: int = 0
+) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
+    """Optimiser vector -> (c, h, rho, attack, defence, ha) with sum-to-zero applied.
+
+    Home-advantage design parameters are appended AFTER the team blocks, so adding them cannot
+    shift the layout of anything that existed before the seam — which is what lets the seam be
+    byte-identical when it carries no columns.
+    """
     c = theta[_INTERCEPT]
     h = theta[_HOME_ADV]
     rho = theta[_RHO]
@@ -181,7 +226,8 @@ def _unpack(theta: np.ndarray, n_teams: int) -> tuple[float, float, float, np.nd
     d_free = theta[_N_GLOBAL + free: _N_GLOBAL + 2 * free]
     attack = np.concatenate([a_free, [-a_free.sum()]])
     defence = np.concatenate([d_free, [-d_free.sum()]])
-    return c, h, rho, attack, defence
+    ha = theta[_N_GLOBAL + 2 * free:] if n_ha else np.zeros(0)
+    return c, h, rho, attack, defence, ha
 
 
 def _tau_terms(
@@ -232,11 +278,16 @@ def _objective(
     lgamma_x: np.ndarray,
     lgamma_y: np.ndarray,
     n_teams: int,
+    ha_design: np.ndarray,
 ) -> tuple[float, np.ndarray]:
     """Weighted negative log-likelihood and its analytic gradient."""
-    c, h, rho, attack, defence = _unpack(theta, n_teams)
+    n_ha = ha_design.shape[1]
+    c, h, rho, attack, defence, ha = _unpack(theta, n_teams, n_ha)
 
-    log_lam = np.clip(c + h + attack[home_i] - defence[away_i], _LOG_RATE_MIN, _LOG_RATE_MAX)
+    # Structural home advantage: exactly zero when the seam carries no columns.
+    ha_term = ha_design @ ha if n_ha else 0.0
+    log_lam = np.clip(c + h + ha_term + attack[home_i] - defence[away_i],
+                      _LOG_RATE_MIN, _LOG_RATE_MAX)
     log_mu = np.clip(c + attack[away_i] - defence[home_i], _LOG_RATE_MIN, _LOG_RATE_MAX)
     lam, mu = np.exp(log_lam), np.exp(log_mu)
 
@@ -274,12 +325,15 @@ def _objective(
     free = n_teams - 1
     grad[_N_GLOBAL: _N_GLOBAL + free] = d_attack[:free] - d_attack[-1]
     grad[_N_GLOBAL + free: _N_GLOBAL + 2 * free] = d_defence[:free] - d_defence[-1]
+    if n_ha:
+        # Each design column enters the home rate additively, exactly as h does.
+        grad[_N_GLOBAL + 2 * free:] = ha_design.T @ g_lam
 
     return -total, -grad
 
 
 def _starting_point(
-    x: np.ndarray, y: np.ndarray, weights: np.ndarray, n_teams: int
+    x: np.ndarray, y: np.ndarray, weights: np.ndarray, n_teams: int, n_ha: int = 0
 ) -> np.ndarray:
     """Data-driven start: the weighted mean goal rates, flat strengths, no low-score correction.
 
@@ -289,7 +343,7 @@ def _starting_point(
     total_w = weights.sum()
     mean_home = float((weights * x).sum() / total_w)
     mean_away = float((weights * y).sum() / total_w)
-    theta = np.zeros(_N_GLOBAL + 2 * (n_teams - 1))
+    theta = np.zeros(_N_GLOBAL + 2 * (n_teams - 1) + n_ha)
     theta[_INTERCEPT] = math.log(max(mean_away, np.finfo(float).tiny))
     theta[_HOME_ADV] = math.log(max(mean_home, np.finfo(float).tiny)) - theta[_INTERCEPT]
     theta[_RHO] = 0.0
@@ -306,6 +360,8 @@ def fit_dixon_coles(
     min_effective_share: float,
     warm_start: DixonColesFit | None = None,
     max_iter: int,
+    ha_mode: str = HA_GLOBAL,
+    ha_window: tuple[str, str] | None = None,
 ) -> DixonColesFit:
     """Fit the model on a training frame, weighted toward ``ref_date``.
 
@@ -358,7 +414,12 @@ def fit_dixon_coles(
     lgamma_x, lgamma_y = gammaln(x + 1.0), gammaln(y + 1.0)
     n_teams = len(teams)
 
-    theta0 = _starting_point(x, y, weights, n_teams)
+    ha_design, ha_names = ha_design_matrix(
+        fit_rows["date"], ref_date, mode=ha_mode,
+        empty_start=ha_window[0] if ha_window else None,
+        empty_end=ha_window[1] if ha_window else None,
+    )
+    theta0 = _starting_point(x, y, weights, n_teams, len(ha_names))
     if warm_start is not None:
         theta0 = _warm_start_vector(theta0, warm_start, teams)
 
@@ -367,19 +428,21 @@ def fit_dixon_coles(
         tuple(param_bounds["intercept"]),
         tuple(param_bounds["home_advantage"]),
         tuple(param_bounds["rho"]),
-    ] + [(lo_s, hi_s)] * (2 * (n_teams - 1))
+    ] + [(lo_s, hi_s)] * (2 * (n_teams - 1)) + [
+        tuple(param_bounds[name]) for name in ha_names
+    ]
     theta0 = np.clip(theta0, [b[0] for b in bounds], [b[1] for b in bounds])
 
     result = minimize(
         _objective,
         theta0,
-        args=(x, y, home_i, away_i, weights, lgamma_x, lgamma_y, n_teams),
+        args=(x, y, home_i, away_i, weights, lgamma_x, lgamma_y, n_teams, ha_design),
         method="L-BFGS-B",
         jac=True,
         bounds=bounds,
         options={"maxiter": max_iter},
     )
-    c, h, rho, attack, defence = _unpack(result.x, n_teams)
+    c, h, rho, attack, defence, ha = _unpack(result.x, n_teams, len(ha_names))
     return DixonColesFit(
         teams=teams,
         attack=attack,
@@ -396,6 +459,10 @@ def fit_dixon_coles(
         converged=bool(result.success),
         n_iterations=int(result.nit),
         cold_start_teams=cold,
+        ha_names=tuple(ha_names),
+        ha_params=tuple(float(v) for v in ha),
+        ha_mode=ha_mode,
+        ha_window=(ha_window[0], ha_window[1]) if ha_window else (None, None),
     )
 
 

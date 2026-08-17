@@ -123,6 +123,52 @@ def _dixon_coles(ctx: ArmContext) -> np.ndarray:
     return previous.predict_proba(ctx.test)
 
 
+def _dc_arm(ctx: "ArmContext", *, ha_mode: str) -> np.ndarray:
+    """Shared body for the production model and its home-advantage variants.
+
+    One function so the variants cannot drift from the baseline in any way other than the seam —
+    which is what makes the paired delta attributable to the seam alone.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    window = (model.seams.get("home_advantage") or {})
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+            ha_mode=ha_mode,
+            ha_window=(window.get("empty_start"), window.get("empty_end")),
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
+
+
+@register("ha-trend")
+def _ha_trend(ctx: ArmContext) -> np.ndarray:
+    """Home advantage carries a linear trend, so the forecast uses its CURRENT value."""
+    return _dc_arm(ctx, ha_mode="trend")
+
+
+@register("ha-empty")
+def _ha_empty(ctx: ArmContext) -> np.ndarray:
+    """Home advantage carries an explicit behind-closed-doors term."""
+    return _dc_arm(ctx, ha_mode="empty")
+
+
+@register("ha-both")
+def _ha_both(ctx: ArmContext) -> np.ndarray:
+    return _dc_arm(ctx, ha_mode="trend+empty")
+
+
 @register("elo-dc")
 def _elo_dixon_coles(ctx: ArmContext) -> np.ndarray:
     """Dixon-Coles parameterised by one Elo rating difference — the single-scalar comparison.

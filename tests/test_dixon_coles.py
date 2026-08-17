@@ -85,7 +85,8 @@ def test_analytic_gradient_matches_finite_differences(seed: int) -> None:
     x = rng.poisson(1.5, n).astype(float)
     y = rng.poisson(1.1, n).astype(float)
     weights = rng.uniform(0.2, 1.0, n)
-    args = (x, y, home, away, weights, gammaln(x + 1), gammaln(y + 1), n_teams)
+    args = (x, y, home, away, weights, gammaln(x + 1), gammaln(y + 1), n_teams,
+            np.zeros((n, 0)))
 
     theta = np.concatenate([
         [rng.uniform(-0.3, 0.5)], [rng.uniform(0.0, 0.4)], [rng.uniform(-0.12, 0.12)],
@@ -117,7 +118,7 @@ def test_strengths_sum_to_zero_by_construction() -> None:
 
 def test_unpack_applies_the_constraint() -> None:
     theta = np.array([0.1, 0.2, -0.05, 0.3, -0.1, 0.2, 0.4])   # 3 globals + 2 free A + 2 free D
-    _, _, _, attack, defence = _unpack(theta, n_teams=3)
+    _, _, _, attack, defence, _ = _unpack(theta, n_teams=3)
     assert attack.tolist() == pytest.approx([0.3, -0.1, -0.2])
     assert defence.tolist() == pytest.approx([0.2, 0.4, -0.6])
 
@@ -350,7 +351,7 @@ def test_the_likelihood_refuses_an_invalid_rho() -> None:
     home = np.arange(n) % 4
     away = (home + 1) % 4
     weights = np.ones(n)
-    args = (x, y, home, away, weights, gammaln(x + 1), gammaln(y + 1), 4)
+    args = (x, y, home, away, weights, gammaln(x + 1), gammaln(y + 1), 4, np.zeros((n, 0)))
     # High rates plus a large positive rho drives tau(0,0) negative.
     theta = np.array([1.0, 0.0, 0.45, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
     value, grad = _objective(theta, *args)
