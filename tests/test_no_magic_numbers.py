@@ -32,12 +32,21 @@ ALLOWED: frozenset[float] = frozenset({0, 1, 2, 3, -1})
 
 MARKER = "# MATH:"
 
-# Files exempt from the scan, each with the reason. The only admissible reason is a requirement
-# that overrides this one; "it was inconvenient" is not a reason.
-VERBATIM_PORTS: dict[str, str] = {
-    # eval/metrics.py, once ported: it is copied verbatim from the WC2026 project and is
-    # byte-identity tested against it, so its bootstrap defaults cannot be edited to add markers.
-    # A companion test asserts every call site passes n_boot/seed explicitly from config.
+# Verbatim ports: file -> (reason, the specific literals that file is licensed to contain).
+#
+# The licence is per-literal, not per-file, so a NEW magic number in a ported file still fails.
+# Exempting the whole file would put the project's most load-bearing module permanently outside
+# the check. The only admissible reason is a requirement that overrides this one; "it was
+# inconvenient" is not a reason.
+VERBATIM_PORTS: dict[str, tuple[str, frozenset[float]]] = {
+    "eval/metrics.py": (
+        "Ported verbatim from the WC2026 project and byte-identity tested against it, so the "
+        "ported functions' code lines must not be edited — not even to add markers, which would "
+        "make a future diff against the source noisier. A companion test asserts every "
+        "paired_delta call site passes n_boot and seed explicitly from config.",
+        # EPS clip; the 1/2 in the RPS formula; the bootstrap default; the 95% CI percentiles.
+        frozenset({1e-15, 0.5, 10000, 2.5, 97.5}),
+    ),
 }
 
 # Compound statements whose span must not be treated as a single markable statement — a marker on
@@ -84,12 +93,13 @@ def _documented_constant_lines(source: str, tree: ast.AST) -> set[int]:
         if not names or not all(n.id.isupper() for n in names):
             continue
         own = lines[node.lineno - 1] if node.lineno <= len(lines) else ""
-        prev = ""
+        # Walk back past blank lines and sibling constant assignments: one comment above a block
+        # of related constants documents all of them, which is how they are naturally written.
+        sibling_lines = {n.lineno for n in tree.body if isinstance(n, (ast.Assign, ast.AnnAssign))}
         idx = node.lineno - 2
-        while idx >= 0 and not lines[idx].strip():
+        while idx >= 0 and (not lines[idx].strip() or (idx + 1) in sibling_lines):
             idx -= 1
-        if idx >= 0:
-            prev = lines[idx].strip()
+        prev = lines[idx].strip() if idx >= 0 else ""
         if "#" not in own and not prev.startswith("#"):
             continue  # an undocumented constant is still a magic number, just relocated
         for child in ast.walk(value):
@@ -98,10 +108,13 @@ def _documented_constant_lines(source: str, tree: ast.AST) -> set[int]:
     return allowed
 
 
-def find_violations(source: str, filename: str = "<source>") -> list[str]:
+def find_violations(
+    source: str, filename: str = "<source>", *, extra_allowed: frozenset[float] = frozenset()
+) -> list[str]:
     """Numeric literals in ``source`` that no rule licenses, as human-readable messages."""
     tree = ast.parse(source, filename=filename)
     licensed = _marked_lines(source, tree) | _documented_constant_lines(source, tree)
+    allowed = ALLOWED | extra_allowed
     lines = source.splitlines()
 
     violations: list[str] = []
@@ -112,7 +125,7 @@ def find_violations(source: str, filename: str = "<source>") -> list[str]:
         # bool is a subclass of int; True/False are not magic numbers.
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             continue
-        if value in ALLOWED or node.lineno in licensed:
+        if value in allowed or node.lineno in licensed:
             continue
         text = lines[node.lineno - 1].strip() if node.lineno <= len(lines) else ""
         violations.append(f"{filename}:{node.lineno}: bare literal {value!r} in `{text}`")
@@ -130,17 +143,33 @@ def test_no_magic_numbers_in_model_and_eval() -> None:
     violations: list[str] = []
     for path in scanned_files():
         rel = path.relative_to(REPO_ROOT / "src" / "plmodel").as_posix()
-        if rel in VERBATIM_PORTS:
-            continue
-        violations.extend(find_violations(path.read_text(encoding="utf-8"), rel))
+        _, extra = VERBATIM_PORTS.get(rel, ("", frozenset()))
+        violations.extend(
+            find_violations(path.read_text(encoding="utf-8"), rel, extra_allowed=extra)
+        )
     assert not violations, "magic numbers must live in config.yaml:\n  " + "\n  ".join(violations)
 
 
 def test_every_exemption_carries_a_reason() -> None:
     """An exemption without a stated reason is a hole, not an exemption."""
-    for name, reason in VERBATIM_PORTS.items():
+    for name, (reason, literals) in VERBATIM_PORTS.items():
         assert reason.strip(), f"{name} is exempt with no reason given"
+        assert literals, f"{name} is exempt but licenses no literals; drop the entry"
         assert (REPO_ROOT / "src" / "plmodel" / name).exists(), f"stale exemption: {name}"
+
+
+def test_exemptions_do_not_license_unused_literals() -> None:
+    """A licensed literal that no longer appears is a stale hole; remove it."""
+    for name, (_, literals) in VERBATIM_PORTS.items():
+        source = (REPO_ROOT / "src" / "plmodel" / name).read_text(encoding="utf-8")
+        present = {
+            n.value for n in ast.walk(ast.parse(source))
+            if isinstance(n, ast.Constant)
+            and isinstance(n.value, (int, float))
+            and not isinstance(n.value, bool)
+        }
+        unused = {lit for lit in literals if lit not in present}
+        assert not unused, f"{name} licenses literals it no longer contains: {sorted(unused)}"
 
 
 # --- the checker's own teeth -------------------------------------------------------------------
@@ -162,6 +191,24 @@ def test_checker_allows_marked_math() -> None:
 def test_checker_allows_documented_module_constant() -> None:
     src = "# Clip the linear predictor so the optimiser cannot overflow exp().\n_LOG_RATE_MIN = -6.0\n"
     assert not find_violations(src)
+
+
+def test_one_comment_documents_a_block_of_constants() -> None:
+    """Related constants are naturally written under a single comment."""
+    src = "# Newey-West automatic bandwidth parameters.\n_A = 4.0\n_B = 100.0\n_C = 9.0\n"
+    assert not find_violations(src)
+
+
+def test_undocumented_constant_after_a_documented_one_is_still_caught() -> None:
+    src = "# Documented.\n_A = 4.0\n\n\ndef f():\n    return 7.7\n"
+    assert find_violations(src)
+
+
+def test_extra_allowed_licenses_only_what_it_names() -> None:
+    src = "def f(n_boot=10000, other=1234):\n    return n_boot, other\n"
+    assert len(find_violations(src)) == 2
+    remaining = find_violations(src, extra_allowed=frozenset({10000}))
+    assert len(remaining) == 1 and "1234" in remaining[0]
 
 
 def test_checker_rejects_undocumented_module_constant() -> None:
