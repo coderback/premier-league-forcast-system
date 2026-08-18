@@ -3,17 +3,21 @@
 # Only names that differ from their canonical form belong here. A name absent from this file must
 # already be on the roster, or ingest raises.
 #
-# Currently empty for football-data.co.uk: all 116 spellings across E0-E3 1993/94-2025/26 are
-# internally consistent, so each is its own canonical name (verified 2026-08-17). This file exists
-# and is loaded anyway, because the moment a second source arrives it stops being empty:
+# football-data.co.uk needs no entries: all 116 spellings across E0-E3 1993/94-2025/26 are
+# internally consistent, so each is its own canonical name (verified 2026-08-17).
 #
-#   Understat and the FPL API use full club names ("Manchester United", "Wolverhampton
-#   Wanderers", "Nottingham Forest") where football-data.co.uk uses short ones ("Man United",
-#   "Wolves", "Nott'm Forest"). Those mappings are added when those loaders land, NOT guessed now
-#   — an unverified alias is worse than a missing one, because it fails silently.
+# Understat (via the Kaggle mirror, see data/xg.py) uses full club names where football-data.co.uk
+# uses short ones. These six are the complete set of differences across the 33 clubs appearing in
+# the xG corpus — verified by set difference against the roster, not guessed, and the join is then
+# checked match-by-match against goals we already hold from an independent source.
 #
 # Never add a fuzzy or approximate match. If two spellings might be the same club, verify it and
 # write the mapping explicitly; if they are different clubs (Wimbledon / AFC Wimbledon / Milton
 # Keynes Dons), they stay separate.
 
-{}
+Manchester City: Man City
+Manchester United: Man United
+Newcastle United: Newcastle
+Nottingham Forest: Nott'm Forest
+West Bromwich Albion: West Brom
+Wolverhampton Wanderers: Wolves

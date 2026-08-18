@@ -36,6 +36,11 @@ from plmodel.eval.backtest import Split, validate_splits
 from plmodel.eval.calibration import calibration_report
 from plmodel.eval.slices import add_slice_columns, all_slices
 
+# A pool weight this size or larger counts as the channel materially contributing, for
+# reporting only — nothing is gated on it. Matches the threshold the reproduction used when
+# calling a fitted weight "near zero".
+_MATERIAL_POOL_WEIGHT = 0.05
+
 # Columns that identify a match. Two arms disagreeing on these are not comparable.
 ALIGN_COLUMNS: tuple[str, ...] = ("date", "division", "home_team", "away_team")
 
@@ -169,6 +174,93 @@ def _ha_both(ctx: ArmContext) -> np.ndarray:
     return _dc_arm(ctx, ha_mode="trend+empty")
 
 
+def _pooled_channel_arm(ctx: "ArmContext", *, channel_name: str) -> np.ndarray:
+    """Goals model logarithmically pooled with a chance-creation channel.
+
+    This is the arm the plan actually specifies. Running the channel *instead of* goals is a
+    different and much weaker proposition — Pitcan's shots model loses to his goals model outright,
+    yet still earns 0.35 weight beside it, because the question is whether it carries information
+    the goals model lacks, not whether it is better on its own.
+
+    The weight is fitted **online, on forecasts this walk has already made and whose results have
+    since landed**. At each barrier the pool weight minimises log loss over every earlier barrier's
+    out-of-sample forecasts. That is leak-free by construction — those matches are all strictly
+    before the current barrier — and it is the only way to fit the weight on genuinely
+    out-of-sample predictions without surrendering a season of the test pool to a validation
+    window. Until enough resolved history has accumulated the weight is pinned at zero, which makes
+    the arm exactly the goals baseline rather than a guess.
+    """
+    from plmodel.model.channels import fit_channel_model, get_channel
+    from plmodel.model.dixon_coles import fit_dixon_coles
+    from plmodel.reproduce.pooling import fit_pair_weight, log_pool
+
+    from plmodel.model.baselines import outcomes_of
+
+    model = ctx.cfg.model
+    observation = model.seams.get("observation") or {}
+    min_history = int(observation.get("min_pool_history", 0))
+    grid = int(observation.get("pool_weight_grid", 0))
+    channel = get_channel(channel_name)
+
+    if previous_needs_refit := (ctx.state.get("goals_fit") is None or ctx.split.is_refit):
+        ctx.state["goals_fit"] = fit_dixon_coles(
+            ctx.train, half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier, max_goals=model.max_goals,
+            param_bounds=model.param_bounds, min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("goals_fit"), max_iter=model.max_iter,
+        )
+        try:
+            ctx.state["channel_fit"] = fit_channel_model(
+                ctx.train, channel=channel, half_life_days=model.decay_half_life_days,
+                ref_date=ctx.split.fit_barrier, max_goals=model.max_goals,
+                param_bounds=model.param_bounds,
+                min_effective_share=model.min_effective_share,
+                max_iter=model.max_iter, warm_start=ctx.state.get("channel_fit"),
+            )
+        except ValueError:
+            # The channel has no history yet. Recorded, and the pool falls back to goals alone
+            # rather than inventing a forecast.
+            ctx.state["channel_fit"] = None
+            ctx.state["n_barriers_without_channel"] = (
+                ctx.state.get("n_barriers_without_channel", 0) + 1
+            )
+
+    goals_probs = ctx.state["goals_fit"].predict_proba(ctx.test)
+    channel_fit = ctx.state.get("channel_fit")
+    if channel_fit is None:
+        ctx.state.setdefault("weights", []).append(0.0)
+        return goals_probs
+    channel_probs = channel_fit.predict_proba(ctx.test)
+
+    # Fit the weight on everything this walk has already forecast and seen resolved.
+    resolved = ctx.state.setdefault("resolved", [])
+    weight = 0.0
+    if resolved:
+        past_goals = np.vstack([r[0] for r in resolved])
+        past_channel = np.vstack([r[1] for r in resolved])
+        past_outcomes = np.concatenate([r[2] for r in resolved])
+        if len(past_outcomes) >= min_history:
+            weight = fit_pair_weight(
+                past_channel, past_goals, past_outcomes, n_grid=grid
+            )["weight"]
+
+    ctx.state.setdefault("weights", []).append(weight)
+    resolved.append((goals_probs, channel_probs, outcomes_of(ctx.test)))
+    return log_pool([channel_probs, goals_probs], [weight, 1.0 - weight])
+
+
+@register("dc+xg")
+def _dc_plus_xg(ctx: ArmContext) -> np.ndarray:
+    """The plan's Arm 4: expected goals as a second observation channel, log-pooled."""
+    return _pooled_channel_arm(ctx, channel_name="xg")
+
+
+@register("dc+sot")
+def _dc_plus_sot(ctx: ArmContext) -> np.ndarray:
+    """The same pool with shots on target, so the two channels can be compared directly."""
+    return _pooled_channel_arm(ctx, channel_name="sot")
+
+
 @register("elo-dc")
 def _elo_dixon_coles(ctx: ArmContext) -> np.ndarray:
     """Dixon-Coles parameterised by one Elo rating difference — the single-scalar comparison.
@@ -206,16 +298,22 @@ def _elo_dixon_coles(ctx: ArmContext) -> np.ndarray:
     return previous.predict_proba(ctx.test)
 
 
-@register("dixon-coles-sot")
-def _dixon_coles_sot(ctx: ArmContext) -> np.ndarray:
-    """The shots-on-target variant: same machinery, chance-creation target, no tau correction."""
-    from plmodel.model.shots import fit_shots_model
+def _channel_arm(ctx: "ArmContext", *, channel_name: str) -> np.ndarray:
+    """Shared body for every second-observation-channel arm.
+
+    One code path so shots on target and expected goals differ only in which columns they read —
+    which is what makes a paired delta between them attributable to the signal rather than to the
+    implementation.
+    """
+    from plmodel.model.channels import fit_channel_model, get_channel
 
     model = ctx.cfg.model
+    channel = get_channel(channel_name)
     previous = ctx.state.get("fit")
     if previous is None or ctx.split.is_refit:
-        previous = fit_shots_model(
+        previous = fit_channel_model(
             ctx.train,
+            channel=channel,
             half_life_days=model.decay_half_life_days,
             ref_date=ctx.split.fit_barrier,
             max_goals=model.max_goals,
@@ -228,6 +326,23 @@ def _dixon_coles_sot(ctx: ArmContext) -> np.ndarray:
         ctx.state.setdefault("fits", []).append(previous.channel_fit)
         ctx.state.setdefault("kappas", []).append((previous.kappa_home, previous.kappa_away))
     return previous.predict_proba(ctx.test)
+
+
+@register("dixon-coles-sot")
+def _dixon_coles_sot(ctx: ArmContext) -> np.ndarray:
+    """Shots on target as the chance-creation channel: same machinery, no tau correction."""
+    return _channel_arm(ctx, channel_name="sot")
+
+
+@register("dixon-coles-xg")
+def _dixon_coles_xg(ctx: ArmContext) -> np.ndarray:
+    """Expected goals as the chance-creation channel.
+
+    Note the asymmetry with the goals model: xG exists only from 2015/16, so this arm trains on a
+    far shorter history than its baseline, and after 2023/24 its most recent xG is stale. Both are
+    properties of the source, not of the method, and both are reported.
+    """
+    return _channel_arm(ctx, channel_name="xg")
 
 
 @dataclass(frozen=True)
@@ -254,6 +369,7 @@ class ArmResult:
     fit_summary: dict[str, object] | None = None
     vs_baseline: dict[str, float] | None = None
     vs_baseline_dm: dict[str, float] | None = None
+    vs_baseline_logloss: dict[str, float] | None = None
     vs_market: dict[str, float] | None = None
 
 
@@ -409,6 +525,13 @@ def run_compare(
         arm.vs_baseline_dm = metrics.diebold_mariano(
             metrics.rps(arm.probs, outcomes), metrics.rps(baseline.probs, outcomes)
         )
+        # The same pairing applied to log loss. An arm that moves one rule and not the other is
+        # saying something about where in the distribution it changed the forecast, and the
+        # acceptance rule scores RPS only — so this is reported, never gated on.
+        arm.vs_baseline_logloss = metrics.paired_delta_losses(
+            metrics.log_loss(arm.probs, outcomes), metrics.log_loss(baseline.probs, outcomes),
+            n_boot=cfg.backtest.n_boot, seed=cfg.seed,
+        )
 
     market_block = _market_block(results, market_probs, covered, outcomes, cfg)
     fdr = _fdr_block(results, cfg)
@@ -438,6 +561,25 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
     """
     fits = state.get("fits")
     if not fits:
+        # A pooled arm keeps its own state shape; its weight trajectory is the whole diagnostic,
+        # because a pool whose weight sat at zero is indistinguishable from the baseline and its
+        # null says nothing about the channel.
+        weights = state.get("weights")
+        if weights:
+            w = np.asarray(weights, dtype=float)
+            return {
+                "kind": "pool",
+                "n_barriers": int(w.size),
+                "weight_on_channel": {
+                    "mean": float(w.mean()), "min": float(w.min()), "max": float(w.max()),
+                    "final": float(w[-1]),
+                    "share_zero": float((w == 0.0).mean()),
+                    f"share_above_{_MATERIAL_POOL_WEIGHT}": float(
+                        (w > _MATERIAL_POOL_WEIGHT).mean()
+                    ),
+                },
+                "barriers_without_channel": int(state.get("n_barriers_without_channel", 0)),
+            }
         return None
     rho = np.array([f.rho for f in fits])
 
@@ -587,6 +729,7 @@ def report_json(report: CompareReport) -> dict[str, object]:
                 "pooled": arm.pooled,
                 "vs_baseline": arm.vs_baseline,
                 "vs_baseline_dm": arm.vs_baseline_dm,
+                "vs_baseline_logloss": arm.vs_baseline_logloss,
                 "vs_market": arm.vs_market,
                 "calibration": {
                     outcome: block["decomposition"]

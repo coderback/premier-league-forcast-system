@@ -171,7 +171,16 @@ model:
   seams:
     covariates: []                      # extra additive strength terms
     dynamics: {enabled: false}          # score-driven / GAS time-varying states
-    observation: {channels: [goals]}    # add xG or shots-on-target as a second channel
+    # Second observation channel, log-pooled with goals. `channels: [goals]` is off.
+    observation:
+      channels: [goals]
+      # Resolved out-of-sample matches required before the pool weight is fitted at all; below
+      # this the weight is pinned at zero and the arm IS the goals baseline. One full season, so
+      # the weight is never chosen from a handful of matches.
+      min_pool_history: 380
+      # Grid density for the weight search. The weight is bounded in [0, 1] and the log-loss
+      # surface is smooth, so 101 points resolves it to 0.01 — finer than the question needs.
+      pool_weight_grid: 101
     ensemble: {enabled: false}          # blend with an ML goals regressor
     # global | trend | empty | trend+empty. See model/home_advantage.py.
     # The empty-stadium window is CAUSAL — every match played without a crowd — not fitted to

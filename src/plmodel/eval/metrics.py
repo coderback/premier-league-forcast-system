@@ -255,6 +255,37 @@ def diebold_mariano(
     }
 
 
+def paired_delta_losses(
+    loss_a: np.ndarray, loss_b: np.ndarray, *, n_boot: int, seed: int
+) -> dict[str, float]:
+    """Paired percentile bootstrap over any per-match loss, not just RPS.
+
+    Same construction as :func:`paired_delta` and the same sign convention (negative favours A),
+    generalised so log loss can be compared with the same pairing that makes the RPS comparison
+    sensitive. Reported alongside RPS because the two rules can genuinely disagree: Wheatcroft
+    (2019) argues the log score is the more sensitive discriminator, and an arm that moves one and
+    not the other is telling you something about *where* it changed the forecast.
+    """
+    a = np.asarray(loss_a, dtype=float)
+    b = np.asarray(loss_b, dtype=float)
+    if a.shape != b.shape or a.ndim != 1:
+        raise ValueError(f"losses must be matching 1-D arrays; got {a.shape} and {b.shape}")
+    diffs = a - b
+    n = diffs.shape[0]
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n, size=(int(n_boot), n))
+    boot_means = diffs[idx].mean(axis=1)
+    lo, hi = np.percentile(boot_means, [2.5, 97.5])
+    return {
+        "n": int(n),
+        "delta": float(diffs.mean()),
+        "ci_low": float(lo),
+        "ci_high": float(hi),
+        "p_a_better": float(np.mean(boot_means < 0.0)),
+        "n_boot": int(n_boot),
+    }
+
+
 def benjamini_hochberg(p_values: dict[str, float] | np.ndarray, *, alpha: float) -> dict:
     """Benjamini-Hochberg FDR control across a family of arms.
 

@@ -1242,3 +1242,195 @@ silently revisited later.
 `robots.txt` is checked before any automated collection, and a `Disallow` is treated as decisive
 regardless of whether the pages happen to respond. That is why Understat was not scraped even
 though its match pages were readable two days ago.
+
+---
+
+## 2026-08-18 — UNBLOCKED, Arm 4: an xG source, obtained and validated
+
+The blocker recorded earlier today is resolved. Understat is still not scrapeable — its
+`robots.txt` remains `Disallow: /` and its match pages still 404 — so the figures come instead
+from a Kaggle dataset published under an explicit licence, which is a different artefact obtained
+on different terms. That distinction was put to the project owner and this route chosen
+deliberately.
+
+    dataset : yarknyorulmaz/understat-match-team-metrics-dataset-epl-v16-v24
+    licence : Open Database License (ODbL)
+    source  : understat.com, mirrored
+    coverage: 3,420 Premier League matches, 2015/16 -> 2023/24
+
+### Validated against a source we already hold, not taken on trust
+
+Joined to the football-data.co.uk corpus on teams and date:
+
+| check | result |
+|---|---|
+| join on date + teams | 3,394 of 3,420 exact; **all 26 remaining resolve at exactly ±1 day** |
+| **goals, both sides** | **3,394 / 3,394 identical** |
+| shots on target | 98.0% / 98.2% identical |
+| xG calibration | mean home xG 1.567 vs 1.555 goals scored; away 1.260 vs 1.266 |
+
+The goals agreement is the load-bearing one: a mirror that had been mangled, misaligned or
+fabricated would fail it instantly. It is therefore enforced on **every** joined row at load time
+rather than checked once here — `attach()` raises if any match's score disagrees. The ±1 day
+tolerance exists because Understat timestamps by kickoff and football-data.co.uk by calendar date;
+exact dates are tried first, so a fixture cannot steal another meeting's xG.
+
+The xG calibration is a second, independent reassurance: unbiased against realised goals to within
+0.012, which is what a competent xG model should look like and what a corrupted feed would not.
+
+Six team names needed aliases (`Manchester United` -> `Man United` and five siblings) — derived by
+set difference against the roster rather than guessed, and then confirmed by the score check.
+
+### The coverage cliff, and what it does to the arm
+
+xG runs 2015/16 to 2023/24. Against the test span that is **8 of 10 seasons, 3,040 of 3,800
+matches**, with nothing for 2024-25, 2025-26, or the 2026/27 season the model must score live.
+
+This does **not** stop the arm running on the full span. The channel model estimates team strengths
+*from* xG and then predicts goals, so prediction needs only team identities — a 2025-26 barrier
+still yields a forecast, just one whose xG information stops in May 2024. Both framings are
+therefore reported, and they answer different questions:
+
+* **covered subset (2016-17..2023-24)** — does the xG channel carry information *when it exists*?
+  This is the scientific question and the primary result.
+* **full test span** — what would production get from this source *today*? This is the
+  operational question, and it is expected to be worse because the channel goes stale.
+
+Even a win on both would not license wiring xG into production for 2026/27: there is no live feed.
+An adopted-but-unrunnable arm would be a reason to buy one, not a reason to claim an improvement.
+
+### Pre-registration, Arm 4
+
+**Hypothesis.** A chance-creation channel built on xG lowers pooled RPS against the goals-only
+production model on the xG-covered subset.
+
+**Arm.** `dixon-coles-xg`: identical machinery to the baseline, fitted to xG counts instead of
+goals, converted back to goal rates by a league-wide finishing factor, with the τ correction
+dropped because it would have been estimated against a different quantity. This is Pitcan's §5.3
+specification with xG substituted for shots on target, and it shares one code path with
+`dixon-coles-sot` so the two differ only in which columns they read.
+
+**Bar.** The standing rule — paired-bootstrap delta favourable (95% CI excludes 0 or
+P(better) ≥ 0.95) and no degradation against the market — with `dixon-coles-sot` run alongside as a
+third arm so BH-FDR applies across the family and the two channels can be compared directly.
+
+**Prediction, from the reproduction.** It should **pass gate 1 and leave the market gap untouched**:
+the reproduction found chance-creation carries information the goals model lacks (pool weight
+0.17–0.63 depending on decay) while earning 0.000 against the price. I expect xG to beat shots on
+target, since xG is the refinement shots-on-target proxies for. Magnitude −0.001 to −0.004 on the
+covered subset.
+
+**Two known handicaps, recorded before the run so they are not excuses afterwards.**
+The xG arm trains on 2015/16 onward where the goals model trains from 1993, so it has roughly a
+fifth of the history at every barrier. And xG is continuous, so applying a Poisson likelihood to it
+is an approximation — routine in this literature, but an approximation. Both bias *against* the
+arm, so a win would be despite them.
+
+**What a null will mean.** Given the reproduction measured real incremental information in the
+chance-creation signal, a null here would most likely indict the short training history or the
+staleness rather than the signal — and the covered-subset-versus-full-span split is what will
+separate those two explanations.
+
+---
+
+## 2026-08-18 — RESULT, Arm 4: NULL, and a qualification of the paper's own headline diagnostic
+
+**Primary — the xG-covered subset (2016-17..2023-24, 3,040 matches, 930 barriers):**
+
+```
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+dixon-coles        0.1979    0.9596   17.6%   0.00221    +0.0074   (baseline)
+dc+xg              0.1975    0.9578   17.8%   0.00199    +0.0071   -0.0004 [-0.0012, +0.0003] P=0.860
+dc+sot             0.1979    0.9597   17.6%   0.00206    +0.0074   +0.0001 [-0.0001, +0.0002] P=0.276
+```
+
+**Secondary — the full test span (3,800 matches), where xG is stale after May 2024:**
+
+```
+dc+xg              0.2004    0.9712   16.2%   +0.0084   -0.0001 [-0.0008, +0.0005] P=0.630
+dc+sot             0.2005    0.9719   16.1%   +0.0082   +0.0000 [-0.0001, +0.0002] P=0.370
+```
+
+Both arms rejected on both pools; Benjamini–Hochberg rejects 0 of 2.
+
+### The arm ran the right comparison the second time
+
+The first run tested each channel as a **replacement** for the goals model, which is not Arm 4 and
+is a much weaker proposition: `dixon-coles-xg` alone scores 0.2020 against the baseline's 0.2005
+(+0.0015, P=0.024 — decisively worse), and shots on target worse still at 0.2031. Pitcan's shots
+model loses to his goals model outright too. The question was never whether the channel wins alone;
+it is whether it carries information the goals model lacks *beside* it. Corrected to a logarithmic
+pool before anything was concluded.
+
+The pool weight is fitted **online, on forecasts the walk has already made and whose results have
+since landed** — at each barrier the weight minimises log loss over every earlier barrier's
+out-of-sample predictions. Leak-free by construction, and it avoids surrendering a season of the
+test pool to a validation window, which mattered because xG begins with 2015/16 and there is no
+earlier xG history to fit a weight on.
+
+### The pool is emphatically not degenerate
+
+| arm | mean weight on channel | max | share of barriers above 0.05 |
+|---|---|---|---|
+| `dc+xg` | **0.457** | 0.618 | 91% |
+| `dc+sot` | 0.103 | 0.305 | 80% |
+
+**xG earns 4.4× the weight of shots on target**, confirming the pre-registered expectation that xG
+would beat the proxy it refines. The shots weight of 0.103 also lands near the reproduction's 0.170
+at this half-life, so the two independent estimates agree.
+
+### The finding: a 0.46 pool weight buys 0.0004 RPS
+
+This is the part worth keeping. By the predictive-likelihood criterion the xG channel carries
+**substantial** information the goals model lacks — nearly half the pooled forecast. The resulting
+improvement is **−0.0004 RPS (P=0.860) and −0.0017 log loss (P=0.910)**, neither reaching the bar.
+
+Pitcan proposes the pooling weight as the quantity that "should be the headline diagnostic in this
+literature", in place of accuracy quoted beside a market figure. Measured here, the weight answers
+*"does this channel carry information the other lacks?"* — and answers it well. It does **not**
+answer *"does using it improve the forecast?"*, and the gap between those two questions is an order
+of magnitude. Two forecasts that are highly correlated can pool near 50/50 and barely move any
+score, because the pool mostly re-expresses what both already agreed on.
+
+That is a qualification of the paper's central methodological proposal, found by running it rather
+than by reading it, and it is the kind of thing only a reproduction surfaces.
+
+### Staleness is real, and the pre-registered split separated it
+
+The pre-registration said the covered-subset-versus-full-span contrast would distinguish "the
+signal is weak" from "the signal is stale". It did: `dc+xg` strengthens from **P=0.630 on the full
+span to P=0.860 on the covered subset**, and its market gap moves from degrading (+0.0084 against
++0.0082) to improving (+0.0071 against +0.0074). The channel does more when its data is current,
+which is exactly what a staleness explanation predicts and what a weak-signal explanation would
+not.
+
+`dc+xg` is on that basis the strongest arm this project has tested — and it still fails.
+
+### Against the reproduction's prediction
+
+The reproduction predicted the channel would pass gate 1 and leave the market gap untouched. Both
+halves are wrong in an interesting way: it **failed** gate 1 (P=0.860 < 0.95), and on the covered
+subset it **improved** the market gap rather than leaving it flat. The pooling weight transferred
+from Serie A to the Premier League; the consequence for forecast quality did not.
+
+### Scoring the prediction
+
+I predicted −0.001 to −0.004 on the covered subset with xG beating shots on target. Direction and
+ranking right, magnitude wrong by roughly an order of magnitude (−0.0004). Three arms now, three
+magnitude misses, and the two directional calls I got wrong were both on arms I expected to win.
+The pattern is consistent: **I over-predict effect sizes in this problem**, which is worth
+carrying into the remaining pre-registrations.
+
+### Two handicaps, as recorded before the run
+
+Both were declared in advance so they could not become excuses, and both still stand: the xG arm
+trains on 2015/16 onward against the goals model's 1993, roughly a fifth of the history at every
+barrier; and xG is continuous, so the Poisson likelihood is an approximation. Both bias against
+the arm, so the true effect is plausibly a little larger than measured — but not, on this evidence,
+by the order of magnitude that would change the verdict.
+
+### Production status
+
+Unchanged. Even had it passed, the xG channel could not be wired in for 2026/27: the source stops
+in May 2024 and there is no live feed. An adopted-but-unrunnable arm would have been an argument
+for buying one.

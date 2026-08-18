@@ -45,11 +45,26 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     cfg = load_config(args.config)
     divisions = tuple(args.divisions.split(",")) if args.divisions else None
     corpus, metas = load_matches(cfg, divisions=divisions, refresh=args.refresh)
+
+    # Expected goals is a separate source with its own licence, coverage and provenance, so it is
+    # attached only when its archive is present. `--with-xg` fetches it; otherwise an existing
+    # cache is reused and a missing one simply leaves the columns absent.
+    from plmodel.data import xg as xg_source
+
+    xg_coverage = None
+    if args.with_xg or xg_source.cache_path(cfg).exists():
+        if args.with_xg:
+            xg_source.download(cfg, refresh=args.refresh)
+        corpus = xg_source.attach(corpus, xg_source.load_raw(cfg))
+        xg_coverage = xg_source.coverage_summary(corpus)
+
     report = build_report(
         corpus, metas, skipped=corpus.attrs.get("skipped_seasons"), cfg=cfg
     )
 
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    if xg_coverage is not None:
+        report["expected_goals"] = xg_coverage
     report_path = cfg.output_dir / "coverage.json"
     report_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
@@ -123,6 +138,14 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
     corpus, matches = _load_corpus(cfg)
     span = cfg.backtest.sensitivity_span if args.sensitivity else cfg.backtest.test_span
+    if args.first_season or args.last_season:
+        # Narrowing the pool is sometimes necessary — a channel that only covers part of the span
+        # cannot be judged where it does not exist — so it is an explicit flag that lands in the
+        # report rather than a quiet edit to config.
+        from plmodel.config import SeasonSpan
+
+        span = SeasonSpan(args.first_season or span.first_season,
+                          args.last_season or span.last_season)
     splits = _build_splits(cfg, matches, span=span)
     report = run_compare(
         matches, splits, cfg, arm_names,
@@ -457,6 +480,8 @@ def build_parser() -> argparse.ArgumentParser:
     pi = sub.add_parser("ingest", help="fetch + cache + validate the corpus; emit coverage report")
     pi.add_argument("--refresh", action="store_true", help="re-download cached season files")
     pi.add_argument("--divisions", default=None, help="comma-separated subset, e.g. E0,E1")
+    pi.add_argument("--with-xg", action="store_true",
+                    help="also fetch and attach expected goals (needs a Kaggle token)")
     pi.set_defaults(func=cmd_ingest)
 
     pcmp = sub.add_parser("compare", help="paired A/B of arms vs baseline, with the market gate")
@@ -464,6 +489,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="comma-separated arm names; the first is the baseline")
     pcmp.add_argument("--sensitivity", action="store_true",
                       help="run on the earlier decade instead of the test span")
+    pcmp.add_argument("--first-season", default=None, help="override the pool's first season")
+    pcmp.add_argument("--last-season", default=None, help="override the pool's last season")
     pcmp.add_argument("--out", default=None, help="report filename within the output directory")
     pcmp.set_defaults(func=cmd_compare)
 
