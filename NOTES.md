@@ -1181,3 +1181,64 @@ to classify training rows, which all lie before the barrier. No path from a resu
 forecast.
 
 Seams remain off in production; all four arms leave `dixon-coles` byte-identical.
+
+---
+
+## 2026-08-18 — BLOCKED, Arm 4: there is currently no accessible xG source
+
+Arm 4 (xG as a second observation channel) is cleared on the evidence — the `pitcan2026`
+reproduction confirmed the pattern and predicted the arm would pass gate 1 — and its *mechanism* is
+already built and tested: the log-pool weight estimator, the second-channel model, the conversion
+from a chance-creation rate to a goal rate. Only the input is missing.
+
+### What was checked, 2026-08-18
+
+| source | status |
+|---|---|
+| **Understat** `robots.txt` | **`User-agent: * / Disallow: /`** — crawling not permitted |
+| Understat `/match/{id}`, `/league/EPL/{year}` | **404** (both returned data on 2026-08-16) |
+| Understat `/office` | 307 redirect, appears to be a login portal |
+| **FBref** `/en/comps/9/Premier-League-Stats` | **403** |
+| football-data.co.uk `notes.txt` + all 132 cached files | **no xG columns for England**, confirmed |
+| **StatsBomb open data** | Premier League: **2003/04 and 2015/16 only** |
+| football-data.org API | 403 without a key |
+| local Kaggle credentials | present but a 37-byte stub, not valid JSON |
+
+This is a **material update to Correction 4**, which records Understat as the single live xG source
+following FBref's January 2026 Opta licence loss. As of today Understat's public pages 404 *and*
+its robots.txt disallows all crawling, so it is not a source this project may use regardless of
+whether the pages return. There is presently **no accessible xG source for the Premier League,
+live or archival.**
+
+Understat's pages were readable on 2026-08-16, two days before this entry, so the change is recent.
+The `/office` portal suggests access may have moved behind registration or licensing rather than
+disappearing.
+
+### Why StatsBomb does not rescue it
+
+The open-data repository would let us **train** an xG model — the research report recommends
+exactly that as the hedge for methodological control — but training is not the constraint.
+Applying an xG model needs *shot-level events for every match being forecast*, and StatsBomb
+publishes two Premier League seasons, neither inside the test decade. Our own corpus carries shot
+**counts**, not shot locations, so it cannot support an xG computation. A model with nothing to
+score is not a solution.
+
+### The arm is paused, not cancelled, and nothing is wasted
+
+Everything except the input exists and is under test: `reproduce/pooling.py` (log pool, weight
+fitting, the profile that distinguishes a genuine boundary solution from an optimiser stopping at a
+bound, the simplex extension), `model/shots.py` (the identical machinery on a chance-creation
+target, with the league-wide finishing conversion), and the `dixon-coles-sot` arm. Swapping shots
+on target for xG changes the input column and nothing else.
+
+**Shots on target remains available as the chance-creation channel** — full coverage from 2000/01,
+already ingested, and the substitution Pitcan himself makes in his §5.3. Running the arm that way
+was offered and deliberately declined in favour of obtaining real xG, so that the result speaks to
+xG specifically rather than to chance-creation channels in general. Recorded so the choice is not
+silently revisited later.
+
+### Standing note on collection ethics
+
+`robots.txt` is checked before any automated collection, and a `Disallow` is treated as decisive
+regardless of whether the pages happen to respond. That is why Understat was not scraped even
+though its match pages were readable two days ago.
