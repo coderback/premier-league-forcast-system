@@ -211,7 +211,7 @@ def test_finishing_factor_needs_coverage() -> None:
 
     empty = pd.DataFrame({"date": [], "home_goals": [], "away_goals": [],
                           "home_sot": [], "away_sot": []})
-    with pytest.raises(ValueError, match="no rows with shots-on-target"):
+    with pytest.raises(ValueError, match="no rows with sot coverage"):
         finishing_factors(empty, pd.Timestamp("2024-01-01"), 365.0)
 
 
@@ -306,3 +306,53 @@ def test_verdict_reports_the_sensitivity_range() -> None:
     ]
     result = pitcan2026.verdict(validation, {}, sensitivity)
     assert result["paper_weight_inside_our_range"] is True
+
+
+# --- the channel is a parameter, not a hardcoded column --------------------------------------
+
+def test_channel_registry_carries_both_signals() -> None:
+    """Shots on target is what we can run today; expected goals is what the plan asks for.
+
+    Wiring the channel as a parameter means acquiring xG is a configuration change rather than a
+    rewrite — which matters, because the available signal has already changed twice here.
+    """
+    from plmodel.model.channels import CHANNELS, EXPECTED_GOALS, SHOTS_ON_TARGET, get_channel
+
+    assert set(CHANNELS) == {"sot", "xg"}
+    assert SHOTS_ON_TARGET.columns == ("home_sot", "away_sot")
+    assert EXPECTED_GOALS.columns == ("home_xg", "away_xg")
+    assert get_channel("sot") is SHOTS_ON_TARGET
+
+
+def test_expected_goals_is_flagged_continuous() -> None:
+    """xG is not a count, so the Poisson likelihood is an approximation. Recorded on the spec so
+    the ledger states it when the arm eventually runs."""
+    from plmodel.model.channels import EXPECTED_GOALS, SHOTS_ON_TARGET
+
+    assert EXPECTED_GOALS.continuous is True
+    assert SHOTS_ON_TARGET.continuous is False
+
+
+def test_unknown_channel_raises() -> None:
+    from plmodel.model.channels import get_channel
+
+    with pytest.raises(ValueError, match="unknown channel"):
+        get_channel("vibes")
+
+
+def test_missing_channel_columns_raise_before_fitting() -> None:
+    """A channel whose data has not been ingested must fail loudly, not silently fit on nothing."""
+    from plmodel.model.channels import EXPECTED_GOALS, fit_channel_model
+
+    history = pd.DataFrame({
+        "date": pd.to_datetime(["2024-01-01"]), "home_team": ["A"], "away_team": ["B"],
+        "home_goals": [1.0], "away_goals": [0.0], "home_sot": [4.0], "away_sot": [3.0],
+    })
+    with pytest.raises(ValueError, match="absent from the training frame"):
+        fit_channel_model(
+            history, channel=EXPECTED_GOALS, half_life_days=365.0,
+            ref_date=pd.Timestamp("2024-02-01"), max_goals=12,
+            param_bounds={"intercept": (-2.0, 2.0), "home_advantage": (-1.0, 1.0),
+                          "rho": (-0.2, 0.2), "strength": (-3.0, 3.0)},
+            min_effective_share=0.15, max_iter=500,
+        )

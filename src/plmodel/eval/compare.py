@@ -225,7 +225,7 @@ def _dixon_coles_sot(ctx: ArmContext) -> np.ndarray:
             warm_start=ctx.state.get("fit"),
         )
         ctx.state["fit"] = previous
-        ctx.state.setdefault("fits", []).append(previous.shot_fit)
+        ctx.state.setdefault("fits", []).append(previous.channel_fit)
         ctx.state.setdefault("kappas", []).append((previous.kappa_home, previous.kappa_away))
     return previous.predict_proba(ctx.test)
 
