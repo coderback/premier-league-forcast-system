@@ -8,6 +8,7 @@ mapping rather than a default-filled object, so "not yet tuned" can never be mis
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -143,6 +144,10 @@ class Config:
     elo: EloRatingConfig
     # Sections not yet populated are carried as raw mappings so nothing invents a default.
     season: dict[str, Any] = field(default_factory=dict)
+    # sha256 of the config file as loaded. Every hyperparameter this project has lives in that
+    # file, so this one string identifies the whole specification — which is what lets a cached
+    # walk prove it was produced by the same configuration rather than merely claim it.
+    digest: str = ""
 
 
 def _require(raw: dict[str, Any], key: str) -> Any:
@@ -177,8 +182,8 @@ def load_config(path: Path | str | None = None) -> Config:
     cfg_path = Path(path) if path is not None else DEFAULT_CONFIG_PATH
     if not cfg_path.exists():
         raise ConfigError(f"config not found: {cfg_path}")
-    with cfg_path.open(encoding="utf-8") as fh:
-        raw = yaml.safe_load(fh) or {}
+    source = cfg_path.read_text(encoding="utf-8")
+    raw = yaml.safe_load(source) or {}
     if not isinstance(raw, dict):
         raise ConfigError(f"config.yaml must parse to a mapping, got {type(raw).__name__}")
 
@@ -282,4 +287,5 @@ def load_config(path: Path | str | None = None) -> Config:
         ),
         elo=EloRatingConfig(**{k: float(e[k]) for k in elo_keys}),
         season=_section(raw, "season"),
+        digest=hashlib.sha256(source.encode("utf-8")).hexdigest(),
     )

@@ -1434,3 +1434,408 @@ by the order of magnitude that would change the verdict.
 Unchanged. Even had it passed, the xG channel could not be wired in for 2026/27: the source stops
 in May 2024 and there is no live feed. An adopted-but-unrunnable arm would have been an argument
 for buying one.
+
+---
+
+## 2026-08-18 — PRE-REGISTRATION, Arm 3: score-driven dynamic team states
+
+*Written before any comparison was run on either evaluation span. The implementation existed, and
+two things had already been seen and are declared below so they cannot be quietly forgotten: an
+untuned single-season smoke run, and the opening cells of the tuning sweep.*
+
+### Hypothesis
+
+Letting each team's attack and defence move **within** the training window — a state updated after
+every match by the score of the conditional likelihood — lowers pooled RPS against the production
+model, which holds both constant and handles time variation only by down-weighting old matches.
+
+### The bar is −0.003, and this is the arm where that correction bites
+
+Correction 1 of this project's founding entry exists for this arm specifically. The research
+report's TL;DR headlines a **−0.008** gain for dynamic models, but its own §B table gives three
+rows on the same 2,660 EPL matches:
+
+| specification | ARPS |
+|---|---|
+| static bivariate Poisson | 0.2062 |
+| **semi-dynamic, DC-weighted** | **0.2014** |
+| dynamic (Koopman & Lit) | 0.1982 |
+
+Our baseline **is** the middle row — a per-team Dixon–Coles with exponential decay is exactly that
+specification, and it landed at 0.2005, right where that predicts. So the honest bar against the
+thing we actually have is **0.2014 → 0.1982 ≈ −0.003**, and the −0.008 is the distance from a
+*static* model nobody here is running. Half of the headline gain has already been collected by the
+decay. This number must not appear anywhere in this project as −0.008.
+
+That still makes it, on paper, the largest single effect left on the arm list.
+
+### What the arm does
+
+Each team carries a deviation from its fitted level, `a_i` on attack and `d_i` on defence, both
+starting at zero:
+
+```
+log lam = [c + h + A_H - D_A] + a_H - d_A
+log mu  = [c     + A_A - D_H] + a_A - d_H
+```
+
+and after the match the four states involved move by the scaled score, `s = (x - lam + dlog tau) / lam**e`:
+
+```
+a_H <- B*a_H + K*s_home      d_A <- B*d_A - K*s_home
+a_A <- B*a_A + K*s_away      d_H <- B*d_H - K*s_away
+```
+
+For a Poisson log-rate the score is `goals - expected goals`, so this reads as "a team that beats
+its expectation gets better, in proportion to how much it beat it". The mirror on defence is not a
+second assumption: `a_H` and `d_A` enter the same rate with opposite signs, so their derivatives
+are equal and opposite. This is the Generalised Autoregressive Score family (Creal, Koopman & Lucas
+2013) — the observation-driven counterpart to the latent-state model Koopman & Lit fit, which is
+what makes it affordable at 1,153 barriers.
+
+### Four design decisions, declared before the result
+
+Each could reasonably have gone the other way, so each is recorded now rather than defended later.
+
+1. **Estimation is two-stage.** Levels come from the ordinary weighted MLE, unaware that any state
+   exists; the filter runs afterwards. Koopman & Lit estimate jointly. Two-stage is less efficient
+   and it **understates the arm** — the level fit has already absorbed into a constant some of the
+   variation the states exist to explain. The bias runs against acceptance, which is the safe
+   direction, and it is what keeps the walk affordable.
+2. **The clock is team-match time, not calendar time.** A state decays when its team plays. This is
+   the Elo convention and the natural one for a rating, but it means a team idle through an
+   international break carries an undecayed state into its next fixture.
+3. **The filter re-runs at every barrier, using that barrier's level fit.** So a 1998 match is
+   scored against a level a forecaster standing in 1998 would not have had. Nothing dated at or
+   after the barrier enters anything, so the acceptance instrument sees no leakage; states are
+   filtered, levels are smoothed. Standard practice, and stated because it looks like leakage at a
+   glance.
+4. **The arm gets its own likelihood half-life, tuned separately.** Decay and dynamics are
+   *substitutes* — both exist to track time variation — so handing this arm the production 730
+   days would make the comparison a test of whose hyperparameter happened to suit whom. Exactly the
+   argument that gave `elo-dc` its own half-life. If the tuning wants a much longer half-life here,
+   that is itself the finding: the states would be doing the forgetting instead.
+
+### Tuning protocol
+
+`K`, `B`, `e` and the half-life are selected on `backtest.tuning_span` (1996-97..2005-06), the
+window neither evaluation span touches, by one shallow coordinate pass — the same protocol the
+production half-life and `elo-dc`'s K came from. `K = 0` is included as a grid point and must
+reproduce the baseline's tuning-span RPS exactly, which makes the sweep self-checking. A winner at
+a grid edge is a red flag to widen on, not a value to adopt.
+
+### Pre-registered bar
+
+The standing rule: paired-bootstrap RPS delta favourable (95% CI excludes 0 **or** P(better) ≥ 0.95)
+**and** no degradation against the Shin de-vigged market on the odds-covered subset. DM as
+corroboration. One arm, so no FDR correction applies within this family.
+
+Two confirmatory runs, both fixed now: the **test span** (2016-17..2025-26) is the gate, and the
+**sensitivity span** (2006-07..2015-16) is reported alongside it. A dynamics parameter tuned on
+2003-2006 that only works on one of two later decades is a tuning artefact, and the second run is
+what would show it.
+
+### A pre-registered sub-analysis the literature does not have
+
+The research report's §B says this outright: the theoretical case for dynamic models is that a
+state-space update *localises* information — A beating B updates A and B, where a weighted
+likelihood lets that result contaminate unrelated team C — and that this predicts the dynamic edge
+is concentrated exactly where a fitted-then-frozen strength is most out of date. It then notes that
+**no paper it found isolates the effect size by regime**, and calls that a gap worth a
+pre-registered sub-analysis.
+
+So the pool is partitioned three ways, by keys that are known before kickoff and never read off a
+result:
+
+| regime | definition | why |
+|---|---|---|
+| `early_season` | either side inside its first **6** matches of the season | the model is carrying last summer's squad into this season |
+| `post_january_window` | any match in **February** | the month after the window shuts, when mid-season signings first play |
+| `settled` | everything else | the regime where the static fit is at its freshest |
+
+Neither threshold is tuned and neither gates anything — this is a diagnostic, reported with a
+paired delta per regime. It lives in `eval/slices.py` so every future arm gets it too.
+
+**The directional prediction:** the delta is more favourable in `early_season` than in `settled`.
+If dynamics help *uniformly*, the localisation story is not the mechanism and something else is
+driving whatever gain appears. If they help *only* in `settled`, the mechanism is backwards and I
+should not believe the arm even if it passes.
+
+### What each outcome will mean
+
+* **Accept** — the first arm this project has accepted, and it would say the production model's
+  single mechanism for time variation is genuinely too blunt: form exists within a season and a
+  decayed constant cannot represent it.
+* **Null with visible states** — the reportable one. If the state dispersion is materially non-zero
+  and the forecast still does not improve, the finding is that the 730-day decay already captures
+  what is capturable, and that the extra structure is re-expressing rather than adding. That is the
+  same shape as Arm 4's result, where a 0.46 pool weight bought 0.0004 RPS, and it would make two
+  independent demonstrations of the same thing.
+* **Null with states near zero** — a broken experiment, not a result. The `dynamics` block in the
+  report exists to tell these two apart, and it is this arm's analogue of Arm 4's pool weight.
+
+### Prediction, recorded to be scored later
+
+**−0.0010 to −0.0025 on the test span, and I put 60% on it clearing gate 1.**
+
+Higher than my usual because the mechanism is the one thing the baseline structurally *cannot* do —
+Arms 1, 2 and 4 all added parameters to a structure that could already express something close, and
+all three were null. A within-season form state is a genuinely new degree of freedom.
+
+Lower than the literature's −0.003 for three reasons, one of them about me: the two-stage estimator
+gives up efficiency the joint one has; the level fit is refit at every one of 1,153 barriers where
+Koopman & Lit's is not; and **three arms have now produced three magnitude misses, all in the same
+direction — I over-predict effect sizes in this problem.** Shading a −0.003 literature figure down
+to −0.002 is that correction applied deliberately rather than after the fact.
+
+**Two things already seen, declared so they are not mistaken for foresight.** An untuned smoke run
+on 2024-25 alone (K = 0.01, B = 0.95, 380 matches) scored 0.2077 against the baseline's 0.2110 — a
+−0.0033 that is one season with no significance attached and no tuning behind it. And the first
+three cells of the tuning sweep came in at −0.0002 to −0.0004 against the inert reference, an order
+of magnitude smaller. The prediction above sits between them, closer to the sweep, because the
+sweep is 342 barriers and the smoke run is one season.
+
+**Also predicted:** the tuning will want a **longer** half-life than 730 days for this arm, because
+the states take over the job the decay was doing. If it instead wants a shorter one, the two
+mechanisms are complements rather than substitutes and I have the mechanism wrong.
+
+---
+
+## 2026-08-18 — RESULT, Arm 3: ACCEPT — the first arm to pass, and its mechanism is not the one predicted
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                   RPS  log loss   skill  vs market   vs baseline
+dixon-coles        0.2005    0.9718   16.1%    +0.0082   (baseline)
+dc-gas             0.1986    0.9667   16.9%    +0.0061   -0.0019 [-0.0032, -0.0005] P=0.995
+```
+
+**Gate 1 passes**: the 95% CI excludes zero. **Gate 2 passes**: the market gap improves from +0.0082
+to +0.0061. Diebold–Mariano corroborates independently (HLN −2.53, p=0.011), and log loss moves the
+same way (−0.0051, P=0.988). No state was ever clipped and tau stayed valid at every one of the
+~10 million filter updates.
+
+Tuned recursion: `K = 0.03`, `B = 0.99`, `e = 1.0` (inverse-information scaling), likelihood
+half-life 2555 days. Mean state dispersion 0.129 in log-goal units — the states are saying
+something, which is the precondition for the result meaning anything either way.
+
+### The pre-registered mechanism test failed, and then failed again
+
+This is the part that matters more than the verdict.
+
+| regime | test span delta | P | sensitivity span delta | P |
+|---|---|---|---|---|
+| `early_season` | **−0.00000** | 0.495 | +0.00047 | 0.379 |
+| `post_january_window` | +0.00118 | 0.288 | −0.00054 | 0.616 |
+| `settled` | **−0.00270** | 0.999 | **−0.00114** | 0.957 |
+
+The report's §B argues that a state-space model wins by *localising* information, and that this
+predicts the dynamic edge is concentrated where a fitted-then-frozen strength is most out of date —
+early season, post-transfer-window. It notes no paper isolates this, and calls it a gap worth a
+pre-registered sub-analysis. So it was pre-registered.
+
+**The gain is entirely in `settled` and exactly zero in `early_season`, on both decades
+independently.** The localisation story, as a story about *when* the edge appears, is wrong here.
+
+I also pre-registered this sentence: *"If they help only in `settled`, the mechanism is backwards
+and I should not believe the arm even if it passes."* That sentence has fired, and walking it back
+is exactly the move the pre-registration exists to prevent, so it gets argued rather than dropped.
+
+**The sentence was wrong, and the tuning said so before the result did.** It assumed the states
+would be a *form* state — fast-moving, most valuable when the level is stale. The tuning chose
+`B = 0.99`, a memory of about 69 team-matches, or nearly two seasons. A state that takes two
+seasons to move **cannot** express itself inside a team's first six matches; in the opening weeks
+it is still carrying what it learned last season, which the level fit already knows. The regime
+result is what that parameter *predicts*, and I failed to notice the implication when I read the
+tuning output.
+
+So the mechanism is not "catch form the decay missed". It is: **the level becomes a long-run
+quality estimate over seven years of history, and the state carries where a club has drifted
+relative to it.** That is a different claim from the report's, it is consistent with everything
+else measured here, and it was reached by running the sub-analysis the report said nobody had run.
+
+### The half-life crossover, which is the strongest evidence for that reading
+
+The two mechanisms are substitutes, so the arm was tuned with its own likelihood decay. Scoring the
+**static baseline at the same half-lives** turns a hyperparameter into a finding:
+
+| half-life | `dc-gas` | static baseline |
+|---|---|---|
+| 730 (production) | — | **0.20048** |
+| 1825 | 0.19849 | 0.20138 |
+| **2555** | **0.19825** | 0.20156 |
+| 3650 | 0.19837 | 0.20212 |
+| 36500 (no decay) | 0.19875 | 0.20362 |
+
+**A longer memory hurts the static model monotonically and helps the dynamic one.** Without states,
+distant matches are noise about a club that no longer exists; with them, the level can be estimated
+on everything while the state carries what changed. The states are what make old data usable, and
+that is a statement about *what* the dynamics do rather than *when* they do it.
+
+This is also the second time this project has watched a model with its own recency mechanism ask
+the layer above it to stop forgetting. `elo-dc` did the same and ran monotone to no decay at all.
+
+### The arm moves two axes, so the two axes were separated
+
+`dc-gas` differs from the production model in two ways: it has states, and it fits its level with a
+2555-day half-life rather than 730. That is deliberate and precedented — decay and dynamics are
+substitutes, so each model is tuned on its own terms, exactly as `elo-dc` was — but it means the
+headline is a two-axis change and the split has to be measured rather than asserted. A failing
+inertness test is what forced the issue: zeroing the loading alone does *not* reproduce the
+baseline, because the level fits still differ.
+
+Three configurations on the identical walk, identical splits, identical matches:
+
+```
+configuration               RPS  vs market   vs production baseline
+dixon-coles @ 730       0.20047   +0.00824   (baseline)
+dixon-coles @ 2555      0.20414   +0.01218   +0.00367 [+0.00227, +0.00506] P=0.000
+dc-gas      @ 2555      0.19860   +0.00607   -0.00187 [-0.00322, -0.00048] P=0.995
+
+states alone (dc-gas @ 2555 vs dixon-coles @ 2555): -0.00555 [-0.00751, -0.00354] P=1.000
+```
+
+**The longer memory is a handicap the arm carries, not an advantage it borrows.** Stripped of its
+states, a model fitted on seven years is worse than the production baseline by +0.0037 — nearly
+twice the size of Arm 3's entire net gain, and decisively so. The tuning window showed the same
+sign at +0.0011; on the test decade it is three times larger.
+
+So the honest decomposition of the −0.0019 headline is: **−0.0056 from the states, +0.0037 given
+back to the half-life.** Measured against a static model fitted the same way, the dynamics are
+worth about three times what the arm's gate number shows.
+
+That also sharpens the mechanism claim. It is not merely that a long memory becomes *tolerable*
+once states exist — on this decade a seven-year memory is actively bad without them, and the states
+turn it into the better configuration. The level and the state are doing genuinely different jobs:
+long-run quality, and drift away from it.
+
+**A question this raises and deliberately does not answer:** would `dc-gas` do better at 730 days,
+given how much larger the static half-life penalty is on the test decade than on the tuning window?
+That question cannot be answered here. Selecting a half-life on the test span is tuning against the
+acceptance instrument, which is the one thing this project's protocol forbids outright, and knowing
+the number is most of the way to being influenced by it. It is therefore recorded as the first item
+for the retune the acceptance rule already mandates — to be run on `tuning_span`, where the arm's
+half-life was selected against a grid that stopped at 1825 and never saw the interaction.
+
+### Robustness, and the caveat that belongs next to the headline
+
+**The sensitivity span (2006-07..2015-16) does not clear gate 1**: −0.0008 [−0.0020, +0.0003],
+P=0.927, DM p=0.117. Same sign, half the magnitude, not significant. Gate 2 is not assessable there
+— `avg_closing` begins in 2019/20.
+
+**A season jackknife on the test span** (point estimates; the CI is not recomputed):
+
+| dropped season | pooled delta over the other nine |
+|---|---|
+| none | −0.00187 |
+| 2022-23 (the arm's best) | **−0.00109** |
+| 2024-25 | −0.00154 |
+| 2020-21 (the arm's worst) | −0.00226 |
+
+One season carries about half the pooled effect. Drop it and what remains — −0.0011 — is
+essentially the sensitivity span's −0.0008.
+
+**Sign test across all twenty scored seasons**: the arm is ahead in 14 of 20 (8 of 10 on the test
+decade, 6 of 10 on the earlier one), one-sided p = 0.058. Suggestive, not decisive, and
+non-parametric, so it does not lean on the bootstrap.
+
+Putting those three together, the honest estimate is that **the true effect is nearer −0.001 than
+−0.002**, and that the test span's −0.0019 sits at the optimistic end of its own confidence
+interval's implication. The arm passes the rule the project committed to in advance. It is not a
+large effect and the entry should not be read as claiming one.
+
+### Leakage was hunted before the result was believed
+
+A single-season dry run came in at −0.0075, which is the signature this project treats as a bug
+until proven otherwise. Three checks, all before the confirmatory run:
+
+* **It does not beat the market.** Market 0.1962, `dc-gas` 0.2035 on 2024-25.
+* **The baseline was unusually stale that season** — +0.0148 against the market versus its decade
+  norm of +0.0082. 2024-25 is where a frozen strength should fail, and it did.
+* **The placebo.** The filter was fed the same fixtures with the results randomly permuted, so
+  every team kept its schedule and the scores carried no information about who played. Real results
+  gain 0.0075; **scrambled results lose 0.0061.** A gain that survived scrambling would have been
+  structural and the arm would have been wrong however good its numbers looked.
+
+The placebo is now a standing test rather than a one-off.
+
+### The tuning hit a grid edge and was not adopted until it did not
+
+The first pass put the half-life at 1825, the top of the standard grid. The project's own rule is
+that a grid-edge winner means the search never bracketed the optimum. Widened to 36500 the curve
+turns over at 2555, so the adopted value is a real interior optimum. `K` and `B` are interior too.
+`K` is weakly identified between 0.02 and 0.03 — they differ by 0.00001 RPS — so read it as "about
+0.025"; 0.03 is the grid winner and is taken for that reason alone.
+
+### Scoring the prediction
+
+I predicted **−0.0010 to −0.0025 with 60% on clearing gate 1**. The result is **−0.0019, and it
+cleared**. First magnitude hit after three consecutive misses, and it came directly from the
+correction recorded at the end of Arm 4 — the literature said −0.003, I shaded it down because I
+had over-predicted three times running, and the shading was right. That correction has now paid
+for itself once.
+
+I also predicted the tuning would want a **longer** half-life because the states take over the
+forgetting. It wanted the longest available and then some. Right for the right reason.
+
+And I got the regime prediction **wrong**, in the specific way described above. Two right, one
+wrong, and the wrong one is the more interesting.
+
+### Production status: NOT wired
+
+The acceptance rule's own last line: *"An accepted variant earns a hyperparameter retune BEFORE
+production wiring."* So `model.seams.dynamics.enabled` stays `false`. The retune is the next piece
+of work, and it is a joint one — the production half-life was selected against a model with no
+states, and this arm has just demonstrated that the presence of states changes which half-life is
+right by a factor of three and a half.
+
+### Three changes to the standing instrument, all additive
+
+* **`slice_staleness`** in `eval/slices.py` — the regime partition above, defined causally from the
+  calendar and from how many matches each side has played. Every future arm gets it.
+* **`eval/cache.py`** — a content-addressed store for a completed walk, keyed on the arm, every
+  split boundary, the identity of every match in the pool, and the **effective** configuration. A
+  mismatched entry is not stale, it is wrong, and it is ignored rather than repaired. It lets the
+  walk and the statistics run as separate processes, and it makes a sub-analysis thought of the
+  next day cost seconds instead of minutes. The fingerprint covers configuration, not source, so
+  the standing discipline is: **delete the cache when model or eval code changes.**
+* **`tests/conftest.py`** — pins the BLAS thread count. See below; this is the one that mattered.
+
+Neither the slice nor the cache changes a verdict. What was *not* done to make the runs fit:
+`n_boot` stays at 10,000 and `paired_delta` stays byte-identical to the WC2026 port. Halving the
+bootstrap would have made everything fit and would have quietly made this arm's interval
+incomparable to every other arm's — buying a green result by degrading the instrument that decides
+it.
+
+### The memory failures had nothing to do with the model, and my first two diagnoses were wrong
+
+Four runs died with `MemoryError` inside the paired bootstrap, which needs two contiguous ~300 MB
+arrays. Three explanations were tried in order, and only the last one was right:
+
+1. *"The corpus is 193 columns wide and the splitter copies it per barrier."* True, and worth
+   fixing — but trimming a frame **after** loading it reclaims almost nothing, because pandas has
+   already materialised every block. The projection has to happen in the read. Real, not the cause.
+2. *"The process grows during the walk, so give the statistics a clean heap."* Measurably false.
+   Instrumenting commit at each stage showed the process was already ~1.1 GB heavy **at import**,
+   before a single fit had run. The walk itself was nearly free.
+3. **OpenBLAS.** It allocates per-thread scratch buffers when it initialises, sized for the machine
+   rather than for the work. On this 16-core host, importing numpy/pandas/scipy/plmodel costs
+   **1,106 MB of commit**; with the thread count pinned to 1 it costs **84 MB**. A gigabyte of
+   scratch space for matrix operations this project never performs — the largest array the model
+   ever touches is the ~50x50 of a league's attack and defence parameters, far below the size where
+   threading pays, and the walk is a long sequence of tiny problems rather than a few large ones.
+
+Pinning is therefore not a workaround, it is the right configuration for this workload, and it
+removes a source of run-to-run variation in floating-point summation order as a side effect — worth
+having in a project that asserts byte-identical output in six places. Set as environment variables
+in `tests/conftest.py` rather than through `threadpoolctl`, because the allocation happens at import
+time: by the time Python can call a library function the memory is already committed.
+
+The whole suite, integration included, is green with the pin in place, and every Arm 3 number above
+was computed **without** it — so the byte-identity and determinism tests are also confirming the pin
+changed no arithmetic.
+
+**The lesson worth keeping:** two plausible diagnoses cost an hour, and both were plausible enough
+to act on without measuring. The third took one instrumented run to find. Measure the resource
+before optimising the code that appears to consume it.

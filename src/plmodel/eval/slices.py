@@ -9,6 +9,11 @@ that matter in a domestic league are:
   simply learned "the rich clubs win" would look good overall while being useless elsewhere.
 * **home/away favourite** — asks whether errors are symmetric in the direction of the mismatch.
 * **by season** — catches a result that is really an artefact of one era.
+* **staleness regime** — where a fitted-then-frozen strength is most out of date: the opening
+  weeks of a season, and the weeks after the January transfer window shuts. The research report
+  notes that the theoretical case for dynamic models predicts their edge is concentrated exactly
+  there, and that **no paper it found isolates the effect size by regime**. This partition is what
+  makes that measurable here.
 
 A slice is a diagnostic, not a gate. A model that is well calibrated overall and badly calibrated
 on promoted teams is not failing the acceptance rule; it is telling you where its next improvement
@@ -23,6 +28,20 @@ import pandas as pd
 # favourite would make the partition differ between arms, so the slices would no longer be
 # comparable. It therefore exists only where the market priced the match.
 FAVOURITE_UNPRICED = "unpriced"
+
+# The staleness partition, defined causally from the calendar and from how many matches each side
+# has played — both known before kickoff, neither read off the result.
+#
+# A team is "early season" for its first six matches: that is the window in which a model fitted
+# on history is carrying last summer's squad into this season's fixtures, and it is about a sixth
+# of a 38-match season. February is the month after the January window shuts, so it is where
+# mid-season transfers first show up on the pitch. Neither number is tuned and neither gates
+# anything; they partition a diagnostic.
+EARLY_SEASON_MATCHES = 6
+POST_WINDOW_MONTH = 2  # February, the month after the January window closes
+STALENESS_EARLY = "early_season"
+STALENESS_POST_WINDOW = "post_january_window"
+STALENESS_SETTLED = "settled"
 
 
 def promoted_teams(history: pd.DataFrame, division: str) -> dict[str, set[str]]:
@@ -70,6 +89,19 @@ def add_slice_columns(
         [n_big == 2, n_big == 1], ["big_six_derby", "big_six_vs_rest"], default="rest_vs_rest"
     )
 
+    # Priority matters: a February fixture in a team's first six matches does not exist, but an
+    # explicit order means the partition can never depend on evaluation order.
+    played = np.maximum(
+        rows["home_match_index"].to_numpy(), rows["away_match_index"].to_numpy()
+    ) if {"home_match_index", "away_match_index"} <= set(rows.columns) else None
+    if played is not None:
+        out["slice_staleness"] = np.select(
+            [played <= EARLY_SEASON_MATCHES,
+             rows["date"].dt.month.to_numpy() == POST_WINDOW_MONTH],
+            [STALENESS_EARLY, STALENESS_POST_WINDOW],
+            default=STALENESS_SETTLED,
+        )
+
     if market_probs is None:
         out["slice_favourite"] = FAVOURITE_UNPRICED
     else:
@@ -83,7 +115,9 @@ def add_slice_columns(
     return out
 
 
-SLICE_COLUMNS: tuple[str, ...] = ("season", "slice_promoted", "slice_big_six", "slice_favourite")
+SLICE_COLUMNS: tuple[str, ...] = (
+    "season", "slice_promoted", "slice_big_six", "slice_favourite", "slice_staleness",
+)
 
 
 def slice_metrics(

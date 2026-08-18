@@ -25,6 +25,7 @@ arm did, and the reason there are two gates.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable, Sequence
 
 import numpy as np
@@ -172,6 +173,51 @@ def _ha_empty(ctx: ArmContext) -> np.ndarray:
 @register("ha-both")
 def _ha_both(ctx: ArmContext) -> np.ndarray:
     return _dc_arm(ctx, ha_mode="trend+empty")
+
+
+@register("dc-gas")
+def _dc_gas(ctx: ArmContext) -> np.ndarray:
+    """The plan's Arm 3: score-driven dynamic team states on top of the fitted level.
+
+    Two things happen at every barrier and only one of them is a refit. The level parameters honour
+    the ordinary refit cadence and warm-start from the previous solution, exactly as the baseline
+    does. The **filter always re-runs**, because its whole job is to be current: a state refreshed
+    only on refit barriers would be a stale rating pretending to be a dynamic one.
+
+    The arm carries its own half-life, tuned on the tuning span. Decay and dynamics are substitutes
+    for one another, so handing this arm the production value would make the comparison a test of
+    whose hyperparameter happened to suit whom.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+    from plmodel.model.dynamics import DynamicFit, GasSpec, filter_states
+
+    model = ctx.cfg.model
+    spec = ctx.state.get("spec")
+    if spec is None:
+        spec = GasSpec.from_seam(
+            model.seams.get("dynamics") or {},
+            state_bound=model.param_bounds["gas_state"][1],
+            fallback_half_life=model.decay_half_life_days,
+        )
+        ctx.state["spec"] = spec
+
+    level = ctx.state.get("level")
+    if level is None or ctx.split.is_refit:
+        level = fit_dixon_coles(
+            ctx.train,
+            half_life_days=spec.half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("level"),
+            max_iter=model.max_iter,
+        )
+        ctx.state["level"] = level
+
+    dynamic = DynamicFit(level, filter_states(ctx.train, level, spec), spec)
+    ctx.state.setdefault("fits", []).append(dynamic)
+    return dynamic.predict_proba(ctx.test)
 
 
 def _pooled_channel_arm(ctx: "ArmContext", *, channel_name: str) -> np.ndarray:
@@ -392,13 +438,34 @@ def _pooled_block(probs: np.ndarray, outcomes: np.ndarray) -> dict[str, float]:
 
 
 def run_arm(
-    spec: ArmSpec, matches: pd.DataFrame, splits: Sequence[Split], cfg: Config
+    spec: ArmSpec,
+    matches: pd.DataFrame,
+    splits: Sequence[Split],
+    cfg: Config,
+    *,
+    cache_dir: "Path | None" = None,
 ) -> tuple[np.ndarray, dict]:
     """Run one arm over the walk.
 
     Returns the probabilities aligned to the concatenated test rows, and the arm's end state (a
     fitted arm leaves its fits there for the report).
+
+    With ``cache_dir`` set, a walk already run under the identical arm, splits, matches and
+    configuration is read back instead of refitted — see :mod:`plmodel.eval.cache` for the
+    fingerprint that makes "identical" checkable rather than assumed. This exists so the statistics
+    can be re-run without the fits, which is what makes a sub-analysis thought of after the fact
+    affordable. **Delete the cache when model or eval code changes**: the fingerprint covers
+    configuration, not source.
     """
+    if cache_dir is not None:
+        from plmodel.eval import cache
+
+        key = cache.fingerprint(spec.name, build_pool(matches, splits), splits, cfg)
+        hit = cache.load(cache_dir, spec.name, key)
+        if hit is not None:
+            probs, fit_summary = hit
+            return probs, {"from_cache": True, "fit_summary": fit_summary}
+
     forecaster = _REGISTRY[spec.forecaster]
     # The full prediction frame, for arms that need a single pass over all of it (an Elo replay is
     # causal by construction, so computing it once is both faster and safer than per barrier).
@@ -414,7 +481,12 @@ def run_arm(
                 f"arm {spec.name!r} returned {probs.shape} for {len(test)} test rows"
             )
         blocks.append(probs)
-    return np.vstack(blocks), state
+    stacked = np.vstack(blocks)
+    if cache_dir is not None:
+        from plmodel.eval import cache
+
+        cache.save(cache_dir, spec.name, key, stacked, _fit_summary(state))
+    return stacked, state
 
 
 def build_pool(matches: pd.DataFrame, splits: Sequence[Split]) -> pd.DataFrame:
@@ -466,8 +538,13 @@ def run_compare(
     history: pd.DataFrame | None = None,
     n_bins: int,
     big_six: tuple[str, ...],
+    cache_dir: "Path | None" = None,
 ) -> CompareReport:
-    """Run every arm over the walk and pair-compare them. The first arm is the baseline."""
+    """Run every arm over the walk and pair-compare them. The first arm is the baseline.
+
+    ``cache_dir`` reuses forecasts from an identical earlier walk; every guard below still runs on
+    them, so a cached comparison is checked exactly as hard as a fresh one.
+    """
     if len(arm_names) < 1:
         raise ValueError("need at least one arm")
     specs = [ArmSpec.parse(name) for name in arm_names]
@@ -498,7 +575,7 @@ def run_compare(
 
     results: list[ArmResult] = []
     for spec in specs:
-        probs, state = run_arm(spec, matches, splits, cfg)
+        probs, state = run_arm(spec, matches, splits, cfg, cache_dir=cache_dir)
         if np.isnan(probs).any():
             raise ValueError(
                 f"arm {spec.name!r} produced NaN probabilities; an arm must cover the whole pool. "
@@ -556,9 +633,14 @@ def run_compare(
 def _fit_summary(state: dict) -> dict[str, object] | None:
     """Aggregate what a fitted arm's walk produced. None for model-free arms.
 
+    A walk read from cache carries its summary rather than its fits — the fits are the expensive
+    thing the cache exists to avoid keeping — so that is returned unchanged.
+
     The rho block is the one that matters beyond diagnostics: its sign over the walk decides
     whether a negative-dependence copula arm is worth building at all.
     """
+    if state.get("from_cache"):
+        return state.get("fit_summary")
     fits = state.get("fits")
     if not fits:
         # A pooled arm keeps its own state shape; its weight trajectory is the whole diagnostic,
@@ -615,6 +697,33 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
         "rho_clamped": int(
             sum(getattr(f, "diagnostics", {}).get("rho_clamped", 0) for f in fits)
         ),
+        **_dynamics_block(fits),
+    }
+
+
+def _dynamics_block(fits: Sequence[object]) -> dict[str, object]:
+    """State dispersion over the walk — the dynamics arm's analogue of a pool weight.
+
+    Empty for every arm that carries no states. For the one that does, this is what separates "the
+    dynamics were tried and did nothing" from "the dynamics were never switched on" — the same
+    distinction ``assert_arms_differ`` exists to protect, and the one a null is worthless without.
+    """
+    states = [getattr(f, "states", None) for f in fits]
+    if not any(s is not None for s in states):
+        return {}
+    dispersion = np.array([s.dispersion for s in states if s is not None])
+    return {
+        "dynamics": {
+            "spec": fits[-1].spec.as_dict(),
+            "state_dispersion": {
+                "mean": float(dispersion.mean()),
+                "min": float(dispersion.min()),
+                "max": float(dispersion.max()),
+                "final": float(dispersion[-1]),
+            },
+            "n_state_clipped": int(sum(s.n_state_clipped for s in states if s is not None)),
+            "n_tau_invalid": int(sum(s.n_tau_invalid for s in states if s is not None)),
+        }
     }
 
 

@@ -167,10 +167,54 @@ model:
     # ha_empty is the whole crowd effect in log-goal units. The 2020-21 collapse is about
     # -0.10 on the home:away goal ratio, so 1.0 is generous in both directions.
     ha_empty: [-1.0, 1.0]
+    # Outer box on a score-driven team state (model.seams.dynamics), in log-goal units of
+    # deviation from the team's fitted level. exp(1.5) = 4.5x the team's own long-run rate, which
+    # no run of form produces; this is a divergence guard for a recursion that could in principle
+    # run away, not a lever, and every clip it makes is counted into the report.
+    gas_state: [-1.5, 1.5]
 
   seams:
     covariates: []                      # extra additive strength terms
-    dynamics: {enabled: false}          # score-driven / GAS time-varying states
+    # Score-driven (GAS) time-varying team states — see model/dynamics.py for the recursion.
+    # Each team carries a deviation from its fitted attack/defence level, updated after every match
+    # by the score of the conditional likelihood (goals minus expected goals, scaled).
+    dynamics:
+      enabled: false
+      # All four SELECTED on backtest.tuning_span (1996-97..2005-06), a window neither evaluation
+      # span touches, by one shallow coordinate pass — the same protocol the elo-dc arm's K and
+      # half-life came from. See NOTES.md for the full trace, including the first pass that landed
+      # at a grid edge and the widened grid that replaced it.
+      #
+      # score_loading K: how far one unit of relative surprise moves a state, in log-goal units.
+      # Weakly identified between 0.02 and 0.03 — the two differ by 0.00001 RPS on the tuning
+      # window, so read this as "about 0.025" rather than as a precise optimum. 0.03 is the grid
+      # winner and is taken for that reason alone. Interior: 0.005 and 0.04 are both clearly worse.
+      score_loading: 0.03
+      # persistence B: retained fraction of a state at a team's NEXT MATCH, not next day. The
+      # clock is team-match time (the Elo convention), so this is a memory of about 69 matches —
+      # nearly two seasons. Worth reading twice: the tuned recursion is a slow drift in strength,
+      # NOT a hot-streak detector, which is the shape Koopman & Lit's near-random-walk states have.
+      # Interior: 0.97 and 1.00 are both worse.
+      persistence: 0.99
+      # scaling_exponent e: the score is divided by lam**e. 0 = unit scaling, 0.5 = inverse
+      # square-root information (the Creal-Koopman-Lucas default), 1 = inverse information, which
+      # makes the update a relative surprise K*(goals/lam - 1) and so invariant to the league's
+      # scoring level. 1.0 won at every (K, B) cell of the first pass, which is what a corpus
+      # spanning 1993-2026 should prefer: scoring rates drift, and this form does not care.
+      scaling_exponent: 1.0
+      # This arm's own likelihood decay. Decay and dynamics are SUBSTITUTES for tracking time
+      # variation, so inheriting model.decay_half_life_days would make the comparison a test of
+      # whose hyperparameter happened to suit whom, exactly as it would have for elo-dc.
+      #
+      # The standard grid's answer was its own top end, 1825, which this project treats as a red
+      # flag rather than a result. Widened to 36500 the curve turns over: 0.19849 at 1825, 0.19825
+      # at 2555, 0.19837 at 3650, 0.19875 at no decay at all. So 2555 is a real interior optimum,
+      # not an unbracketed edge.
+      #
+      # The contrast that makes this more than a number: at 2555 days the STATIC model scores
+      # 0.20156 against its own 0.20048 at 730 — a longer memory HURTS it. The same longer memory
+      # helps the dynamic one. The states are what make old data usable.
+      half_life_days: 2555
     # Second observation channel, log-pooled with goals. `channels: [goals]` is off.
     observation:
       channels: [goals]

@@ -210,10 +210,29 @@ def test_acceptance_needs_both_gates(cfg) -> None:
 
 @pytest.fixture(scope="module")
 def real(cfg):
+    """The real corpus, projected to the columns this file's tests actually read.
+
+    The cached corpus carries 193 columns and materialising all of them costs ~400 MB — enough,
+    on a machine whose commit limit is already stretched, to leave the paired bootstrap unable to
+    allocate its two contiguous ~300 MB arrays. Projecting in the read rather than afterwards is
+    what fixes that; trimming a loaded frame gives back almost nothing, because pandas has already
+    built every block. Every market family is kept, so no test loses a benchmark it could ask for.
+    """
+    import pyarrow.parquet as pq
+
+    from plmodel.data.odds import FAMILIES
+
     path = cfg.cache_dir / "matches.parquet"
     if not path.exists():
         pytest.skip("run `pl ingest` first")
-    corpus = pd.read_parquet(path)
+    keep = [
+        "date", "division", "season", "played", "result",
+        "home_team", "away_team", "home_goals", "away_goals",
+        "home_match_index", "away_match_index", "home_sot", "away_sot",
+        *(column for family in FAMILIES.values() for column in family.columns),
+    ]
+    available = set(pq.ParquetFile(path).schema.names)
+    corpus = pd.read_parquet(path, columns=[c for c in keep if c in available])
     div = corpus[corpus["division"] == cfg.backtest.prediction_division]
     played = div[div["played"]].sort_values("date", kind="stable").reset_index(drop=True)
     return div, played
@@ -259,6 +278,30 @@ def test_market_lands_in_the_published_band(cfg, real) -> None:
         n_bins=cfg.audit.calibration_bins, big_six=cfg.audit.big_six,
     )
     assert 0.19 <= report.market["rps_market"] <= 0.20
+
+
+def test_the_staleness_slice_is_defined_before_kickoff(cfg) -> None:
+    """The regime partition the dynamic-model literature never isolates.
+
+    Both keys are causal: how many matches each side has already played, and what month it is.
+    Neither reads the result, so a match can be assigned to its regime the moment it is scheduled.
+    """
+    from plmodel.eval.slices import add_slice_columns
+
+    rows = pd.DataFrame({
+        "date": pd.to_datetime(["2024-08-17", "2024-02-10", "2024-11-09", "2024-02-03"]),
+        "season": ["2024-25"] * 4,
+        "home_team": ["Arsenal", "Arsenal", "Arsenal", "Everton"],
+        "away_team": ["Chelsea", "Chelsea", "Chelsea", "Fulham"],
+        "home_match_index": [1, 24, 12, 3],
+        "away_match_index": [1, 25, 13, 4],
+    })
+    out = add_slice_columns(
+        rows, history=rows.assign(division="E0"), division="E0", big_six=cfg.audit.big_six,
+    )
+    assert out["slice_staleness"].tolist() == [
+        "early_season", "post_january_window", "settled", "early_season"
+    ]
 
 
 @pytest.mark.integration
