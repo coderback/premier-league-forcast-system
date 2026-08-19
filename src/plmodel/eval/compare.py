@@ -33,7 +33,7 @@ import pandas as pd
 
 from plmodel.config import Config
 from plmodel.eval import metrics
-from plmodel.eval.backtest import Split, validate_splits
+from plmodel.eval.backtest import Split, training_frame, validate_splits
 from plmodel.eval.calibration import calibration_report
 from plmodel.eval.slices import add_slice_columns, all_slices
 
@@ -60,6 +60,11 @@ class ArmContext:
     train: pd.DataFrame
     cfg: Config
     state: dict
+    # Multi-division history for the joint-tier fit, ALREADY truncated at the barrier by
+    # ``backtest.training_frame`` -- the same guard the prediction frame goes through, so extra
+    # divisions cannot bypass the barrier just because they did not come from ``train``. None for
+    # every arm that does not ask for it.
+    tiers: pd.DataFrame | None = None
 
 
 # A forecaster returns (n, 3) probabilities for the context's test rows.
@@ -173,6 +178,72 @@ def _ha_empty(ctx: ArmContext) -> np.ndarray:
 @register("ha-both")
 def _ha_both(ctx: ArmContext) -> np.ndarray:
     return _dc_arm(ctx, ha_mode="trend+empty")
+
+
+def _tier_arm(ctx: "ArmContext", *, divisions: tuple[str, ...]) -> np.ndarray:
+    """Shared body for the joint multi-division fits.
+
+    Every parameter is estimated on the pooled frame and the forecast is made for the prediction
+    division only. There is no division term: a team's attack and defence mean the same thing
+    wherever it plays, and the opponent's parameters carry the rest, so the lower division's lower
+    scoring rate falls out of its teams having weaker attack and defence rather than needing to be
+    stated. Promotion and relegation link the two scales -- clubs that have played in both
+    divisions are the bridge, and thirty-three seasons supply plenty of them.
+
+    The one thing a pooled fit is *forced* to share is home advantage, and that is the assumption
+    worth checking rather than asserting. Measured on 2010-11 onward, the home:away goal ratio is
+    1.248 in E0 and 1.248 in E1, agreeing to four decimal places in logs (+0.2216 against +0.2219).
+    E2 is materially different at +0.1925, which is why adding it is a separate arm rather than a
+    free extension of this one.
+
+    The likelihood half-life stays at the production value. Unlike the Elo-scalar and score-driven
+    arms, more divisions is not a substitute for time decay -- it adds teams, not recency -- so
+    there is no fairness argument for giving this arm its own memory, and giving it one anyway
+    would make the delta a two-axis change. If the arm is accepted, the acceptance rule's mandated
+    retune is where the half-life gets to move.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    if ctx.tiers is None:
+        raise ValueError(
+            f"arm needs multi-division history for {list(divisions)}; pass `tiers=` to run_arm. "
+            "Refusing to fall back to the prediction division, which would silently make this arm "
+            "the baseline and turn its null into an uninformative one."
+        )
+    history = ctx.tiers[ctx.tiers["division"].isin(divisions)]
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            history,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
+
+
+@register("dc-tiers")
+def _dc_tiers(ctx: ArmContext) -> np.ndarray:
+    """The plan's Arm 8: fit the top two divisions jointly, forecast the top one.
+
+    A promoted club arrives with no top-flight form and is pinned at the league average by the
+    production model. That is not a missing feature but a wrong one: the club has just played
+    forty-six competitive matches the model refuses to look at.
+    """
+    return _tier_arm(ctx, divisions=("E0", "E1"))
+
+
+@register("dc-tiers3")
+def _dc_tiers3(ctx: ArmContext) -> np.ndarray:
+    """The same fit one division further down, where home advantage stops matching."""
+    return _tier_arm(ctx, divisions=("E0", "E1", "E2"))
 
 
 @register("dc-gas")
@@ -444,6 +515,7 @@ def run_arm(
     cfg: Config,
     *,
     cache_dir: "Path | None" = None,
+    tiers: pd.DataFrame | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Run one arm over the walk.
 
@@ -460,7 +532,10 @@ def run_arm(
     if cache_dir is not None:
         from plmodel.eval import cache
 
-        key = cache.fingerprint(spec.name, build_pool(matches, splits), splits, cfg)
+        key = cache.fingerprint(
+            spec.name, build_pool(matches, splits), splits, cfg,
+            extra=_tier_identity(tiers),
+        )
         hit = cache.load(cache_dir, spec.name, key)
         if hit is not None:
             probs, fit_summary = hit
@@ -473,8 +548,11 @@ def run_arm(
     blocks = []
     for split in splits:
         test = split.test(matches)
+        # Extra divisions go through the splitter's own truncation, never around it.
+        tier_rows = None if tiers is None else training_frame(tiers, split.barrier)
         probs = np.asarray(
-            forecaster(ArmContext(split, test, split.train(matches), cfg, state)), dtype=float
+            forecaster(ArmContext(split, test, split.train(matches), cfg, state, tier_rows)),
+            dtype=float,
         )
         if probs.shape != (len(test), metrics.AWAY + 1):
             raise ValueError(
@@ -487,6 +565,19 @@ def run_arm(
 
         cache.save(cache_dir, spec.name, key, stacked, _fit_summary(state))
     return stacked, state
+
+
+def _tier_identity(tiers: pd.DataFrame | None) -> str:
+    """What the cache must know about the multi-division frame handed to an arm.
+
+    Two runs of the same arm on the same splits can still differ if one was given a wider corpus,
+    and a cache that could not tell them apart would serve one run's forecasts under the other's
+    name. Divisions, row count and last date pin it without hashing thirty thousand rows.
+    """
+    if tiers is None:
+        return "no-tiers"
+    divisions = ",".join(sorted(tiers["division"].unique()))
+    return f"{divisions}|{len(tiers)}|{tiers['date'].max()}"
 
 
 def build_pool(matches: pd.DataFrame, splits: Sequence[Split]) -> pd.DataFrame:
@@ -539,6 +630,7 @@ def run_compare(
     n_bins: int,
     big_six: tuple[str, ...],
     cache_dir: "Path | None" = None,
+    tiers: pd.DataFrame | None = None,
 ) -> CompareReport:
     """Run every arm over the walk and pair-compare them. The first arm is the baseline.
 
@@ -575,7 +667,9 @@ def run_compare(
 
     results: list[ArmResult] = []
     for spec in specs:
-        probs, state = run_arm(spec, matches, splits, cfg, cache_dir=cache_dir)
+        probs, state = run_arm(
+            spec, matches, splits, cfg, cache_dir=cache_dir, tiers=tiers
+        )
         if np.isnan(probs).any():
             raise ValueError(
                 f"arm {spec.name!r} produced NaN probabilities; an arm must cover the whole pool. "

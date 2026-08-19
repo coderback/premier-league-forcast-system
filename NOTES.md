@@ -1934,3 +1934,262 @@ because it is not a small change: promoting `dc-gas` to production changes the b
 remaining arm is measured against, and the `seams_are_inert()` contract plus the seam-inertness
 tests are written around a production model with every seam off. That restructuring should be a
 deliberate step, not a side effect of a retune.
+
+---
+
+## 2026-08-19 — PRE-REGISTRATION, Arm 8: the joint multi-division fit
+
+*Written before any comparison was run on either evaluation span. Everything below is descriptive
+statistics on the corpus, used to define the arm; no arm result existed.*
+
+### Hypothesis
+
+Fitting the top two divisions jointly and forecasting only the top one lowers pooled RPS against
+the production model, because a promoted club stops being pinned at the league average and starts
+carrying the forty-six matches it has just played.
+
+### This is a correctness fix, not a feature, and the error it fixes is measurable
+
+The build brief calls Arm 8 "the correctness fix for ~15% of fixtures". Three measurements say the
+share is larger and the error is worse than that framing suggests.
+
+**Promoted clubs are 28% of the fixture list**, not 15% — three arrive each season and play 38
+matches each, so about 108 of 380.
+
+**The production model has almost nothing to say about them.** At the production half-life a
+promoted club carries a median of **26.7** effective (decay-weighted) matches against an
+established club's **102.7**. Twelve of the thirty promoted clubs since 2016-17 fall below the
+cold-start threshold entirely and are pinned at exactly the league average. At the 2024-25 opening
+barrier the production fit pins Ipswich; the joint fit pins no top-flight club at all.
+
+**And the league average is not a neutral prior for a promoted club, it is a badly wrong one.**
+Over the test decade a promoted club's first season returns:
+
+| | promoted club, first season | all E0 clubs |
+|---|---|---|
+| points | **34.4** | 52.6 |
+| goals for per match | **0.996** | 1.348 |
+| goals against per match | **1.763** | 1.348 |
+| relegated that season | **16 of 30** | — |
+
+That is **18.2 points below** the average strength the model assigns them, or about **−0.30 in log
+attack and +0.27 in log defence**. The production model is not merely uninformed about promoted
+clubs, it systematically overrates them, and it does so on more than a quarter of every season it
+forecasts.
+
+Adding E1 takes a promoted club's effective history from 26.7 to **111.1** — from a quarter of an
+established club's to slightly above it.
+
+### Why a pooled fit needs no division term, and the one assumption that was checked
+
+There is no division dummy. A club's attack and defence mean the same thing wherever it plays, and
+the opponent's parameters carry the rest, so E1's lower scoring rate (2.573 goals per match against
+E0's 2.799) falls out of its clubs having weaker attack and weaker defence. Promotion and
+relegation link the two scales; thirty-three seasons supply plenty of clubs that have played in
+both.
+
+The one thing a pooled fit is *forced* to share is home advantage, so that was measured rather than
+assumed:
+
+| division | home:away goal ratio | log home advantage |
+|---|---|---|
+| E0 | 1.248 | +0.2216 |
+| **E1** | **1.248** | **+0.2219** |
+| E2 | 1.212 | +0.1925 |
+
+E0 and E1 agree to four decimal places. **E2 does not**, which is exactly why it is a separate arm
+rather than a free extension — and it gives that second arm a real prediction to fail.
+
+### Arm definitions — two arms, FDR-controlled
+
+Baseline is `dixon-coles`, the production model, unchanged.
+
+* **`dc-tiers`** — joint fit on E0+E1. The primary.
+* **`dc-tiers3`** — joint fit on E0+E1+E2. Secondary, and expected to be *worse* than `dc-tiers`:
+  it adds clubs whose home advantage does not match, and most of them will never reach the top
+  flight, so it buys parameter count without buying relevance.
+
+Two arms is a family, so Benjamini–Hochberg applies across it.
+
+**The half-life stays at the production value.** Unlike the Elo-scalar and score-driven arms, extra
+divisions are not a substitute for time decay — they add clubs, not recency — so there is no
+fairness argument for a separate memory, and giving one anyway would make this a two-axis change
+of exactly the kind Arm 3 had to decompose after the fact. If the arm is accepted, the acceptance
+rule's mandated retune is where the half-life gets to move.
+
+### Pre-registered bar
+
+The standing rule: paired-bootstrap RPS delta favourable (95% CI excludes 0 **or** P(better) ≥ 0.95)
+**and** no degradation against the Shin de-vigged market on the odds-covered subset. DM as
+corroboration, BH-FDR across the two arms. Test span is the gate; the sensitivity span is reported
+beside it.
+
+### The sub-analysis, and this time it is a real falsifier
+
+Arm 3 taught this the hard way: its regime prediction was wrong because I had not thought through
+what the tuned parameters implied. Here the mechanism names the affected matches directly, so the
+sub-analysis is a genuine test rather than a hope.
+
+**The gain must concentrate in `slice_promoted == involves_promoted`.** That is where the fixed
+parameter is. If `dc-tiers` improves `established_only` by as much as it improves
+`involves_promoted`, then whatever it is doing is not the thing this arm claims to do, and the
+result should not be believed regardless of the pooled number — the extra clubs would be changing
+the fit's global scale rather than any promoted club's strength.
+
+A weaker corollary worth recording: the joint fit should **lower** the forecast strength of
+promoted clubs, so calibration on that slice should move from over-predicting their wins toward
+neutral.
+
+### Prediction, recorded to be scored later
+
+**−0.0015 to −0.0040 on the test span, and I put 70% on it clearing gate 1.**
+
+The arithmetic argues for more. Twelve of thirty promoted clubs are pinned at a prior that is wrong
+by 0.30 log-goals, on 12% of the pool outright and 28% partially; a naive calculation puts the
+available gain near −0.0036. I am shading down for the reason that has now been recorded four
+times: **I over-predict effect sizes in this problem**, and the one time I shaded deliberately
+(Arm 3) the shaded number was right.
+
+Two specific reasons to shade beyond habit. Promoted fixtures are already the *easier* half of the
+pool — baseline RPS 0.18995 on `involves_promoted` against 0.20464 on `established_only` — because
+they are often lopsided, and a match the model already gets roughly right leaves less to win. And
+the eighteen promoted clubs that are *not* pinned already carry some top-flight history, so the
+fix only bites fully on the twelve.
+
+**Also predicted:** `dc-tiers3` lands worse than `dc-tiers` and does not clear gate 1, on the E2
+home-advantage mismatch above. If `dc-tiers3` instead beats `dc-tiers`, my account of why pooling
+works is wrong — it would mean the gain comes from sheer sample size rather than from relevance,
+and that would be worth more than either arm passing.
+
+---
+
+## 2026-08-19 — RESULT, Arm 8: REJECT — the correctness fix makes the model less correct, for a reason worth having
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                   RPS  log loss   skill  vs market   vs baseline
+dixon-coles        0.2005    0.9718   16.1%    +0.0082   (baseline)
+dc-tiers           0.2012    0.9739   15.8%    +0.0097   +0.0007 [-0.0003, +0.0017] P=0.091
+dc-tiers3          0.2012    0.9737   15.9%    +0.0096   +0.0007 [-0.0004, +0.0018] P=0.110
+```
+
+Both arms fail **both** gates: worse than baseline, and the market gap degrades from +0.0082 to
++0.0097. Benjamini–Hochberg rejects 0 of 2. DM agrees (p = 0.21).
+
+**The prediction was wrong in direction, not merely in size.** I predicted −0.0015 to −0.0040 with
+70% on acceptance, off the back of the strongest arithmetic any arm in this project has had: a
+measured 18.2-point gap, 12 of 30 clubs pinned at a prior wrong by 0.30 log-goals, 28% of fixtures
+touched. Every one of those numbers was correct. The conclusion drawn from them was not.
+
+### The pre-registered falsifier fired, and it fired backwards
+
+The pre-registration said the gain **must** concentrate in `involves_promoted`, and that if it did
+not, "whatever it is doing is not the thing this arm claims to do".
+
+```
+slice                  n     baseline     arm     delta                       P
+established_only    2720      0.20464  0.20384  -0.00080 [-0.00141, -0.00018]  0.995
+involves_promoted   1080      0.18995  0.19445  +0.00450 [+0.00118, +0.00780]  0.004
+```
+
+It does not merely fail to concentrate there. **The joint fit significantly damages exactly the
+fixtures it was built to fix, and significantly helps the ones it was not.** On established
+fixtures alone it would clear gate 1.
+
+### Why: the bridge between the divisions is selection-biased
+
+A pooled fit has no division term. It learns how the two divisions compare from clubs that have
+played in both — and those are overwhelmingly **recently relegated clubs, which are the strongest
+clubs in the Championship**, because parachute payments make them so:
+
+| era | relegated clubs' ppg in E1 | other E1 clubs | edge |
+|---|---|---|---|
+| 1994-95..2005-06 | 1.525 | 1.335 | +0.189 |
+| 2006-07..2015-16 | 1.583 | 1.328 | +0.254 |
+| 2016-17..2025-26 | 1.628 | 1.332 | **+0.296** |
+
+The bridge is made of the wrong clubs, and it has been getting wronger for thirty years. The fit
+therefore reads the E0–E1 gap as **smaller than it is**, and every promoted club inherits that
+compression.
+
+Measured directly, on what each model actually says a promoted club is worth relative to the clubs
+it is about to face:
+
+| decade | truth (attack) | baseline overrates by | joint overrates by |
+|---|---|---|---|
+| 2006-07..2015-16 | −0.219 | +0.066 | **+0.064** |
+| 2016-17..2025-26 | −0.352 | +0.122 | **+0.219** |
+
+Both models overrate promoted clubs. In the modern decade the joint fit overrates them **nearly
+twice as badly** — it takes a club that is genuinely 0.352 below the clubs it will face and calls
+it 0.196 below. The baseline's crude "pin it at the league average" is *closer to the truth* than
+the joint fit's carefully-derived Championship rating.
+
+Note also the second row of that table: promoted clubs have got relatively weaker (−0.219 →
+−0.352). The real gap widened while the estimated gap narrowed.
+
+### The mechanism was predicted and then confirmed out of sample
+
+Before scoring the earlier decade, the bias table above implies a specific claim: on 2006-16 the
+joint fit's bias (+0.064) matches the baseline's (+0.066), so the promoted-slice damage should
+vanish. It does, and the sign flips:
+
+```
+                       test span 2016-26          sensitivity span 2006-16
+involves_promoted   +0.00450 (P=0.004, hurts)   -0.00102 (P=0.751, helps)
+established_only    -0.00080 (P=0.995, helps)   +0.00013 (neutral)
+pooled              +0.0007  (P=0.091)          -0.0002  (P=0.662)
+```
+
+Three independent measurements agree: the parameter bias, the growth of the bridge's selection
+edge, and the RPS slice flipping sign between decades. That is as close to a demonstrated causal
+account as this project has produced.
+
+### Why `dc-tiers3` is not worse, and why that matters
+
+I predicted E0+E1+E2 would land clearly worse than E0+E1, on the E2 home-advantage mismatch
+(+0.1925 against E0's +0.2216). It lands **identically** (+0.0007 both). Wrong, and wrong in a way
+that supports the diagnosis rather than undermining it: if the problem were sample composition or
+parameter count, a third division would have made it worse. A third division changes nothing
+because it does not touch the biased E0↔E1 bridge, which is where the damage is.
+
+### What this leaves behind, which is more than a null
+
+**The joint fit's established-club improvement is real and significant** (−0.0008, P=0.995, on 72%
+of the pool). Pooling genuinely sharpens the parameters of clubs that move between divisions and
+the scale they are measured on. The arm fails because that gain is swamped by a promoted-club
+penalty three times its size.
+
+That is a specific, testable lead rather than a consolation: **a joint fit plus an explicit
+promotion discount**. The size is measured — about **0.16 in log attack and 0.06 in log defence**
+for the modern era, and it is era-varying, so it would have to be fitted rather than fixed. That is
+the same shape as the hierarchical-shrinkage lead recorded after Arm 1, arrived at from the
+opposite direction: Arm 1 wanted per-team strengths shrunk toward a prior, and this arm has now
+measured what the prior for an arriving club should be and by how much the naive estimate misses.
+
+**And a warning that generalises past this project:** "give the model more data" is not
+automatically a correctness fix. The extra data arrives through a linking assumption, and if the
+link is estimated from a selected sample — here, the only clubs that appear in both divisions are
+the ones relegated with parachute money — then more data imports the selection bias along with the
+information. The production model's ignorance was crude but unbiased in a way the joint fit's
+knowledge is not.
+
+### Scoring the prediction
+
+Direction wrong, and the falsifier I wrote fired in the opposite direction from either outcome I
+had imagined. Five arms now: **four magnitude misses, two direction misses**, and the one
+deliberate correction (Arm 3, shading the literature down) was right.
+
+The specific error is worth naming, because it is not "I over-predicted" this time. I reasoned from
+a correct measurement of the *disease* — promoted clubs are badly mispriced — straight to the
+conclusion that a treatment aimed at it would work, without asking whether the treatment's own
+machinery was unbiased. The arithmetic in the pre-registration bounded how much was *available* to
+win. It said nothing about whether this arm could collect it, and I presented it as though it did.
+
+### Production status
+
+Unchanged. `model.seams.tiers` stays `[E0]`. The lower divisions remain ingested and are now
+reachable by any arm through `ArmContext.tiers`, which is barrier-truncated by the splitter's own
+guard, so the next attempt at this — with a promotion discount — costs a fraction of what this one
+did.

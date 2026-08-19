@@ -64,10 +64,18 @@ def config_identity(cfg: Config) -> str:
     return json.dumps(dataclasses.asdict(cfg), sort_keys=True, default=str)
 
 
-def fingerprint(arm: str, pool: pd.DataFrame, splits, cfg: Config) -> str:
-    """Identity of one arm's walk: the arm, the barriers, the matches, the configuration."""
+def fingerprint(
+    arm: str, pool: pd.DataFrame, splits, cfg: Config, *, extra: str = ""
+) -> str:
+    """Identity of one arm's walk: the arm, the barriers, the matches, the configuration.
+
+    ``extra`` carries anything an arm was handed that the four above do not describe -- currently
+    the multi-division frame the joint-tier fit trains on, which is not part of the prediction
+    pool and would otherwise be invisible to the key.
+    """
     digest = hashlib.sha256()
     digest.update(arm.encode("utf-8"))
+    digest.update(extra.encode("utf-8"))
     digest.update(cfg.digest.encode("utf-8"))
     digest.update(config_identity(cfg).encode("utf-8"))
     for split in splits:
