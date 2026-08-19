@@ -90,8 +90,16 @@ def test_the_shipped_seam_is_off_and_fully_specified(cfg) -> None:
         fallback_half_life=cfg.model.decay_half_life_days,
     )
     assert 0.0 < spec.score_loading
+    # B = 1 is a pure random walk; above it the recursion diverges, so this bound is structural.
     assert 0.0 < spec.persistence <= 1.0
-    assert spec.scaling_exponent in (UNIT_SCALING, INVERSE_SQRT_INFORMATION, INVERSE_INFORMATION)
+    # Deliberately NOT an enumeration of the three named exponents. An earlier version asserted
+    # membership of {0, 0.5, 1} — the range the Creal-Koopman-Lucas family is conventionally
+    # written in — and the retune then chose 1.5, which beats all three. That test was encoding a
+    # notational convention as if it were a constraint on the model, and it failed the moment the
+    # grid was widened past where the convention stops. Non-negative is the real requirement:
+    # a negative exponent would make a surprise in a high-scoring match count for more, inverting
+    # the scaling the family exists to apply.
+    assert spec.scaling_exponent >= UNIT_SCALING
 
 
 # --- inertness -----------------------------------------------------------------------------------

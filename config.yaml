@@ -181,40 +181,41 @@ model:
     dynamics:
       enabled: false
       # All four SELECTED on backtest.tuning_span (1996-97..2005-06), a window neither evaluation
-      # span touches, by one shallow coordinate pass — the same protocol the elo-dc arm's K and
-      # half-life came from. See NOTES.md for the full trace, including the first pass that landed
-      # at a grid edge and the widened grid that replaced it.
+      # span touches. RETUNED after the arm was accepted, as the acceptance rule requires, by
+      # coordinate cycles run to convergence rather than the single shallow pass that produced the
+      # first values. Two cycles; every axis interior. See NOTES.md for both traces.
       #
       # score_loading K: how far one unit of relative surprise moves a state, in log-goal units.
-      # Weakly identified between 0.02 and 0.03 — the two differ by 0.00001 RPS on the tuning
-      # window, so read this as "about 0.025" rather than as a precise optimum. 0.03 is the grid
-      # winner and is taken for that reason alone. Interior: 0.005 and 0.04 are both clearly worse.
-      score_loading: 0.03
+      # Weakly identified between 0.025 and 0.03 (0.19780 against 0.19781), so read it as "about
+      # 0.025". Interior: 0.015 and 0.04 are both clearly worse.
+      score_loading: 0.025
       # persistence B: retained fraction of a state at a team's NEXT MATCH, not next day. The
-      # clock is team-match time (the Elo convention), so this is a memory of about 69 matches —
-      # nearly two seasons. Worth reading twice: the tuned recursion is a slow drift in strength,
-      # NOT a hot-streak detector, which is the shape Koopman & Lit's near-random-walk states have.
-      # Interior: 0.97 and 1.00 are both worse.
-      persistence: 0.99
-      # scaling_exponent e: the score is divided by lam**e. 0 = unit scaling, 0.5 = inverse
-      # square-root information (the Creal-Koopman-Lucas default), 1 = inverse information, which
-      # makes the update a relative surprise K*(goals/lam - 1) and so invariant to the league's
-      # scoring level. 1.0 won at every (K, B) cell of the first pass, which is what a corpus
-      # spanning 1993-2026 should prefer: scoring rates drift, and this form does not care.
-      scaling_exponent: 1.0
+      # clock is team-match time (the Elo convention), so this is a memory of about 140 matches —
+      # more than three seasons. Worth reading twice: the tuned recursion is a slow drift in
+      # strength, NOT a hot-streak detector, and the retune made it slower still. Interior: 1.0
+      # (a pure random walk) is worse, so the mean reversion is doing real work.
+      persistence: 0.995
+      # scaling_exponent e: the score is divided by lam**e, so the update is K*(goals - lam)/lam**e.
+      # 0 = unit scaling, 0.5 = inverse square-root information, 1 = inverse information.
+      #
+      # The first grid was {0, 0.5, 1} — the range the Creal-Koopman-Lucas family is conventionally
+      # WRITTEN in — and 1.0 won at its edge. Widened, 1.5 wins outright and 2.0 is worse, so this
+      # is a genuine interior optimum the conventional grid could not see. Over-scaling means a
+      # goal of surprise in a low-scoring fixture moves the state further than the same surprise in
+      # a high-scoring one, beyond what inverse-information already implies.
+      scaling_exponent: 1.5
       # This arm's own likelihood decay. Decay and dynamics are SUBSTITUTES for tracking time
       # variation, so inheriting model.decay_half_life_days would make the comparison a test of
       # whose hyperparameter happened to suit whom, exactly as it would have for elo-dc.
       #
-      # The standard grid's answer was its own top end, 1825, which this project treats as a red
-      # flag rather than a result. Widened to 36500 the curve turns over: 0.19849 at 1825, 0.19825
-      # at 2555, 0.19837 at 3650, 0.19875 at no decay at all. So 2555 is a real interior optimum,
-      # not an unbracketed edge.
+      # Read this as "long, and barely identified above 2555" rather than as 7300 exactly: the
+      # tuning curve reads 0.19781 at 2555, 0.19780 at 5475, 0.19780 at 7300 and 0.19801 at no
+      # decay at all. 7300 is the grid winner and is taken for that reason alone. Interior.
       #
-      # The contrast that makes this more than a number: at 2555 days the STATIC model scores
-      # 0.20156 against its own 0.20048 at 730 — a longer memory HURTS it. The same longer memory
-      # helps the dynamic one. The states are what make old data usable.
-      half_life_days: 2555
+      # The contrast that makes this more than a number: at 7300 days the STATIC model scores
+      # 0.20264 against its own 0.20048 at 730 — a longer memory HURTS it, and by more the longer
+      # it gets. The same memory helps the dynamic one. The states are what make old data usable.
+      half_life_days: 7300
     # Second observation channel, log-pooled with goals. `channels: [goals]` is off.
     observation:
       channels: [goals]

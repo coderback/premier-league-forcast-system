@@ -1839,3 +1839,98 @@ changed no arithmetic.
 **The lesson worth keeping:** two plausible diagnoses cost an hour, and both were plausible enough
 to act on without measuring. The third took one instrumented run to find. Measure the resource
 before optimising the code that appears to consume it.
+
+---
+
+## 2026-08-19 — RETUNE, Arm 3: a more thorough search won the tuning window and lost the test span
+
+The acceptance rule's last line: *"An accepted variant earns a hyperparameter retune BEFORE
+production wiring."* Two reasons it was not a formality here — the first values came from **one**
+shallow coordinate pass, and the half-life was never re-opened after `K` and `B` moved underneath
+it.
+
+So: coordinate cycles run to convergence on `backtest.tuning_span` and nowhere else, every axis
+reported for grid-edge status.
+
+### What moved
+
+| | in force | retuned |
+|---|---|---|
+| `score_loading` K | 0.03 | **0.025** |
+| `persistence` B | 0.99 | **0.995** |
+| `scaling_exponent` e | 1.0 | **1.5** |
+| half-life | 2555 | **7300** |
+| tuning-window RPS | 0.19806 | **0.19780** |
+
+Converged in two cycles. All four axes interior at the end.
+
+**The exponent needed the grid widened, and the widening paid.** The first grid was `{0, 0.5, 1}` —
+the range the Creal–Koopman–Lucas family is conventionally *written* in — and 1.0 won at its edge.
+Extended, **1.5 wins outright (0.19780) and 2.0 is worse (0.19791)**, so it is a genuine interior
+optimum the conventional grid could not see. The grid had encoded a notational convention as if it
+were a constraint on the model. This project's edge rule has now caught the same class of error
+twice in one arm.
+
+A unit test had encoded the same convention (`assert exponent in (0, 0.5, 1)`) and failed the
+moment the grid widened. It has been replaced with the real requirement — non-negative, since a
+negative exponent would make a surprise in a high-scoring match count for *more*, inverting the
+scaling the family exists to apply.
+
+### And then the retuned configuration scored WORSE on the test span
+
+```
+configuration                          test-span delta vs baseline        DM p
+first values  (K.03 B.99 e1.0 2555d)   -0.0019 [-0.0032, -0.0005] P=0.995  0.011
+retuned       (K.025 B.995 e1.5 7300d) -0.0013 [-0.0026, -0.0000] P=0.976  0.065
+```
+
+The retune improved the tuning window by **−0.00027** and degraded the test span by **+0.0006**.
+
+That is not a contradiction, it is what a flat plateau does. The half-life curve reads 0.19781 at
+2555, 0.19780 at 5475, 0.19780 at 7300 — a **three-way tie inside 0.00001 RPS**. A more thorough
+search over a surface that flat is not extracting more signal, it is being given more opportunity
+to fit the tuning window's own noise, and the half-life it picks then has to survive on a different
+decade where the same axis is expensive. The decomposition already showed why the axis is
+dangerous: a static model at 2555 days is +0.0037 worse on the test decade than at 730, and the
+penalty grows with the memory.
+
+**The retuned values ship anyway, and that is the point.** Both configurations were selected on the
+tuning window and both are protocol-legal. Choosing between them on test-span evidence would be
+selecting a hyperparameter against the acceptance instrument, which is the one thing this project
+forbids outright — and it would be far more corrosive than the 0.0006 it would buy. The rule
+decides, not the number it produces.
+
+Recorded so the number is not quietly improved later: **the shipping configuration's gate-1 margin
+is thin.** The 95% CI upper bound is −0.000008, P(better) = 0.976, DM p = 0.065. It passes, and it
+passes by less than the configuration it replaced.
+
+### What survives both configurations
+
+The things that do not depend on which of the two ships are the things worth trusting:
+
+* **both pass both gates** — acceptance is robust to the choice;
+* **gate 2 improves either way** — the market gap goes +0.0082 → +0.0061 or +0.0068;
+* **the regime pattern replicates a third time** — `settled` −0.0020 (P=0.994), `early_season`
+  +0.0001, `post_january_window` +0.0014. Three independent runs across two decades now put the
+  entire gain outside the regimes where the literature predicts it;
+* **2022-23 still carries about half the effect** (−0.0085 of a −0.0013 pooled mean);
+* **the states are still worth several times the headline** against a static model fitted at the
+  same half-life: −0.0049 on the tuning window at 7300 days.
+
+### The generalisable lesson
+
+More hyperparameter search is not free, and on a flat surface it is worse than free. The first,
+cruder search happened to land on a better point for the era being forecast; the thorough one
+climbed 0.00027 of tuning-window noise and gave back twice that on the test decade. **The defence
+is not to search less — it is to read a plateau as a plateau.** The half-life is documented in
+`config.yaml` as "long, and barely identified above 2555", not as 7300, for exactly this reason,
+in the same spirit as the production half-life's "somewhere in 240-1095".
+
+### Production wiring is now permitted, and has not been done
+
+`model.seams.dynamics.enabled` remains `false`. The rule's precondition is satisfied — the retune
+has happened — so wiring is now a decision rather than a blocker. It is left open deliberately
+because it is not a small change: promoting `dc-gas` to production changes the baseline every
+remaining arm is measured against, and the `seams_are_inert()` contract plus the seam-inertness
+tests are written around a production model with every seam off. That restructuring should be a
+deliberate step, not a side effect of a retune.
