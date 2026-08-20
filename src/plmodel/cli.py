@@ -1,8 +1,8 @@
 """The `pl` command-line surface.
 
-Commands are registered as each phase lands. A command declared here but not yet built exits with
-a message naming the phase that builds it — an honest stub is better than a missing command,
-because `pl --help` then documents the intended surface without pretending it works.
+A command declared but not yet built exits with a message saying so — an honest stub is better
+than a missing command, because `pl --help` then documents the intended surface without pretending
+it works. Nothing is stubbed now: every command this project set out to build exists.
 """
 from __future__ import annotations
 
@@ -15,10 +15,9 @@ from plmodel import __version__
 from plmodel.config import ConfigError, load_config
 
 # The intended command surface. Entries are removed from here as they are built, so this mapping
-# is both the roadmap and the single place an unbuilt command is documented.
-_PLANNED: dict[str, str] = {
-    "simulate": "season Monte Carlo -> title / top-4 / relegation / points distribution",
-}
+# is both the roadmap and the single place an unbuilt command is documented. Empty means every
+# command the project set out to build exists.
+_PLANNED: dict[str, str] = {}
 
 # External claims this project has re-run on its own data, by paper id.
 _REPRODUCIBLE: tuple[str, ...] = ("pitcan2026",)
@@ -463,6 +462,190 @@ def cmd_live(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_simulate(args: argparse.Namespace) -> int:
+    """Monte Carlo a season's remaining fixtures, or validate the simulator against history."""
+    import pandas as pd
+
+    from plmodel.season.simulate import simulate_season
+    from plmodel.season.validate import matchweek_barriers
+
+    cfg = load_config(args.config)
+    corpus, matches = _load_corpus(cfg)
+    if args.validate:
+        return _run_validation(args, cfg, matches)
+
+    season = args.season or str(matches["season"].max())
+    division = cfg.backtest.prediction_division
+    rows = corpus[(corpus["division"] == division) & (corpus["season"] == season)]
+    rows = rows.sort_values("date", kind="stable").reset_index(drop=True)
+    if rows.empty:
+        print(f"no {division} fixtures for {season}", file=sys.stderr)
+        print("The source publishes a season's fixtures shortly before it starts.", file=sys.stderr)
+        return 2
+
+    barrier = (pd.Timestamp(args.asof) if args.asof
+               else matchweek_barriers(rows, weeks=(args.week,),
+                                       fixtures_per_week=cfg.season.fixtures_per_week)[0].date)
+    played = rows[(rows["date"] < barrier) & rows["played"]]
+    remaining = rows[rows["date"] >= barrier]
+    fit = _season_fit(cfg, matches, barrier)
+    spec = cfg.season.spec(
+        uncertainty=args.uncertainty,
+        n_replicates=args.replicates or cfg.season.n_replicates,
+    )
+    forecast = simulate_season(
+        fit, played, remaining, spec=spec, seed=cfg.seed, season=season, barrier=barrier,
+        deductions=cfg.season.points_deductions.get(season, {}),
+    )
+    _print_simulation(forecast, cfg)
+
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.output_dir / (args.out or f"simulate_{season}.json")
+    out_path.write_text(json.dumps(forecast.to_dict(), indent=2, default=str), encoding="utf-8")
+    print(f"\nreport    : {out_path}")
+    return 0
+
+
+def _season_fit(cfg, matches, barrier):
+    """The production fit at a barrier, with the standing strictly-before rule enforced."""
+    from plmodel.eval.backtest import training_frame
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    train = training_frame(matches, barrier)
+    if train.empty:
+        raise SystemExit(f"no matches before {barrier.date()} to fit on")
+    return fit_dixon_coles(
+        train, half_life_days=cfg.model.decay_half_life_days, ref_date=barrier,
+        max_goals=cfg.model.max_goals, param_bounds=cfg.model.param_bounds,
+        min_effective_share=cfg.model.min_effective_share, max_iter=cfg.model.max_iter,
+    )
+
+
+def _print_simulation(forecast, cfg) -> None:
+    import pandas as pd
+
+    probabilities = forecast.probabilities
+    index = {team: i for i, team in enumerate(forecast.teams)}
+    order = [index[t] for t in probabilities["team"]]
+    low, high = forecast.points_quantile(0.05)[order], forecast.points_quantile(0.95)[order]
+    questions = list(cfg.season.questions)
+    banked = forecast.table.set_index("team")["points"]
+
+    print(f"season    : {forecast.season}   barrier {pd.Timestamp(forecast.barrier).date()}")
+    print(f"table     : {forecast.n_played} played, {forecast.n_remaining} to play "
+          f"(horizon {forecast.horizon:.2f})")
+    print(f"replicates: {forecast.n_replicates:,}   uncertainty {forecast.uncertainty}")
+    if forecast.diagnostics["n_cold_start"]:
+        cold = ", ".join(forecast.diagnostics["cold_start_teams"])
+        print(f"cold start: {cold} - pinned at league average, so read those rows with care")
+
+    header = f"{'club':16}{'pts':>5}" + "".join(f"{q:>12}" for q in questions)
+    print(f"\n{header}{'mean pts':>10}{'90% band':>12}")
+    for row, lo, hi in zip(probabilities.itertuples(index=False), low, high):
+        cells = "".join(f"{getattr(row, q):>12.3f}" for q in questions)
+        band = f"{lo}-{hi}"
+        print(f"{row.team:16}{int(banked[row.team]):>5}{cells}{row.mean_points:>10.1f}{band:>12}")
+
+    ties = forecast.diagnostics["boundary_ties"]
+    if any(ties.values()):
+        detail = ", ".join(f"{name} {count:,}" for name, count in ties.items() if count)
+        print(f"\nplayoff clause: {detail} replicate(s) of {forecast.n_replicates:,} ended level "
+              "on points, goal difference and goals scored at a question's boundary, and were "
+              "split by a coin as the competition's neutral-venue playoff would be.")
+
+
+def _run_validation(args: argparse.Namespace, cfg, matches) -> int:
+    from plmodel.season.simulate import UNCERTAINTY_DRIFT, UNCERTAINTY_POINT
+    from plmodel.season.validate import run_span, summarise
+
+    span = (cfg.backtest.sensitivity_span if args.sensitivity else
+            cfg.backtest.tuning_span if args.tuning else cfg.backtest.test_span)
+    seasons = tuple(sorted(
+        s for s in matches["season"].unique() if span.first_season <= s <= span.last_season
+    ))
+    replicates = args.replicates or cfg.season.validation_replicates
+    specs = {
+        UNCERTAINTY_POINT: cfg.season.spec(uncertainty=UNCERTAINTY_POINT, n_replicates=replicates),
+        UNCERTAINTY_DRIFT: cfg.season.spec(uncertainty=UNCERTAINTY_DRIFT, n_replicates=replicates),
+    }
+    print(f"span      : {span.first_season}..{span.last_season}, {len(seasons)} season-years")
+    print(f"barriers  : matchweeks {list(cfg.season.validation_weeks)}, "
+          f"{replicates:,} replicates each")
+    scored = run_span(
+        matches, cfg, seasons=seasons, specs=specs, weeks=cfg.season.validation_weeks,
+        fixtures_per_week=cfg.season.fixtures_per_week, prob_floor=cfg.season.prob_floor,
+        deductions=cfg.season.points_deductions, progress=args.progress,
+    )
+    summary = summarise(scored, n_boot=cfg.backtest.n_boot, seed=cfg.seed,
+                        baseline=UNCERTAINTY_POINT)
+    _print_validation(summary, seasons)
+
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    # The scored rows, not just the summary: the sweep costs minutes and a later question about
+    # a slice should not need it run again.
+    scored.to_parquet(cfg.output_dir / (args.out or "simulate_validation.json").replace(
+        ".json", "_rows.parquet"))
+    payload = {
+        "span": [span.first_season, span.last_season],
+        "n_seasons": len(seasons),
+        "weeks": list(cfg.season.validation_weeks),
+        "n_replicates": replicates,
+        "acceptance_rule": cfg.acceptance_rule,
+        "acceptance_rule_applies": False,
+        "why_not": (
+            "The acceptance rule governs match forecasts scored by RPS against a de-vigged "
+            "market. A season forecast is a different quantity on a different unit, and this "
+            "corpus carries no outright market, so the rule's second gate has no analogue here. "
+            "What is reused is its construction: a paired bootstrap, clustered on seasons, with "
+            "a favourable delta needing a 95% interval that excludes zero or P(better) >= 0.95."
+        ),
+        "summary": summary,
+    }
+    out_path = cfg.output_dir / (args.out or "simulate_validation.json")
+    out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    print(f"\nreport    : {out_path}")
+    return 0
+
+
+def _print_validation(summary: dict, seasons: tuple[str, ...]) -> None:
+    print(f"\n{'spec':10}{'brier':>9}{'log loss':>10}{'PIT ks':>9}{'tail':>8}{'floored':>9}"
+          "   vs point (brier, clustered on seasons)")
+    for name, block in summary["specs"].items():
+        pit = block["points_pit"]
+        delta = block.get("vs_baseline")
+        against = (f"{delta['delta']:+.5f} [{delta['ci_low']:+.5f}, {delta['ci_high']:+.5f}] "
+                   f"P={delta['p_a_better']:.3f}" if delta else "(baseline)")
+        print(f"{name:10}{block['brier']:>9.5f}{block['log_loss']:>10.4f}{pit['ks']:>9.4f}"
+              f"{pit['tail_mass']:>8.3f}{block['share_floored']:>9.3f}   {against}")
+
+    print(f"\n{'spec':10}{'points log score':>18}   vs point (clustered on seasons)")
+    for name, block in summary["specs"].items():
+        delta = block.get("vs_baseline_points")
+        against = (f"{delta['delta']:+.4f} [{delta['ci_low']:+.4f}, {delta['ci_high']:+.4f}] "
+                   f"P={delta['p_a_better']:.3f}" if delta else "(baseline)")
+        print(f"{name:10}{block['points_log_score']:>18.4f}   {against}")
+    print("\n  A calibrated points forecast puts 0.20 of its PIT mass in the outer tenths; "
+          "more than that is a distribution too narrow for what happened.")
+
+    weeks = sorted(next(iter(summary["specs"].values()))["by_week"])
+    print(f"\nby horizon (Brier / PIT ks)\n{'spec':10}" +
+          "".join(f"{'week ' + str(w):>18}" for w in weeks))
+    for name, block in summary["specs"].items():
+        cells = "".join(f"{block['by_week'][w]['brier']:>10.5f}"
+                        f"{block['by_week'][w]['points_pit']['ks']:>8.3f}" for w in weeks)
+        print(f"{name:10}{cells}")
+
+    questions = list(next(iter(summary["specs"].values()))["by_question"])
+    print(f"\nby question (Brier)\n{'spec':10}" + "".join(f"{q:>14}" for q in questions))
+    for name, block in summary["specs"].items():
+        print(f"{name:10}" + "".join(
+            f"{block['by_question'][q]['brier']:>14.5f}" for q in questions))
+
+    n = len(seasons)
+    print(f"\n  {n} season-years is the sample size, not {n * 20}: one club per season wins the "
+          "title, so the rows inside a season are anything but independent.")
+
+
 def _planned(name: str) -> int:
     print(f"`pl {name}` is not built yet: {_PLANNED[name]}.", file=sys.stderr)
     return 2
@@ -519,6 +702,23 @@ def build_parser() -> argparse.ArgumentParser:
     pl_.add_argument("--score", action="store_true",
                      help="score previously frozen forecasts instead of freezing")
     pl_.set_defaults(func=cmd_live)
+
+    ps = sub.add_parser("simulate", help="Monte Carlo a season's remaining fixtures")
+    ps.add_argument("--season", default=None,
+                    help="season label (default: the latest in the corpus)")
+    ps.add_argument("--week", type=int, default=0,
+                    help="forecast from after this many matchweeks (default: preseason)")
+    ps.add_argument("--asof", default=None, help="forecast from this date instead of a matchweek")
+    ps.add_argument("--uncertainty", choices=("point", "drift"), default=None,
+                    help="override how parameter uncertainty is propagated (default: config)")
+    ps.add_argument("--replicates", type=int, default=None, help="override the replicate count")
+    ps.add_argument("--validate", action="store_true",
+                    help="score the simulator against every completed season in a span")
+    ps.add_argument("--sensitivity", action="store_true", help="validate on the earlier decade")
+    ps.add_argument("--tuning", action="store_true", help="validate on the tuning span")
+    ps.add_argument("--progress", action="store_true", help="print each barrier as it runs")
+    ps.add_argument("--out", default=None, help="report filename within the output directory")
+    ps.set_defaults(func=cmd_simulate)
 
     for name, purpose in _PLANNED.items():
         p = sub.add_parser(name, help=f"[not built yet] {purpose}")

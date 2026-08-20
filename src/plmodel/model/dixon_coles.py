@@ -213,6 +213,22 @@ class DixonColesFit:
                          _LOG_RATE_MIN, _LOG_RATE_MAX)
         return np.exp(log_lam), np.exp(log_mu)
 
+    def match_rates(
+        self, rows: pd.DataFrame, history: pd.DataFrame | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Expected goals for a match frame, with every fitted seam applied.
+
+        The first half of :meth:`predict_proba`, split out because the season simulator needs the
+        rates rather than the three-class collapse. Sharing the step is the point: a simulator
+        that rebuilt the linear predictor itself would be a second implementation of the model,
+        and the two would drift apart the first time a seam changed.
+        """
+        return self.rates(
+            rows["home_team"], rows["away_team"],
+            rows["date"] if "date" in rows.columns else None,
+            context=self._cov_context(rows, history),
+        )
+
     def predict_proba(
         self, rows: pd.DataFrame, history: pd.DataFrame | None = None
     ) -> np.ndarray:
@@ -225,11 +241,7 @@ class DixonColesFit:
         model quietly changing its own dependence parameter is exactly the kind of thing that
         should show up in a report.
         """
-        lam, mu = self.rates(
-            rows["home_team"], rows["away_team"],
-            rows["date"] if "date" in rows.columns else None,
-            context=self._cov_context(rows, history),
-        )
+        lam, mu = self.match_rates(rows, history)
         rho = self.rho
         if self.family is None or self.family.fits_rho:
             rho, n_clamped = clamp_rho_for_rates(lam, mu, self.rho, margin=_RHO_CLAMP_MARGIN)

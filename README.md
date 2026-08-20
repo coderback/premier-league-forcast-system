@@ -44,12 +44,14 @@ pl fit         fit the production model; dump params, ratings, fixture probabili
 pl backtest    rolling-origin walk-forward; metrics + calibration
 pl compare     paired A/B of candidate arms vs baseline, with the market gate
 pl simulate    season Monte Carlo -> title / top-4 / relegation / points distribution
+               --validate scores those probabilities against every completed season
+               --uncertainty point|drift overrides how strength uncertainty propagates
 pl reproduce   re-run an external claim on our data
 pl audit       calibration slices: promoted-team, big-six-vs-rest, favourite, by season
 pl live        freeze a matchweek's forecasts before kickoff; score them after
 ```
 
-Commands not yet built exit with the phase that builds them.
+Every command listed above is built.
 
 ## Development
 

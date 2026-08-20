@@ -1,7 +1,7 @@
-"""Enforce "no magic numbers in code" across the model and eval paths.
+"""Enforce "no magic numbers in code" across the model, eval and season paths.
 
 Non-negotiable #3: every tunable lives in config.yaml with an inline justification. This test is
-what makes that a checkable claim rather than a habit. It AST-walks the model and eval packages
+what makes that a checkable claim rather than a habit. It AST-walks those packages
 and fails on any numeric literal that is not one of:
 
   1. a structural value in ``ALLOWED`` — array indices, ``ndim`` checks, arithmetic identities;
@@ -24,7 +24,7 @@ from pathlib import Path
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCANNED_PACKAGES = ("model", "eval")
+SCANNED_PACKAGES = ("model", "eval", "season")
 
 # Structural values: array indices, shape/ndim comparisons, and arithmetic identities. These
 # cannot meaningfully be configured — `probs.shape[1] != 3` is the three-class contract itself.

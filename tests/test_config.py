@@ -121,9 +121,23 @@ def test_every_seam_ships_off(cfg: Config) -> None:
     assert cfg.model.seams_are_inert()
 
 
-def test_unpopulated_sections_stay_empty(cfg: Config) -> None:
-    """Later work populates these. An empty section must load empty, never default-filled."""
-    assert isinstance(cfg.season, dict)
+def test_the_season_block_is_typed_and_complete(cfg: Config) -> None:
+    """Every section that has landed is typed; nothing about it is defaulted in code."""
+    assert cfg.season.n_replicates > 0 and cfg.season.validation_replicates > 0
+    assert set(cfg.season.questions) == {"title", "top_four", "relegation"}
+    assert set(cfg.season.drift) == {"attack_sd", "defence_sd", "correlation", "horizon_exponent"}
+
+
+def test_a_season_block_missing_a_setting_raises(tmp_path: Path) -> None:
+    """A half-populated section must fail at load, not run with a silent default."""
+    source = DEFAULT_CONFIG_PATH.read_text(encoding="utf-8")
+    trimmed = "\n".join(
+        line for line in source.splitlines() if "validation_replicates" not in line
+    )
+    path = tmp_path / "config.yaml"
+    path.write_text(trimmed, encoding="utf-8")
+    with pytest.raises(ConfigError, match="season section missing"):
+        load_config(path)
 
 
 def test_missing_config_raises(tmp_path: Path) -> None:

@@ -259,3 +259,45 @@ def test_bh_validation() -> None:
         metrics.benjamini_hochberg([], alpha=0.05)
     with pytest.raises(ValueError, match=r"p-values must lie"):
         metrics.benjamini_hochberg([0.5, 1.5], alpha=0.05)
+
+
+# --- clustered bootstrap -----------------------------------------------------------------------
+
+def test_clustering_widens_the_interval_when_the_shock_is_shared() -> None:
+    """The whole reason it exists: rows inside a season are not twenty observations."""
+    rng = np.random.default_rng(0)
+    groups = np.repeat(np.arange(10), 20)
+    shared = rng.normal(0.0, 1.0, 10)[groups]
+    a, b = shared + rng.normal(0.0, 0.1, 200), np.zeros(200)
+    naive = metrics.paired_delta_losses(a, b, n_boot=2000, seed=1)
+    clustered = metrics.paired_delta_clustered(a, b, groups, n_boot=2000, seed=1)
+    assert clustered["ci_high"] - clustered["ci_low"] > 3 * (naive["ci_high"] - naive["ci_low"])
+    assert clustered["delta"] == pytest.approx(naive["delta"])
+    assert clustered["n"] == 200 and clustered["n_groups"] == 10
+
+
+def test_one_row_per_group_is_the_ordinary_bootstrap() -> None:
+    """With no clustering to do, it must not quietly become a different estimator."""
+    rng = np.random.default_rng(2)
+    a, b = rng.normal(size=60), rng.normal(size=60)
+    groups = np.arange(60)
+    clustered = metrics.paired_delta_clustered(a, b, groups, n_boot=4000, seed=7)
+    plain = metrics.paired_delta_losses(a, b, n_boot=4000, seed=7)
+    assert clustered["delta"] == pytest.approx(plain["delta"])
+    assert clustered["ci_low"] == pytest.approx(plain["ci_low"], abs=0.05)
+    assert clustered["ci_high"] == pytest.approx(plain["ci_high"], abs=0.05)
+
+
+def test_the_sign_convention_matches_its_siblings() -> None:
+    groups = np.repeat(np.arange(5), 4)
+    better, worse = np.full(20, 0.1), np.full(20, 0.3)
+    got = metrics.paired_delta_clustered(better, worse, groups, n_boot=500, seed=0)
+    assert got["delta"] < 0 and got["p_a_better"] == 1.0
+
+
+def test_clustered_bootstrap_validation() -> None:
+    groups = np.arange(4)
+    with pytest.raises(ValueError, match="matching 1-D arrays"):
+        metrics.paired_delta_clustered(np.zeros(4), np.zeros(5), groups, n_boot=10, seed=0)
+    with pytest.raises(ValueError, match="empty sample"):
+        metrics.paired_delta_clustered(np.zeros(0), np.zeros(0), np.zeros(0), n_boot=10, seed=0)

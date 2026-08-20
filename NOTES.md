@@ -3417,3 +3417,394 @@ information itself, and it is blocked on data rather than refuted.
 **So the honest current position is that the gap is unexplained and, with this corpus, unclosable**,
 and the remaining scope should be read in that light: the season simulator and the promotion/
 shrinkage lead are about making the model *useful* and *correct*, not about catching the market.
+
+---
+
+## 2026-08-20 — PRE-REGISTRATION, the season simulator: does propagating strength drift help?
+
+*Written after the tuning span was read and before either evaluation span was touched. Everything
+below is either a measurement taken from the fits themselves, or a choice made on the tuning span
+(1996-97..2005-06), the third window neither evaluation span sees.*
+
+### What was built, and the one decision inside it
+
+`pl simulate` Monte Carlos a season's remaining fixtures into a final table: title, top four,
+relegation, and a points distribution per club. Most of it is not a decision. The scoreline
+sampler must draw from the same law the match model reports; the table must add up; the ordering
+must be the competition's own. Those are correctness, and they are tested rather than tuned.
+
+One thing genuinely is a decision, and the research report names it as best practice without
+anyone having checked it at Premier League density: **propagate parameter uncertainty by drawing
+team strengths once per replicate, rather than simulating from the point estimate.** The claim is
+that point-estimate simulations systematically understate the tails. This entry tests it.
+
+### Why not an asymptotic covariance
+
+The obvious route is to draw from the inverse observed information of the fit. It is wrong here
+for two separate reasons, and the second is the one that matters.
+
+Under exponential decay weighting the objective is not a likelihood, so its inverse Hessian is not
+a sampling covariance — it needs a sandwich correction, and the weighted effective sample size is
+much smaller than the count, so the uncorrected version understates the spread it is supposed to
+supply. That is a technical objection with a technical fix.
+
+The real objection is that it answers the wrong question. A season simulation does not need to know
+how precisely the barrier's strengths were estimated. It needs to know **how far a club's strength
+will have moved by the matches being simulated** — which mixes estimation noise with transfers,
+injuries, managers and form, and which does not need them separated because the simulator cannot
+act on the distinction. So the quantity is measured from the corpus instead.
+
+### What was measured, and what had to be calibrated
+
+Fits were taken at every matchweek boundary of every tuning-span season (390 fits, warm-started)
+and each club's attack and defence compared against the same club's parameters at the season's end.
+7,458 club-barrier pairs.
+
+```
+horizon    n    sd(d attack)  sd(d defence)   ratio    corr(att, def)
+1.00     185       0.0730        0.0736       1.008        -0.001
+0.79     188       0.0586        0.0707       1.206        -0.024
+0.58     200       0.0623        0.0744       1.195        -0.141
+0.37     200       0.0528        0.0533       1.010        -0.053
+0.16     200       0.0355        0.0323       0.910        -0.089
+0.05     200       0.0212        0.0206       0.968        -0.001
+
+pooled: ratio 1.058, correlation +0.014
+log sd on log horizon: exponent 0.469 (attack), 0.531 (defence)
+```
+
+Three of the four settings a drift needs are therefore **measurements, not choices**:
+
+* attack and defence move by the same amount, so they carry one standard deviation;
+* their movements are **uncorrelated** (+0.014) — a club that improves does not reliably improve at
+  both ends;
+* the movement grows as the **square root of the horizon**, which is the random walk. The fitted
+  exponents are 0.469 and 0.531; taking 0.5 rather than either is deliberate, because a walk is the
+  mechanism and the fitted numbers are that walk plus estimation noise.
+
+The **level** cannot be read off the same table, and saying why is the point. Under a 730-day
+half-life the fit at a barrier and the fit at the season's end share almost all of their data, so
+the difference between them is an attenuated view of the movement that matters. **0.083 is a
+floor, not an estimate**, and treating it as one would have shipped a drift about half the size it
+should be.
+
+### The level, calibrated against what actually happened
+
+The level was fitted on the tuning span against the **probability integral transform of each club's
+actual final points** within its own simulated points distribution — randomised, because points are
+discrete and the plain transform cannot be uniform however good the forecast is. A calibrated
+forecast puts 0.20 of its PIT mass in the outer tenths.
+
+```
+sd        0.00    0.03    0.06    0.09    0.12    0.15    0.20    0.25    0.30
+PIT ks   0.0489  0.0483  0.0428  0.0325  0.0225  0.0163  0.0302  0.0482  0.0668
+tail      0.274   0.273   0.259   0.246   0.219   0.206   0.181   0.152   0.124
+Brier   0.04926 0.04928 0.04913 0.04909 0.04912 0.04917 0.04969 0.05033 0.05150
+```
+
+An interior minimum at **0.15**, with both edges of the grid worse. Two things in that table are
+worth stating before the evaluation spans are run.
+
+**The point estimate is measurably too narrow.** Its tail mass is 0.274 against the calibrated
+0.20: actual final points land outside the middle 80% of the simulated distribution 37% more often
+than they should. That is the research report's claim, reproduced on this corpus rather than
+inherited.
+
+**Brier cannot resolve this and was not used to choose.** Across the whole grid it moves from
+0.04909 to 0.04926 — 0.00017, against a clustered bootstrap interval half-width of about 0.001. The
+criterion is the PIT because the PIT reads the whole predictive distribution, and a criterion that
+cannot separate the candidates is not a criterion. Choosing on Brier would have picked 0.09 and
+would have been picking noise.
+
+The calibrated 0.15 sits a factor of 1.8 above the attenuated 0.083, in the expected direction.
+That is the only cross-check the level has, and it is a weak one.
+
+### Barriers, questions, and what is not claimed
+
+Four barriers per season: preseason and after roughly a quarter, a half and three quarters of the
+fixtures. Preseason is the headline because it is the hardest and the one everybody publishes.
+
+The questions are **positional** — top 1, top 4, bottom 3 — not "champion, Champions League,
+relegation". Which finish earns what is a season-specific rule this corpus does not carry: England
+had three Champions League places before 2002-03 and five in 2023-24 and 2024-25, and 1994-95
+relegated four clubs to shrink the division from 22 to 20. A positional question is well posed in
+every season; a competition label is not.
+
+Points deductions are applied to the **actual table only** and are recorded from the public record
+rather than derived. Of the four in the corpus, exactly one changes any question's outcome —
+Middlesbrough's three points in 1996-97, which relegated them in place of Coventry — and 1996-97 is
+in the tuning span. **No result on either evaluation span depends on a deduction.**
+
+### The acceptance rule does not apply here, and the report says so
+
+That rule governs match forecasts scored by RPS against a de-vigged market. A season forecast is a
+different quantity on a different unit, and this corpus carries no outright market, so gate 2 has
+no analogue. What is reused is the rule's construction: a paired bootstrap, a favourable delta
+needing a 95% interval excluding zero or P(better) >= 0.95.
+
+With one change that is not cosmetic. The bootstrap **resamples seasons, not team-seasons**.
+Twenty clubs give twenty rows a season but exactly one of them wins the title, so resampling rows
+would report an interval several times too narrow. A decade is ten independent season-years, and
+every table will print both numbers so nobody can mistake 800 rows for 800 observations.
+
+### Predictions, recorded to be scored later
+
+| | prediction |
+|---|---|
+| point-estimate tail mass above 0.20 on **both** evaluation spans | the over-narrow claim replicates |
+| `drift` lowers PIT ks on both spans, and moves tail mass toward 0.20 | the fix works where the diagnosis says it should |
+| Brier delta, drift vs point | **-0.0005 to +0.0005** on both spans — nothing resolvable |
+| P(better) on Brier | **below 0.95 on both spans**; ten seasons cannot resolve 0.0002 |
+| the gain is concentrated at preseason and gone by week 28 | drift scales as sqrt(horizon), so it must be |
+| promoted clubs score materially worse than established ones on relegation | they are cold-started at league average, and three arms have already pointed at the missing shrinkage |
+
+**Where I expect to be wrong, if I am.** The horizon exponent. It was measured on an attenuated
+quantity, and if the attenuation itself varies with the horizon — which it plausibly does, since a
+barrier near the season's end shares even more data with the end-of-season fit than one near its
+start — then 0.5 is measured through a distorting lens and the by-week table is where that will
+show. If the PIT improves at week 0 and *worsens* at week 28, the exponent is wrong rather than
+the level.
+
+**On my own record.** Eight arms scored, the last four with the RPS bands landing and both recent
+misses on parameter predictions. The Brier band above is tight for the same reason those were: the
+tuning span has already measured most of this, and it says Brier cannot see the difference.
+
+---
+
+## 2026-08-20 — RESULT, the season simulator: the point estimate's band is too narrow on all three decades, and the promoted clubs are a different problem entirely
+
+`pl simulate` is built. It Monte Carlos a season's remaining fixtures into a final table and
+reports title, top-four and relegation probabilities with a points distribution per club;
+`pl simulate --validate` scores those probabilities against every completed season in a span. The
+`_PLANNED` mapping in `cli.py` is now empty: every command this project set out to build exists.
+
+### Three decades, one direction
+
+Barriers at matchweeks 0, 9, 19 and 28 of every season; 10,000 replicates each; the fit at each
+barrier is shared by both settings so nothing but the uncertainty differs.
+
+```
+span                    spec     Brier   PIT ks   tail   points log score   delta (clustered on seasons)
+tuning 1996-2006        point  0.04926   0.0489  0.274        3.3905        (baseline)
+                        drift  0.04917   0.0163  0.206        3.3503        -0.0402 [-0.0531, -0.0264] P=1.000
+sensitivity 2006-2016   point  0.05381   0.0643  0.281        3.3452        (baseline)
+                        drift  0.05299   0.0334  0.211        3.3214        -0.0238 [-0.0563, +0.0077] P=0.929
+test 2016-2026          point  0.04759   0.0750  0.341        3.5372        (baseline)
+                        drift  0.04704   0.0450  0.263        3.4322        -0.1049 [-0.1643, -0.0539] P=1.000
+
+Brier delta, drift vs point:  tuning -0.00009 P=0.561   sensitivity -0.00082 P=0.844   test -0.00054 P=0.815
+```
+
+**The point-estimate simulation is too narrow on every window.** A calibrated points forecast puts
+0.20 of its PIT mass in the outer tenths; it puts 0.274, 0.281 and 0.341 there. On the test decade
+a club's actual final points land outside its own simulated 80% interval **seven times in twenty**
+when they should land there four times in twenty. The research report's claim about
+point-estimate season simulations is reproduced on this corpus rather than inherited, and it is
+larger than the claim suggested.
+
+**The three binary questions cannot see it.** The Brier delta is between -0.0001 and -0.0008 on the
+three spans and P(better) never exceeds 0.844. That is exactly the pre-registered band and the
+pre-registered reason: ten season-years cannot resolve a difference of five ten-thousandths, and a
+bar that needs 0.95 was never going to be cleared by this comparison. Nothing here contradicts the
+gate; the gate is simply blind at this sample size, which is worth stating because a reader who
+sees only the Brier column would conclude the two settings are the same, and they are not.
+
+### The instrument that can see it, and when it was added
+
+The PIT was the pre-registered criterion, but a Kolmogorov-Smirnov distance is one number for a
+whole window and there is nothing to put an interval around. So the same question was re-asked with
+a strictly proper per-observation score: `-log P(actual final points)` under each club's own
+simulated points histogram, one row per club-season, run through the same clustered bootstrap.
+
+**That score was added after both evaluation spans had been read, and this entry says so rather
+than presenting it as the plan.** What was pre-registered is the criterion and its direction — *a
+calibrated forecast puts 0.20 in the outer tenths, and drift should move the PIT toward it on both
+spans* — and that prediction holds on all three windows. What was chosen afterwards is the
+estimator that puts a confidence interval on it. It is not a metric shopped for a favourable
+answer: it is the only per-observation proper score of the whole points distribution, and it is
+*less* favourable than the headline on one of the two evaluation spans, where P=0.929 falls short
+of the same 0.95 bar. Treat it as corroboration of a pre-registered direction, not as the evidence.
+
+### What is shipped, and on what grounds
+
+`season.uncertainty: drift`. The grounds are not "it passed the acceptance rule", because it did
+not, and I would rather write that sentence than blur it.
+
+The distinction that makes the choice defensible is that this is **specifying a new command, not
+changing an incumbent**. The acceptance rule exists to stop the production match model drifting on
+a favourable-looking result; there was no season simulator yesterday to defend. The question is
+which of two settings produces a correct forecast, and the criterion for that was fixed in advance
+and answers the same way on three independent decades. A simulator whose stated 90% points band
+contains the truth two times in three is wrong about the thing it is for.
+
+`--uncertainty point` reverses it in one flag, and the config comment carries the table above so
+anyone reversing it can see what they are choosing.
+
+The level stays at the tuning-span value of 0.15 even though the test decade is still too narrow
+under it (tail 0.263 against 0.20). Raising it to fit that would be tuning on the acceptance
+instrument, which this project does not do, and the residual is itself a finding: **the modern
+Premier League needs more drift than the two decades before it.** Point-estimate tail mass runs
+0.274, 0.281, 0.341 across the three decades in order, and the test decade's points log score is
+0.15 to 0.19 nats worse than either earlier one. Something about 2016-2026 makes a season harder to
+forecast from frozen strengths than 1996-2006 was.
+
+### The measurement that set the shape, and the one that could not set the level
+
+Three of the drift's four settings are measurements, from 390 fits at every matchweek boundary of
+every tuning-span season, 7,458 club-barrier pairs:
+
+* **attack and defence move by the same amount** — pooled sd ratio 1.058, per-matchweek ratios
+  straddling 1 with no trend, so one standard deviation covers both;
+* **their movements are uncorrelated** — +0.014, so a club that improves does not reliably improve
+  at both ends;
+* **the movement grows as the square root of the horizon** — regressing log sd on log horizon gives
+  0.469 for attack and 0.531 for defence. Taking 0.5 rather than either is deliberate: a random
+  walk is the mechanism and the fitted numbers are that walk plus noise.
+
+The **level** could not come from the same table, and why not is the interesting part. Under a
+730-day half-life the fit at a barrier and the fit at the season's end share almost all of their
+data, so the difference between them understates the movement that matters. It gives 0.083. The
+calibrated value is 0.15, a factor of 1.8 above it, in the direction the attenuation predicts. A
+project that had read 0.083 off that table and shipped it would have shipped a drift half the size
+it needed, and every diagnostic in this entry would have looked mildly better than the point
+estimate and still wrong.
+
+### The promoted clubs are a bias, and drift does not touch them
+
+The slice the playbook asks for, at season level. Preseason, test decade:
+
+```
+                    mean relegation forecast    actually finished bottom three
+established (170)            0.098                        0.082
+promoted     (30)            0.446                        0.533
+```
+
+```
+relegation Brier, by span and group          tuning   sensitivity   test
+  established                                0.0564     0.0677     0.0464
+  promoted                                   0.2153     0.2322     0.1611
+```
+
+**Promoted clubs' relegation forecasts are three to four times worse than everyone else's on every
+window**, and the direction is consistent: the model expects too much of them. Where the points
+distribution lands is sharper still. Preseason, test decade, share of clubs falling below their own
+simulated 10th percentile — 0.10 if calibrated:
+
+```
+                    point    drift
+established         0.176    0.100
+promoted            0.400    0.367
+```
+
+**Drift calibrates the established clubs almost exactly and barely moves the promoted ones**, which
+is the whole diagnosis in two numbers. Established clubs had a width problem and now do not.
+Promoted clubs have a *bias* problem: four times in ten they take fewer points than the simulation's
+tenth percentile, which no amount of extra spread fixes because the centre is in the wrong place.
+
+That is the fourth independent line pointing at the same missing piece. Arm 1 wanted team strengths
+shrunk toward a prior; Arm 8 found promoted clubs' ratings overstated against the clubs they
+actually face; Arm 6's European flag turned out to be group-level shrinkage wearing a fatigue label;
+and now the season simulator says the same thing at the only horizon a supporter cares about. What
+is new is that it is now quantified as a target: **preseason, a promoted club's relegation
+probability is about nine points too low, and its points distribution is centred about where its
+10th percentile should be.**
+
+### What the simulator itself had to get right
+
+None of this is a decision, so all of it is tested rather than tuned.
+
+**The scoreline sampler is exact and never builds a grid.** The obvious route costs one
+`(13 x 13)` grid per fixture *per replicate* as soon as strengths vary between replicates — 19
+million grids at production settings. It is unnecessary: the tau correction touches only the four
+cells with both scores below two, and it is mass-preserving on that block (the four deltas cancel
+exactly), so the corrected law is the independent-Poisson law with the block's *internal*
+proportions rewritten. Draw two independent Poissons; for the ~37% of draws landing in the block,
+redraw the cell from four weights whose sum is exactly `(1 + lam)(1 + mu)`. O(1) per fixture, and
+the empirical joint is checked against `scoreline_matrix` cell by cell to three standard errors.
+
+**Head-to-head is not a Premier League tiebreak.** Points, then goal difference, then goals scored,
+and clubs still level occupy the same position unless the position decides something, in which case
+they play off at a neutral venue. La Liga and Serie A would order two of these tables differently.
+Encoding their rule here would have rewritten every simulated season and no aggregate score would
+have moved, so there is a test that constructs a case where head-to-head would flip the order and
+asserts that it does not.
+
+**The playoff clause is a coin, and it is counted.** A tie surviving all three keys at a question's
+boundary is split uniformly at random within the replicate, and the number of replicates where that
+happened is reported. It is small — single-digit to low-double-digit per 20,000 — but a simulator
+that broke such ties by array order would hand a systematic advantage to whichever club the corpus
+happened to list first, and nothing downstream would notice.
+
+**The questions are positional.** Top 1, top 4, bottom 3 — not "champion, Champions League,
+relegation". England had three Champions League places before 2002-03 and five in 2023-24 and
+2024-25, and 1994-95 relegated four clubs to shrink the division from 22 to 20. A positional
+question is well posed in every season; a competition label is a different claim in each.
+
+**Points deductions are applied to the actual table and to nothing else**, and are recorded from
+the public record rather than derived, so they are citations rather than measurements. Of the four
+in the corpus, exactly one changes any question's outcome — Middlesbrough's three points in
+1996-97, which relegated them in place of Coventry — and 1996-97 is in the tuning span. **No result
+on either evaluation span depends on a deduction**, which is why the uncertainty in those figures
+does not propagate anywhere that matters.
+
+**The bootstrap resamples seasons, not team-seasons.** Twenty clubs give twenty rows a season but
+exactly one wins the title. On synthetic data with a season-level shock the clustered interval is
+4.4 times wider than the naive one; reporting the naive one would have turned every P=0.8 in this
+entry into a false P=0.99. Every table prints both counts.
+
+### Scoring the predictions
+
+| prediction | outcome |
+|---|---|
+| point-estimate tail mass above 0.20 on both evaluation spans | **right** — 0.281 and 0.341, and 0.274 on the tuning span too |
+| `drift` lowers PIT ks and moves tail mass toward 0.20 on both | **right** — ks 0.064 to 0.033 and 0.075 to 0.045 |
+| Brier delta -0.0005 to +0.0005 on both spans | **half** — -0.00054 and -0.00082, just outside a band that was too tight |
+| P(better) on Brier below 0.95 on both spans | **right** — 0.844 and 0.815 |
+| the gain is concentrated at preseason and gone by week 28 | **right** — PIT ks at week 0 halves; at week 28 it is 0.079 against 0.081 and 0.099 against 0.090 |
+| promoted clubs materially worse on relegation | **right** — 3.5x the Brier on every window |
+
+**Five of six, counting halves.** The Brier miss is worth naming precisely because it is the
+reverse of this project's old failure: the band was too tight and the effect was *larger* than
+predicted, on both spans, in the same direction. Five arms ago the pattern was over-predicting
+magnitudes three- to ten-fold.
+
+The horizon exponent is where I said I expected to be wrong, and it is not. If 0.5 were wrong,
+drift would improve the PIT at week 0 and worsen it at week 28. It improves it at week 0 on all
+three spans and is within 0.002 of the point estimate at week 28 on two of them, marginally worse
+on one. The exponent is not resolved by that — week 28 barely discriminates — but it is not
+refuted either, and it was measured before it was used.
+
+### What this leaves recorded
+
+**The promotion discount now has a season-level target.** Preseason, a promoted club's relegation
+probability is about nine points too low (0.446 forecast against 0.533 observed on the test
+decade), and its points distribution is centred high enough that the club lands below its own
+tenth percentile four times in ten. That is a bias, and the shrinkage arm that Arms 1, 6 and 8 all
+point at is the thing that would move it. It should still be tested as a *prior* rather than as a
+covariate.
+
+**The modern decade needs more drift than the two before it**, and nothing here says why. Candidate
+explanations that this corpus could distinguish: a widening wealth gap that a 730-day half-life
+tracks too slowly, or more mid-season managerial change. Either would be an arm, not an entry.
+
+**Ten season-years is the binding constraint on everything above**, and it does not improve by
+waiting. A decade of seasons arrives one per year. The only way to sharpen a long-horizon
+validation on this corpus is to score a richer quantity per season -- which is what the points log
+score does, and why it separates the settings where three binary questions cannot.
+
+### Production status
+
+The match model is unchanged. `predict_proba` was refactored so its first half is a public
+`match_rates`, which the simulator calls: sharing the linear predictor is the point, because a
+simulator that rebuilt it would be a second implementation of the model and the two would diverge
+the first time a seam changed. The refactor is inert, and not only by the seam tests — the
+production baseline walk over the test decade, recomputed from scratch in 209 seconds because
+`config.yaml` changed and every cached entry became unreachable, reproduces digest
+`d398b3cab1d04106` across all 3,800 matches, first written on 2026-08-18.
+
+Suite: 495 unit tests pass, from 438, and the six new season integration tests pass against the
+real corpus — including the structural one, that a forecast made at a barrier is byte-identical
+whether or not the rest of the season exists in the corpus. The full 50-test integration suite was
+not run to completion here: the two scoreline-family tests refit a whole season's walk four times
+with a 61-term series and take hours on this machine. What they exercise of this change is the
+`match_rates` refactor, and the recomputed baseline digest already settles that.

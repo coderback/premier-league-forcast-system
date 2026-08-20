@@ -3,8 +3,9 @@
 No magic numbers live in code: every hyperparameter is read from here. See NOTES.md for the
 justification of each value, and tests/test_no_magic_numbers.py for the check that enforces it.
 
-Sections are populated phase by phase; a section still empty in config.yaml loads as an empty
-mapping rather than a default-filled object, so "not yet tuned" can never be mistaken for "tuned".
+A section still empty in config.yaml loads as an empty mapping rather than a default-filled
+object, so "not yet tuned" can never be mistaken for "tuned"; a section that has landed is typed,
+and a missing setting inside one is a load error rather than a silent default.
 """
 from __future__ import annotations
 
@@ -166,6 +167,57 @@ class EloRatingConfig:
 
 
 @dataclass(frozen=True)
+class SeasonConfig:
+    """The season Monte Carlo: how many replicates, which questions, how uncertainty propagates."""
+
+    n_replicates: int
+    validation_replicates: int
+    chunk_size: int
+    fixtures_per_week: int
+    validation_weeks: tuple[int, ...]
+    prob_floor: float
+    questions: dict[str, tuple[str, int]]
+    uncertainty: str
+    drift: dict[str, float]
+    points_deductions: dict[str, dict[str, int]]
+
+    def question_specs(self) -> tuple[Any, ...]:
+        from plmodel.season.table import Question
+
+        return tuple(Question(name=n, end=end, places=places)
+                     for n, (end, places) in self.questions.items())
+
+    def spec(self, *, uncertainty: str | None = None, n_replicates: int | None = None,
+             drift_sd: float | None = None):
+        """A :class:`plmodel.season.simulate.SeasonSpec` for one uncertainty mode.
+
+        ``drift_sd`` overrides both standard deviations at once. It exists for the calibration
+        sweep, which has to try values the config does not yet hold; production reads the config.
+        """
+        from plmodel.season.simulate import UNCERTAINTY_DRIFT, DriftSpec, SeasonSpec
+
+        mode = uncertainty if uncertainty is not None else self.uncertainty
+        drift = None
+        if mode == UNCERTAINTY_DRIFT:
+            settings = dict(self.drift)
+            if drift_sd is not None:
+                settings["attack_sd"] = settings["defence_sd"] = float(drift_sd)
+            drift = DriftSpec(
+                attack_sd=float(settings["attack_sd"]),
+                defence_sd=float(settings["defence_sd"]),
+                correlation=float(settings["correlation"]),
+                horizon_exponent=float(settings["horizon_exponent"]),
+            )
+        return SeasonSpec(
+            n_replicates=int(n_replicates if n_replicates is not None else self.n_replicates),
+            chunk_size=self.chunk_size,
+            questions=self.question_specs(),
+            uncertainty=mode,
+            drift=drift,
+        )
+
+
+@dataclass(frozen=True)
 class AuditConfig:
     """The calibration slices. Diagnostics, never gates."""
 
@@ -175,7 +227,7 @@ class AuditConfig:
 
 @dataclass(frozen=True)
 class Config:
-    """The whole config.yaml, typed where a phase has populated it."""
+    """The whole config.yaml, typed."""
 
     acceptance_rule: str
     seed: int
@@ -188,8 +240,7 @@ class Config:
     audit: AuditConfig
     model: ModelConfig
     elo: EloRatingConfig
-    # Sections not yet populated are carried as raw mappings so nothing invents a default.
-    season: dict[str, Any] = field(default_factory=dict)
+    season: SeasonConfig
     # sha256 of the config file as loaded. Every hyperparameter this project has lives in that
     # file, so this one string identifies the whole specification — which is what lets a cached
     # walk prove it was produced by the same configuration rather than merely claim it.
@@ -280,6 +331,17 @@ def load_config(path: Path | str | None = None) -> Config:
     if missing_bounds:
         raise ConfigError(f"config.yaml model.param_bounds missing: {missing_bounds}")
 
+    se = _section(raw, "season")
+    season_keys = ("n_replicates", "validation_replicates", "chunk_size", "fixtures_per_week",
+                   "validation_weeks", "prob_floor", "questions", "uncertainty", "drift")
+    missing_season = [k for k in season_keys if k not in se]
+    if missing_season:
+        raise ConfigError(f"config.yaml season section missing: {missing_season}")
+    drift_keys = ("attack_sd", "defence_sd", "correlation", "horizon_exponent")
+    missing_drift = [k for k in drift_keys if k not in (se["drift"] or {})]
+    if missing_drift:
+        raise ConfigError(f"config.yaml season.drift missing: {missing_drift}")
+
     e = _section(raw, "elo")
     elo_keys = ("initial_rating", "k", "home_advantage", "gd_two_goal", "gd_slope_offset",
                 "gd_slope_divisor", "decay_half_life_days")
@@ -334,6 +396,20 @@ def load_config(path: Path | str | None = None) -> Config:
             context=dict(m.get("context") or {}),
         ),
         elo=EloRatingConfig(**{k: float(e[k]) for k in elo_keys}),
-        season=_section(raw, "season"),
+        season=SeasonConfig(
+            n_replicates=int(se["n_replicates"]),
+            validation_replicates=int(se["validation_replicates"]),
+            chunk_size=int(se["chunk_size"]),
+            fixtures_per_week=int(se["fixtures_per_week"]),
+            validation_weeks=tuple(int(w) for w in se["validation_weeks"]),
+            prob_floor=float(se["prob_floor"]),
+            questions={str(k): (str(v[0]), int(v[1])) for k, v in (se["questions"] or {}).items()},
+            uncertainty=str(se["uncertainty"]),
+            drift={k: float(v) for k, v in (se["drift"] or {}).items()},
+            points_deductions={
+                str(season): {str(t): int(p) for t, p in (block or {}).items()}
+                for season, block in (se.get("points_deductions") or {}).items()
+            },
+        ),
         digest=hashlib.sha256(source.encode("utf-8")).hexdigest(),
     )

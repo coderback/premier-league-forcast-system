@@ -4,9 +4,9 @@
 # evidence is thin carry a `WEAK-EVIDENCE:` marker HERE and at the code site that reads them.
 # See NOTES.md for the dated decision ledger behind each value.
 #
-# Sections are populated phase by phase. A section marked "(populated in Phase N)" is deliberately
-# empty until that phase lands — an empty tunable section is honest; a placeholder value that later
-# gets mistaken for a tuned one is not.
+# A section is added when the work that needs it lands, and stays empty until then — an empty
+# tunable section is honest; a placeholder value that later gets mistaken for a tuned one is not.
+# Every section this file declares is now populated.
 
 # ---------------------------------------------------------------------------------------------
 # THE ACCEPTANCE RULE
@@ -539,9 +539,145 @@ audit:
     - Tottenham
 
 # ---------------------------------------------------------------------------------------------
-# SEASON SIMULATION (populated with the season simulator)
+# SEASON SIMULATION
 #
-# Team strengths are drawn from the posterior ONCE PER SEASON REPLICATE, never per match:
-# per-match resampling collapses the points spread and produces overconfident title probabilities.
+# Team strengths are drawn ONCE PER SEASON REPLICATE, never per match: per-match resampling
+# averages the perturbation away inside a single season, which collapses the points spread instead
+# of widening it and produces exactly the overconfident title probabilities it was meant to fix.
 # ---------------------------------------------------------------------------------------------
-season: {}
+season:
+  # Replicates for `pl simulate`. The research report puts tail stabilisation at 10,000-50,000 and
+  # the WC2026 project used 50,000. Measured here on a preseason 2024-25 simulation, the
+  # favourite's title probability across three seeds spans 0.6392-0.6516 at ten thousand
+  # replicates and 0.6439-0.6449 at fifty thousand -- 0.012 against 0.001. A number quoted to
+  # three decimals should not move in the second one, and ten seconds is not a wait.
+  n_replicates: 50000
+
+  # Replicates inside the validation sweep, which runs the simulator eighty times per span. Ten
+  # thousand puts the Monte Carlo standard error at 0.005 on a probability near a half, which adds
+  # about 2.5e-5 to every Brier score.
+  #
+  # That sounds fatal beside the 5e-4 differences the sweep resolves, and is not, because the
+  # offset is the same for both settings and cancels in the paired difference. What the replicate
+  # count actually costs is interval width, not the estimate -- the bootstrap sees the extra
+  # variance and reports it. Raising this to fifty thousand would narrow the intervals and
+  # quintuple a sweep that already takes five minutes a span.
+  validation_replicates: 10000
+
+  # Replicates held in memory at once. The inner arrays are (chunk x fixtures), so 2,000 keeps the
+  # working set near 6 MB per array on a 380-fixture season while amortising the per-chunk numpy
+  # overhead.
+  #
+  # It is a memory setting, and it is NOT inert: the replicates are drawn from one generator in
+  # chunk-sized blocks, so changing this changes which random numbers land where and therefore the
+  # Monte Carlo noise on every probability. It does not change the distribution being sampled,
+  # which is what tests/test_season_simulate.py pins — two chunk sizes agree to within the
+  # replicate count's own standard error, and a fixed chunk size with a fixed seed is exactly
+  # reproducible. Do not read a difference between two runs at different chunk sizes as a finding.
+  chunk_size: 2000
+
+  # Ten fixtures make a Premier League matchweek. A property of a 20-club round robin, not a
+  # tunable -- but it is what converts "three matchweeks in" into a fixture index, so it is read
+  # from here rather than written into the code.
+  fixtures_per_week: 10
+
+  # Where inside a season the validation sweep places its barriers: before a ball is kicked, and
+  # then at roughly a quarter, a half and three quarters of the way through. Preseason is the
+  # headline because it is the hardest and the one everybody publishes; the other three exist to
+  # show how the calibration moves as the horizon shortens, which is the only way to tell a
+  # mis-scaled uncertainty from a mis-specified model.
+  validation_weeks: [0, 9, 19, 28]
+
+  # Floor applied to a probability before taking its log. A 10,000-replicate simulation cannot
+  # resolve a probability below 1e-4, so anything smaller is the replicate count talking rather
+  # than the model; the floor makes that explicit and the report states what share of rows it
+  # touched. Brier, which needs no floor, is the headline for exactly this reason.
+  prob_floor: 1.0e-4
+
+  # The positional questions the simulator answers. Positional on purpose: which finish earns the
+  # title, relegation or a European place is a season-specific rule this corpus does not carry.
+  # England had three Champions League places before 2002-03 and five in 2023-24 and 2024-25, and
+  # 1994-95 relegated four clubs to shrink the division from 22 to 20. "top 4" is a position, and
+  # calling it qualification would be a claim about a different season each time.
+  questions:
+    title: [top, 1]
+    top_four: [top, 4]
+    relegation: [bottom, 3]
+
+  # How parameter uncertainty is propagated: `point` freezes the fitted strengths, `drift` draws a
+  # per-replicate perturbation of them.
+  #
+  # `drift`, and the reasoning is worth having here rather than only in the ledger. The criterion
+  # was declared before either evaluation span was read: a calibrated points forecast puts 0.20 of
+  # its PIT mass in the outer tenths. Measured:
+  #
+  #                       tuning 1996-2006   sensitivity 2006-16   test 2016-26
+  #   point                     0.274               0.281             0.341
+  #   drift                     0.206               0.211             0.263
+  #
+  # All three windows agree, and the point estimate is too narrow on all three. What `drift` does
+  # NOT do is clear the acceptance rule's bar on the three binary questions: the Brier delta is
+  # -0.0005 on the test span and -0.0008 on the sensitivity span, with P(better) 0.815 and 0.844.
+  # Ten season-years cannot resolve a difference that size and were never going to.
+  #
+  # Read the choice as specifying a new command rather than as passing a gate. A season simulator
+  # whose stated 90% points band contains the truth two times in three is wrong about the thing it
+  # is for, and that is measured rather than argued. Anyone who disagrees can set this to `point`
+  # or pass `--uncertainty point`, and the numbers above are what they would be choosing.
+  uncertainty: drift
+
+  drift:
+    # Standard deviation, in log-goals, of a club's strength movement over a WHOLE season; the
+    # scale actually applied is sd * horizon**exponent.
+    #
+    # Attack and defence carry the same number because they were measured to move by the same
+    # amount: across 7,458 club-barrier pairs on the tuning span the ratio sd(defence)/sd(attack)
+    # is 1.058, and the per-matchweek ratios straddle 1 with no trend.
+    #
+    # The LEVEL is not that measurement. Comparing the fit at a barrier with the fit at the season
+    # end gives 0.083 over a full season, but those two fits share almost all of their data under
+    # a 730-day half-life, so that number is an attenuated view of the movement that matters and
+    # is a floor rather than an estimate. The value below is calibrated on the tuning span against
+    # the probability integral transform of actual final points, over the grid
+    # [0, 0.03, 0.06, 0.09, 0.12, 0.15, 0.20, 0.25, 0.30]:
+    #
+    #   sd       0.00    0.06    0.09    0.12    0.15    0.20    0.25    0.30
+    #   PIT ks  0.0489  0.0428  0.0325  0.0225  0.0163  0.0302  0.0482  0.0668
+    #   tail    0.274   0.259   0.246   0.219   0.206   0.181   0.152   0.124
+    #
+    # An interior minimum with both edges worse. The criterion is the PIT, declared before the
+    # grid was read, because it reads the whole predictive distribution: Brier over the same grid
+    # runs 0.04909 to 0.04926, a range of 0.00017 against a bootstrap interval half-width of about
+    # 0.001, so it cannot resolve this and choosing on it would be choosing on noise. A calibrated
+    # forecast puts 0.20 of its PIT mass in the outer tenths; the point estimate puts 0.274 there,
+    # which is the over-narrow season simulation the research report warns about, measured.
+    #
+    # 0.15 against the attenuated 0.083 measured from the fits is a factor of 1.8 in the expected
+    # direction, which is the only cross-check available on the level.
+    attack_sd: 0.15
+    defence_sd: 0.15
+
+    # Correlation between a club's attack and defence movement. Measured, not chosen: +0.014 over
+    # the same 7,458 pairs, which is zero. A club that gets better does not reliably get better at
+    # both ends.
+    correlation: 0.0
+
+    # sd(horizon) = sd * horizon ** exponent. One half is the random walk, and it is also what the
+    # corpus shows: regressing log sd on log horizon over the tuning span gives 0.469 for attack
+    # and 0.531 for defence. The measurement landing on the causal value is why this is 0.5 rather
+    # than either fitted number -- a walk is the mechanism, and 0.469 is that walk plus noise.
+    horizon_exponent: 0.5
+
+  # Points deducted by the competition, which results cannot show and this corpus does not record.
+  # Applied to the ACTUAL table only, never to a forecast: a deduction is a disciplinary fact the
+  # model has no way to know, and scoring against a table that ignored one would credit the model
+  # for a relegation the football did not cause.
+  #
+  # Recorded from the public record, not derivable from anything here, so treat the figures as
+  # citations rather than measurements. Their reach is small and reported: of the four, only
+  # Middlesbrough's changes any question's outcome (it relegated them in place of Coventry), and
+  # 1996-97 lies in the tuning span, so no result on either evaluation span depends on any of them.
+  points_deductions:
+    "1996-97": {Middlesbrough: 3}        # failure to fulfil a fixture
+    "2009-10": {Portsmouth: 9}           # administration
+    "2023-24": {Everton: 8, "Nott'm Forest": 4}   # profitability and sustainability rules

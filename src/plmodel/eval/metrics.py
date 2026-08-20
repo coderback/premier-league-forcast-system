@@ -344,3 +344,55 @@ def benjamini_hochberg(p_values: dict[str, float] | np.ndarray, *, alpha: float)
         out["p_adjusted"] = {k: float(v) for k, v in zip(names, adjusted)}
         out["rejected"] = {k: bool(v) for k, v in zip(names, rejected)}
     return out
+
+
+def paired_delta_clustered(
+    loss_a: np.ndarray,
+    loss_b: np.ndarray,
+    groups: np.ndarray,
+    *,
+    n_boot: int,
+    seed: int,
+) -> dict[str, float]:
+    """Paired bootstrap that resamples whole *groups* rather than individual observations.
+
+    :func:`paired_delta_losses` assumes its rows are independent. For a season forecast they are
+    emphatically not: exactly one club in a division wins the title, so twenty team-season rows
+    from one season carry nowhere near twenty seasons' worth of information, and resampling them
+    individually would report a confidence interval several times too narrow. The cluster
+    bootstrap resamples seasons with replacement and keeps each drawn season whole, which is the
+    standard correction and the only one that makes the interval mean what it says.
+
+    Same sign convention as its siblings: negative favours A. Reports ``n_groups`` beside ``n``
+    because the honest sample size for a long-horizon forecast is the smaller of the two.
+    """
+    a = np.asarray(loss_a, dtype=float)
+    b = np.asarray(loss_b, dtype=float)
+    g = np.asarray(groups)
+    if a.shape != b.shape or a.ndim != 1 or g.shape != a.shape:
+        raise ValueError(
+            f"losses and groups must be matching 1-D arrays; got {a.shape}, {b.shape}, {g.shape}"
+        )
+    if a.size == 0:
+        raise ValueError("cannot bootstrap an empty sample")
+    diffs = a - b
+    keys, codes = np.unique(g, return_inverse=True)
+    n_groups = len(keys)
+    # Per-group sums and counts, so a resample is an index into two small arrays rather than a
+    # gather over every row: the estimate is the ratio of summed differences to summed counts,
+    # which is the mean over the resampled rows.
+    sums = np.bincount(codes, weights=diffs, minlength=n_groups)
+    counts = np.bincount(codes, minlength=n_groups).astype(float)
+    rng = np.random.default_rng(seed)
+    idx = rng.integers(0, n_groups, size=(int(n_boot), n_groups))
+    boot_means = sums[idx].sum(axis=1) / counts[idx].sum(axis=1)
+    lo, hi = np.percentile(boot_means, [2.5, 97.5])
+    return {
+        "n": int(a.size),
+        "n_groups": int(n_groups),
+        "delta": float(diffs.mean()),
+        "ci_low": float(lo),
+        "ci_high": float(hi),
+        "p_a_better": float(np.mean(boot_means < 0.0)),
+        "n_boot": int(n_boot),
+    }
