@@ -47,6 +47,7 @@ rate.
 """
 from __future__ import annotations
 
+import dataclasses
 import math
 from dataclasses import dataclass, field
 
@@ -65,6 +66,8 @@ from plmodel.model.counts import (
     marginals,
     observed_cell_likelihood,
 )
+from plmodel.model.covariates import CovariateSpec
+from plmodel.model.covariates import design as cov_design_matrix
 from plmodel.model.home_advantage import MODE_GLOBAL as HA_GLOBAL
 from plmodel.model.home_advantage import design as ha_design_matrix
 from plmodel.model.home_advantage import prediction_design
@@ -124,6 +127,13 @@ class DixonColesFit:
     family: CountSpec | None = None
     shape: float = UNIT_SHAPE
     kappa: float = INDEPENDENT_KAPPA
+    # Match-context covariates (model.seams.covariates). None IS the production model, and when
+    # it is None the design is an empty matrix product that leaves every rate untouched.
+    cov_spec: CovariateSpec | None = None
+    cov_names: tuple[str, ...] = ()
+    cov_params: tuple[float, ...] = ()
+    cov_division: str = ""
+    cov_undefined: dict[str, int] = field(default_factory=dict)
     # Mutable on purpose: prediction-time observations that the fit itself cannot know, such
     # as how often rho had to be clamped for an extreme matchup. Surfaced in the report.
     diagnostics: dict[str, int] = field(default_factory=dict)
@@ -154,8 +164,38 @@ class DixonColesFit:
             raise ValueError(f"prediction design {names} does not match the fit's {self.ha_names}")
         return matrix @ np.asarray(self.ha_params)
 
+    def _cov_context(
+        self, rows: pd.DataFrame, history: pd.DataFrame | None
+    ) -> tuple[np.ndarray, np.ndarray] | None:
+        """Additive log-rate contribution of the context covariates for rows being predicted.
+
+        Rebuilt with the SAME design used at fit time, from the history behind the barrier. Unlike
+        the home-advantage terms, these do NOT vanish at prediction: how long each side has rested
+        and whether it is in Europe are both known before kickoff, so applying them is leak-free
+        and omitting them would fit a term the forecast then refuses to use.
+
+        The history is required rather than optional. A covariate that silently evaluated to zero
+        because nobody passed the matches it counts back to would be a model that fits one thing
+        and predicts another, which is the failure the home-advantage seam already paid for once.
+        """
+        if self.cov_spec is None or self.cov_spec.is_inert:
+            return None
+        if history is None:
+            raise ValueError(
+                "covariates are fitted but no history was given to predict with; "
+                "call predict_proba(rows, history=...)"
+            )
+        built = cov_design_matrix(rows, history, self.cov_spec, division=self.cov_division)
+        if built.names != self.cov_names:
+            raise ValueError(
+                f"prediction design {built.names} does not match the fit's {self.cov_names}"
+            )
+        params = np.asarray(self.cov_params)
+        return built.lam @ params, built.mu @ params
+
     def rates(
-        self, home: pd.Series, away: pd.Series, dates: pd.Series | None = None
+        self, home: pd.Series, away: pd.Series, dates: pd.Series | None = None,
+        *, context: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Expected goals for each side. Unknown teams take the league average."""
         idx = self._index()
@@ -166,12 +206,16 @@ class DixonColesFit:
         d_home = np.where(home_i >= 0, self.defence[home_i], 0.0)
         d_away = np.where(away_i >= 0, self.defence[away_i], 0.0)
         ha = self._ha_adjustment(dates, len(a_home))
-        log_lam = np.clip(self.intercept + self.home_advantage + ha + a_home - d_away,
+        cov_lam, cov_mu = context if context is not None else (0.0, 0.0)
+        log_lam = np.clip(self.intercept + self.home_advantage + ha + cov_lam + a_home - d_away,
                           _LOG_RATE_MIN, _LOG_RATE_MAX)
-        log_mu = np.clip(self.intercept + a_away - d_home, _LOG_RATE_MIN, _LOG_RATE_MAX)
+        log_mu = np.clip(self.intercept + cov_mu + a_away - d_home,
+                         _LOG_RATE_MIN, _LOG_RATE_MAX)
         return np.exp(log_lam), np.exp(log_mu)
 
-    def predict_proba(self, rows: pd.DataFrame) -> np.ndarray:
+    def predict_proba(
+        self, rows: pd.DataFrame, history: pd.DataFrame | None = None
+    ) -> np.ndarray:
         """(N, 3) home/draw/away probabilities for a match frame.
 
         rho is clamped per match into the range that keeps tau positive at *that match's* rates.
@@ -184,6 +228,7 @@ class DixonColesFit:
         lam, mu = self.rates(
             rows["home_team"], rows["away_team"],
             rows["date"] if "date" in rows.columns else None,
+            context=self._cov_context(rows, history),
         )
         rho = self.rho
         if self.family is None or self.family.fits_rho:
@@ -226,6 +271,9 @@ class DixonColesFit:
             "n_cold_start": len(self.cold_start_teams),
             "cold_start_teams": list(self.cold_start_teams),
             "home_advantage_terms": dict(zip(self.ha_names, self.ha_params)),
+            "covariates": None if self.cov_spec is None else self.cov_spec.label(),
+            "covariate_terms": dict(zip(self.cov_names, self.cov_params)),
+            "covariate_undefined": dict(self.cov_undefined),
             "scoreline_family": None if self.family is None else self.family.label(),
             "weibull_shape": self.shape,
             "frank_kappa": self.kappa,
@@ -244,13 +292,13 @@ def decay_weights(dates: pd.Series, ref_date: pd.Timestamp, half_life_days: floa
 
 
 def _unpack(
-    theta: np.ndarray, n_teams: int, n_ha: int = 0, n_family: int = 0
-) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray]:
-    """Optimiser vector -> (c, h, rho, attack, defence, ha) with sum-to-zero applied.
+    theta: np.ndarray, n_teams: int, n_ha: int = 0, n_family: int = 0, n_cov: int = 0
+) -> tuple[float, float, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Optimiser vector -> (c, h, rho, attack, defence, ha, cov) with sum-to-zero applied.
 
-    Home-advantage design parameters are appended AFTER the team blocks, so adding them cannot
-    shift the layout of anything that existed before the seam — which is what lets the seam be
-    byte-identical when it carries no columns.
+    Seam parameters are appended AFTER the team blocks, in the order the seams were built, so
+    adding one cannot shift the layout of anything that existed before it — which is what lets
+    each seam be byte-identical when it carries no columns.
     """
     c = theta[_INTERCEPT]
     h = theta[_HOME_ADV]
@@ -262,7 +310,9 @@ def _unpack(
     defence = np.concatenate([d_free, [-d_free.sum()]])
     ha_start = _N_GLOBAL + 2 * free
     ha = theta[ha_start: ha_start + n_ha] if n_ha else np.zeros(0)
-    return c, h, rho, attack, defence, ha
+    cov_start = ha_start + n_ha
+    cov = theta[cov_start: cov_start + n_cov] if n_cov else np.zeros(0)
+    return c, h, rho, attack, defence, ha, cov
 
 
 def _tau_terms(
@@ -314,16 +364,23 @@ def _objective(
     lgamma_y: np.ndarray,
     n_teams: int,
     ha_design: np.ndarray,
+    cov_lam_design: np.ndarray,
+    cov_mu_design: np.ndarray,
 ) -> tuple[float, np.ndarray]:
     """Weighted negative log-likelihood and its analytic gradient."""
     n_ha = ha_design.shape[1]
-    c, h, rho, attack, defence, ha = _unpack(theta, n_teams, n_ha)
+    n_cov = cov_lam_design.shape[1]
+    c, h, rho, attack, defence, ha, cov = _unpack(theta, n_teams, n_ha, n_cov=n_cov)
 
     # Structural home advantage: exactly zero when the seam carries no columns.
     ha_term = ha_design @ ha if n_ha else 0.0
-    log_lam = np.clip(c + h + ha_term + attack[home_i] - defence[away_i],
+    # Match context enters BOTH rates, through its own design for each.
+    cov_lam_term = cov_lam_design @ cov if n_cov else 0.0
+    cov_mu_term = cov_mu_design @ cov if n_cov else 0.0
+    log_lam = np.clip(c + h + ha_term + cov_lam_term + attack[home_i] - defence[away_i],
                       _LOG_RATE_MIN, _LOG_RATE_MAX)
-    log_mu = np.clip(c + attack[away_i] - defence[home_i], _LOG_RATE_MIN, _LOG_RATE_MAX)
+    log_mu = np.clip(c + cov_mu_term + attack[away_i] - defence[home_i],
+                     _LOG_RATE_MIN, _LOG_RATE_MAX)
     lam, mu = np.exp(log_lam), np.exp(log_mu)
 
     tau, dt_dloglam, dt_dlogmu, dt_drho = _tau_terms(x, y, lam, mu, rho)
@@ -362,7 +419,11 @@ def _objective(
     grad[_N_GLOBAL + free: _N_GLOBAL + 2 * free] = d_defence[:free] - d_defence[-1]
     if n_ha:
         # Each design column enters the home rate additively, exactly as h does.
-        grad[_N_GLOBAL + 2 * free:] = ha_design.T @ g_lam
+        grad[_N_GLOBAL + 2 * free: _N_GLOBAL + 2 * free + n_ha] = ha_design.T @ g_lam
+    if n_cov:
+        # One parameter, two designs: the derivative is the sum of both rates' contributions.
+        start = _N_GLOBAL + 2 * free + n_ha
+        grad[start: start + n_cov] = cov_lam_design.T @ g_lam + cov_mu_design.T @ g_mu
 
     return -total, -grad
 
@@ -388,14 +449,20 @@ def _family_rates(
     n_teams: int,
     ha_design: np.ndarray,
     n_family: int,
+    cov_lam_design: np.ndarray | None = None,
+    cov_mu_design: np.ndarray | None = None,
 ) -> tuple[np.ndarray, np.ndarray, float]:
     """Expected goals for the fit sample, plus rho, from an optimiser vector."""
     n_ha = ha_design.shape[1]
-    c, h, rho, attack, defence, ha = _unpack(theta, n_teams, n_ha, n_family)
+    n_cov = 0 if cov_lam_design is None else cov_lam_design.shape[1]
+    c, h, rho, attack, defence, ha, cov = _unpack(theta, n_teams, n_ha, n_family, n_cov)
     ha_term = ha_design @ ha if n_ha else 0.0
-    log_lam = np.clip(c + h + ha_term + attack[home_i] - defence[away_i],
+    cov_lam_term = cov_lam_design @ cov if n_cov else 0.0
+    cov_mu_term = cov_mu_design @ cov if n_cov else 0.0
+    log_lam = np.clip(c + h + ha_term + cov_lam_term + attack[home_i] - defence[away_i],
                       _LOG_RATE_MIN, _LOG_RATE_MAX)
-    log_mu = np.clip(c + attack[away_i] - defence[home_i], _LOG_RATE_MIN, _LOG_RATE_MAX)
+    log_mu = np.clip(c + cov_mu_term + attack[away_i] - defence[home_i],
+                     _LOG_RATE_MIN, _LOG_RATE_MAX)
     return np.exp(log_lam), np.exp(log_mu), rho
 
 
@@ -585,6 +652,8 @@ def fit_dixon_coles(
     ha_mode: str = HA_GLOBAL,
     ha_window: tuple[str, str] | None = None,
     family: CountSpec | None = None,
+    covariates: CovariateSpec | None = None,
+    cov_division: str = "",
 ) -> DixonColesFit:
     """Fit the model on a training frame, weighted toward ``ref_date``.
 
@@ -595,6 +664,10 @@ def fit_dixon_coles(
     if len(history) == 0:
         raise ValueError("cannot fit on an empty history")
     required = {"date", "home_team", "away_team", "home_goals", "away_goals"}
+    if covariates is not None and not covariates.is_inert:
+        # The context terms count back through the calendar, so they need the columns that say
+        # which calendar a row belongs to. Asked for explicitly rather than filled in.
+        required |= {"season", "division", "played"}
     missing = required - set(history.columns)
     if missing:
         raise ValueError(f"history missing columns: {sorted(missing)}")
@@ -642,6 +715,22 @@ def fit_dixon_coles(
         empty_start=ha_window[0] if ha_window else None,
         empty_end=ha_window[1] if ha_window else None,
     )
+    # Built on the WHOLE history and then restricted, not built on the fit sample. A team whose
+    # previous match was against a cold-start club still played it: measuring rest inside the fit
+    # sample alone would silently lengthen exactly the gaps that surround a promoted team.
+    cov = cov_design_matrix(
+        history, history.iloc[:0],
+        covariates if covariates is not None else CovariateSpec(),
+        division=cov_division,
+    )
+    if cov.n_params:
+        kept = keep.to_numpy()
+        cov = dataclasses.replace(cov, lam=cov.lam[kept], mu=cov.mu[kept])
+    if cov.n_params and family is not None:
+        # Not a limitation worth working around silently: every arm in this project moves ONE
+        # axis, so a run that asked for both would be a two-axis test wearing a one-axis name.
+        raise ValueError("the covariate seam and the scoreline family seam cannot run together")
+
     family_names: list[str] = []
     if family is not None:
         if family.fits_shape:
@@ -650,9 +739,11 @@ def fit_dixon_coles(
             family_names.append("frank_kappa")
     n_family = len(family_names)
 
-    theta0 = _starting_point(x, y, weights, n_teams, len(ha_names) + n_family)
+    theta0 = _starting_point(x, y, weights, n_teams, len(ha_names) + cov.n_params + n_family)
     if warm_start is not None:
-        theta0 = _warm_start_vector(theta0, warm_start, teams, n_family)
+        theta0 = _warm_start_vector(
+            theta0, warm_start, teams, n_family, len(ha_names), cov.names
+        )
 
     lo_s, hi_s = param_bounds["strength"]
     # rho is pinned shut, not removed, when the family carries no tau term: keeping the layout
@@ -667,6 +758,8 @@ def fit_dixon_coles(
         rho_bounds,
     ] + [(lo_s, hi_s)] * (2 * (n_teams - 1)) + [
         tuple(param_bounds[name]) for name in ha_names
+    ] + [
+        tuple(param_bounds[covariates.bound_key(name)]) for name in cov.names
     ] + [tuple(param_bounds[name]) for name in family_names]
     theta0 = np.clip(theta0, [b[0] for b in bounds], [b[1] for b in bounds])
 
@@ -674,7 +767,8 @@ def fit_dixon_coles(
         result = minimize(
             _objective,
             theta0,
-            args=(x, y, home_i, away_i, weights, lgamma_x, lgamma_y, n_teams, ha_design),
+            args=(x, y, home_i, away_i, weights, lgamma_x, lgamma_y, n_teams, ha_design,
+                  cov.lam, cov.mu),
             method="L-BFGS-B",
             jac=True,
             bounds=bounds,
@@ -692,7 +786,9 @@ def fit_dixon_coles(
             bounds=bounds,
             options={"maxiter": max_iter},
         )
-    c, h, rho, attack, defence, ha = _unpack(result.x, n_teams, len(ha_names), n_family)
+    c, h, rho, attack, defence, ha, cov_params = _unpack(
+        result.x, n_teams, len(ha_names), n_family, cov.n_params
+    )
     shape, kappa = (
         (UNIT_SHAPE, INDEPENDENT_KAPPA) if family is None
         else _family_globals(result.x, family, n_family)
@@ -736,17 +832,26 @@ def fit_dixon_coles(
         family=family,
         shape=shape,
         kappa=kappa,
+        cov_spec=covariates,
+        cov_names=cov.names,
+        cov_params=tuple(float(v) for v in cov_params),
+        cov_division=cov_division,
+        cov_undefined=dict(cov.undefined),
         diagnostics=family_diagnostics,
     )
 
 
 def _warm_start_vector(
-    theta0: np.ndarray, previous: DixonColesFit, teams: tuple[str, ...], n_family: int = 0
+    theta0: np.ndarray, previous: DixonColesFit, teams: tuple[str, ...], n_family: int = 0,
+    n_ha: int = 0, cov_names: tuple[str, ...] = (),
 ) -> np.ndarray:
     """Seed the optimiser from a previous fit, matching teams by name.
 
     Consecutive barriers differ by a single matchday, so the previous solution is close. Teams the
     previous fit did not know start at the league average, which is exactly the cold-start prior.
+
+    Context-covariate coefficients carry over **by name**, not by position, so an arm that changes
+    which terms it holds cannot silently seed one term's coefficient into another's slot.
     """
     theta = theta0.copy()
     theta[_INTERCEPT] = previous.intercept
@@ -758,6 +863,11 @@ def _warm_start_vector(
         if team in prev:
             theta[_N_GLOBAL + k] = previous.attack[prev[team]]
             theta[_N_GLOBAL + free + k] = previous.defence[prev[team]]
+    if previous.cov_names:
+        offset = _N_GLOBAL + 2 * free + n_ha
+        for k, name in enumerate(cov_names):
+            if name in previous.cov_names:
+                theta[offset + k] = previous.cov_params[previous.cov_names.index(name)]
     if n_family and previous.family is not None:
         tail = []
         if previous.family.fits_shape:

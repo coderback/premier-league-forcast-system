@@ -141,7 +141,8 @@ def test_design_parameter_gradients(n_ha: int) -> None:
     y = rng.poisson(1.1, n).astype(float)
     weights = rng.uniform(0.3, 1.0, n)
     ha_design = rng.uniform(0.0, 3.0, (n, n_ha))
-    args = (x, y, home, away, weights, gammaln(x + 1), gammaln(y + 1), n_teams, ha_design)
+    args = (x, y, home, away, weights, gammaln(x + 1), gammaln(y + 1), n_teams, ha_design,
+            np.zeros((n, 0)), np.zeros((n, 0)))
 
     theta = np.concatenate([
         [0.1, 0.25, -0.05], rng.uniform(-0.4, 0.4, 2 * (n_teams - 1)),

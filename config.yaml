@@ -178,6 +178,20 @@ model:
     # k = 0.27, so 5 is nearly twenty times any dependence football has shown and is an outer box
     # rather than a constraint.
     frank_kappa: [-5.0, 5.0]
+    # Match-context covariates (model.seams.covariates). Each enters BOTH rates -- the home side's
+    # value adds to the home rate and subtracts from the away rate -- so a box is a statement about
+    # how far one unit of context can move a scoreline.
+    #
+    # cov_rest is per DAY of rest differential. At the top of this box a one-week differential
+    # would be exp(0.05*7) = 1.42x the goal rate, which no fatigue study has ever suggested, so
+    # this is an outer box rather than a constraint.
+    cov_rest: [-0.05, 0.05]
+    # cov_congestion is per MATCH already played in the trailing window. The differential spans
+    # about +/-3 matches, and exp(0.3) = 1.35x per extra match is generous in both directions.
+    cov_congestion: [-0.3, 0.3]
+    # cov_euro is the WHOLE effect of a European commitment, the flag being 0 or 1. exp(0.5) =
+    # 1.65x is far beyond anything a midweek fixture could plausibly do to a league match.
+    cov_euro: [-0.5, 0.5]
     # Outer box on a score-driven team state (model.seams.dynamics), in log-goal units of
     # deviation from the team's fitted level. exp(1.5) = 4.5x the team's own long-run rate, which
     # no run of form produces; this is a divergence guard for a recursion that could in principle
@@ -185,7 +199,20 @@ model:
     gas_state: [-1.5, 1.5]
 
   seams:
-    covariates: []                      # extra additive strength terms
+    # Match-context terms: properties of the FIXTURE rather than of the teams. Empty is off, and
+    # off means the design matrices are empty and the likelihood is byte-identical. How each term
+    # is measured lives in `model.context` below, following the same split as the ensemble seam
+    # and `model.gbm`: the seam says which terms are on, the settings block says what they mean.
+    #
+    #   rest        days since that side's previous league match, within the season
+    #   congestion  league matches that side played in a trailing window
+    #   euro        that club qualified for Europe this season, inside UEFA's playing weeks
+    #
+    # See model/covariates.py, and read its note on measurement error before reading a result:
+    # rest is computed from LEAGUE matches only, because the corpus has no cup or European
+    # fixtures, so European clubs look more rested than they are and the `euro` term is the only
+    # place that bias has to go.
+    covariates: []
     # Score-driven (GAS) time-varying team states — see model/dynamics.py for the recursion.
     # Each team carries a deviation from its fitted attack/defence level, updated after every match
     # by the score of the conditional likelihood (goals minus expected goals, scaled).
@@ -318,6 +345,74 @@ model:
     learning_rate: 0.05
     num_leaves: 5
     min_data_in_leaf: 20
+
+  # How each match-context covariate is MEASURED. The seam above says which terms are on; this
+  # says what they mean, so two arms can differ in which terms they carry and in nothing else.
+  #
+  # Only the two genuinely arbitrary settings are tuned, and both on backtest.tuning_span. The
+  # other three are CAUSAL definitions -- what the league calendar is, what UEFA's allocation for
+  # England is, when UEFA plays -- and tuning them would be fitting the definition to the outcome,
+  # exactly the trap the empty-stadium window was defined to avoid.
+  context:
+    # diff  -> one parameter per term: a tired side scores less by as much as it concedes more.
+    # split -> two, so the attack and defence halves of that restriction are free to differ.
+    # The differential form is what the research report recommends and is the production default;
+    # `split` exists so the restriction is a measurement rather than an assumption.
+    mode: diff
+    # Days of rest beyond which more rest is treated as the same amount of rest, before the two
+    # sides are differenced. CAUSAL, and the one place in this project where a tuning grid was run
+    # and then NOT followed -- so the reason is here rather than in the ledger alone.
+    #
+    # The grid on backtest.tuning_span, every value scored as the `rest` arm's own walk-forward
+    # RPS against a baseline of 0.20048:
+    #
+    #     clip     3        4        5        7       10       14       21
+    #     RPS   0.20051  0.20049  0.20050  0.20062  0.20060  0.20058  0.20057
+    #     zeros   99.3%    90.2%    86.4%    68.9%    62.0%    55.6%    54.6%
+    #
+    # Every value is worse than the baseline, and the winner (4, interior after the grid was
+    # extended down from 7) wins by leaving nine matches in ten with a rest differential of
+    # exactly zero. **The standing rule this establishes: take the grid winner unless the winner
+    # works by switching the term off, in which case the grid is answering the arm's question
+    # rather than choosing a hyperparameter.** Handing the arm a covariate that fires on a tenth
+    # of the sample and then reporting the near-null as a measurement of rest would be a way of
+    # not testing it.
+    #
+    # 14 days is where extra days stop plausibly meaning anything -- a club two weeks without a
+    # match is on a break, not rested -- and it keeps 96% of the correlation with unclipped rest
+    # while capping the 2019-20 suspension's 107-day gap, which is not rest either. The choice
+    # cannot change the verdict, only its size: every value on the grid rejects.
+    rest_clip_days: 14
+    # The value one week of rest is measured against, in days. CAUSAL, not tuned: 7 days is the
+    # league's modal gap -- 30.5% of all gaps on the tuning span are exactly a week -- so a
+    # centred covariate reads as "days more rested than a normal week" and the intercept keeps
+    # meaning the same thing it meant before the seam existed.
+    rest_reference_days: 7
+    # Trailing window, in days, over which a side's already-played league matches are counted.
+    # SELECTED by the grid on backtest.tuning_span; interior after BOTH edges were extended (up
+    # from 28, then again from 56 to 120), scored as the `congestion` arm's own walk-forward RPS:
+    #
+    #     window    7       10       14       21       28       42       56       84      120
+    #     RPS    0.20065  0.20059  0.20065  0.20061  0.20052  0.20053  0.20041  0.20051  0.20052
+    #
+    # Read this as "the curve is flat and 56 is a spike of one ten-thousandth in it", not as a
+    # resolved optimum: 56 is the only value that beats the 0.20048 baseline and it does so by
+    # 0.00008, with both neighbours worse. It is taken because it is the grid's winner and it is
+    # interior, and unlike the rest clip it wins by making the term MORE active, not less --
+    # the share of matches with a zero differential falls from 84% at a week to 61% here.
+    congestion_window_days: 56
+    # How many clubs from the previous season's final table are treated as being in Europe.
+    # CAUSAL, not tuned: England's UEFA allocation over this corpus is four Champions League
+    # places plus a Europa League place for fifth, with the remaining berths going to the cup
+    # winners or to sixth. Six is the number of league positions that reliably carry a European
+    # commitment; clubs that qualified through a cup the corpus cannot see are scored as not in
+    # Europe, which pulls the fitted coefficient toward zero rather than away from it.
+    euro_top_k: 6
+    # UEFA's playing season, as (MM-DD, MM-DD) wrapping the calendar year. CAUSAL: the group
+    # stages begin in mid-September and the finals are played by the end of May. Outside it the
+    # term is defined to be zero, which is what makes the out-of-window coefficient a placebo
+    # test rather than a second free parameter.
+    euro_window: ["09-14", "05-31"]
 
 # ---------------------------------------------------------------------------------------------
 # BACKTEST

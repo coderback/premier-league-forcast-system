@@ -454,6 +454,74 @@ def _dc_weibull_copula(ctx: ArmContext) -> np.ndarray:
     return _family_arm(ctx, marginal="weibull", dependence="frank")
 
 
+def _context_arm(ctx: "ArmContext", *, terms: tuple[str, ...], mode: str) -> np.ndarray:
+    """Shared body for the match-context arms.
+
+    One function so the four combinations cannot drift from each other, and so the only thing
+    separating any of them from the production model is which context terms the design carries:
+    same half-life, same cold-start rule, same tau correction with the same fitted rho, same
+    warm-started refit cadence.
+
+    The history is handed to ``predict_proba`` as well as to the fit, because unlike the
+    home-advantage terms these do NOT vanish at prediction time. How long each side has rested and
+    whether it is in Europe are both known before kickoff, so using them is leak-free — and the
+    history reaches no further than the barrier, because the splitter truncated it.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    spec = model.covariate_spec(terms=terms, mode=mode)
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+            covariates=spec,
+            cov_division=ctx.cfg.backtest.prediction_division,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test, ctx.train)
+
+
+@register("rest")
+def _rest(ctx: ArmContext) -> np.ndarray:
+    """Differential days of rest, one parameter. The plan's primary term."""
+    return _context_arm(ctx, terms=("rest",), mode="diff")
+
+
+@register("rest-euro")
+def _rest_euro(ctx: ArmContext) -> np.ndarray:
+    """Differential rest plus the European-commitment flag — the arm the plan specifies."""
+    return _context_arm(ctx, terms=("rest", "euro"), mode="diff")
+
+
+@register("rest-split")
+def _rest_split(ctx: ArmContext) -> np.ndarray:
+    """Differential rest with its attack and defence halves free rather than tied.
+
+    Tests the restriction the differential encoding imposes: that a tired side scores less by
+    exactly as much as it concedes more. Same information, one more parameter.
+    """
+    return _context_arm(ctx, terms=("rest",), mode="split")
+
+
+@register("congestion")
+def _congestion(ctx: ArmContext) -> np.ndarray:
+    """Matches already played in a trailing window, instead of the gap since the last one.
+
+    A club that played twice in eight days and one that played once are both "four days rested";
+    this is the measurement that can tell them apart.
+    """
+    return _context_arm(ctx, terms=("congestion",), mode="diff")
+
+
 def _pooled_channel_arm(ctx: "ArmContext", *, channel_name: str) -> np.ndarray:
     """Goals model logarithmically pooled with a chance-creation channel.
 
@@ -956,6 +1024,7 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
         ),
         **_dynamics_block(fits),
         **_family_block(fits),
+        **_context_block(fits),
         **_blend_block(state),
     }
 
@@ -1048,6 +1117,46 @@ def _family_block(fits: Sequence[object]) -> dict[str, object]:
     }
 
 
+def _context_block(fits: Sequence[object]) -> dict[str, object]:
+    """What the match-context covariates were fitted to, over the walk. Empty when the seam is off.
+
+    Every coefficient is reported with its whole trajectory rather than only its last value,
+    because a context term that changes sign along the walk is measuring something other than the
+    thing it is named after — and a term pinned at a bound is reporting that its box, not the
+    data, chose it.
+
+    ``undefined`` is the count of matches where a term had no value and was switched off rather
+    than filled in. It belongs in the report for the same reason cold starts do: a covariate that
+    was silently absent for a tenth of the sample is a different covariate.
+    """
+    named = [f for f in fits if getattr(f, "cov_names", ())]
+    if not named:
+        return {}
+    last = named[-1]
+    terms: dict[str, object] = {}
+    for k, name in enumerate(last.cov_names):
+        series = np.array([f.cov_params[k] for f in named])
+        terms[name] = {
+            "mean": float(series.mean()),
+            "min": float(series.min()),
+            "max": float(series.max()),
+            "final": float(series[-1]),
+            "share_negative": float((series < 0.0).mean()),
+        }
+    undefined: dict[str, int] = {}
+    for fit in named:
+        for term, count in getattr(fit, "cov_undefined", {}).items():
+            undefined[term] = max(undefined.get(term, 0), int(count))
+    return {
+        "covariates": {
+            "spec": last.cov_spec.label(),
+            "n_fits": len(named),
+            "terms": terms,
+            "max_matches_with_term_undefined": undefined,
+        }
+    }
+
+
 def _parameter_count(fit) -> int:
     """How many free parameters a fit carries — the axis Arm 1 is actually about.
 
@@ -1064,6 +1173,8 @@ def _parameter_count(fit) -> int:
     family = getattr(fit, "family", None)
     if family is not None:
         count += int(family.fits_shape) + int(family.fits_kappa) - int(not family.fits_rho)
+    # Context covariates are pure additions: they buy an extra term without giving anything up.
+    count += len(getattr(fit, "cov_names", ()))
     return count
 
 

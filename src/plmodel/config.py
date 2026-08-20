@@ -16,6 +16,7 @@ from typing import Any
 import yaml
 
 from plmodel.model.counts import CountSpec
+from plmodel.model.covariates import CovariateSpec
 
 # Repo root = three levels up from this file (src/plmodel/config.py -> repo root).
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -82,6 +83,7 @@ class ModelConfig:
     param_bounds: dict[str, tuple[float, float]]
     seams: dict[str, Any]
     gbm: dict[str, Any] = field(default_factory=dict)
+    context: dict[str, Any] = field(default_factory=dict)
 
     def seams_are_inert(self) -> bool:
         """True when every seam is off — the configuration the byte-identity tests pin."""
@@ -94,6 +96,34 @@ class ModelConfig:
             and (s.get("home_advantage") or {}).get("mode", "global") == "global"
             and list(s.get("tiers", ["E0"])) == ["E0"]
             and self._scoreline_spec().is_inert
+        )
+
+    def covariate_spec(
+        self, *, terms: tuple[str, ...] | None = None, mode: str | None = None
+    ) -> CovariateSpec | None:
+        """The configured context covariates, or None when the seam is off.
+
+        None rather than an empty spec, for the same reason the scoreline family returns None:
+        switching the seam off should remove the covariate code from the call graph rather than
+        route the production path through it and rely on the answer coming back the same.
+
+        ``terms`` and ``mode`` let a comparison arm ask for a specific combination without
+        rewriting the config — the settings that say what each term *means* still come from here,
+        so two arms can differ in which terms they carry and in nothing else.
+        """
+        settings = self.context or {}
+        chosen = tuple(terms if terms is not None else (self.seams.get("covariates") or ()))
+        if not chosen:
+            return None
+        window = settings.get("euro_window") or ["", ""]
+        return CovariateSpec(
+            terms=chosen,
+            mode=str(mode if mode is not None else settings.get("mode", "diff")),
+            rest_clip_days=int(settings["rest_clip_days"]),
+            rest_reference_days=int(settings["rest_reference_days"]),
+            congestion_window_days=int(settings["congestion_window_days"]),
+            euro_top_k=int(settings["euro_top_k"]),
+            euro_window=(str(window[0]), str(window[1])),
         )
 
     def _scoreline_spec(self) -> CountSpec:
@@ -301,6 +331,7 @@ def load_config(path: Path | str | None = None) -> Config:
             },
             seams=dict(m["seams"] or {}),
             gbm=dict(m.get("gbm") or {}),
+            context=dict(m.get("context") or {}),
         ),
         elo=EloRatingConfig(**{k: float(e[k]) for k in elo_keys}),
         season=_section(raw, "season"),

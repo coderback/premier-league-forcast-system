@@ -2866,3 +2866,412 @@ argues for paying that.
 
 Unchanged. `model.seams.ensemble.enabled` stays `false`, and off means the production model never
 imports lightgbm at all.
+
+---
+
+## 2026-08-20 — PRE-REGISTRATION, Arm 6: differential rest, fixture congestion, and a European flag
+
+*Written before any comparison was run on either evaluation span. Everything below is either
+descriptive statistics or hyperparameter selection on the **tuning span** (1996-97..2005-06), the
+third window neither evaluation span touches. One disclosure at the end of this entry names the
+single thing I saw that was not measured there.*
+
+### Hypothesis
+
+Encoding rest as a **differential** (home minus away) plus a **binary European-commitment flag**
+lowers pooled RPS. This is the research report's specific recommendation — *"encode as a
+differential plus a binary 'played European midweek' flag, not absolute rest"* — and it is the
+fourth WC2026 lead to be re-tested here. That project's `rest` arm was its best below-bar result
+(−0.0006, **P=0.952** against its tree parent, market gap +0.0057 → +0.0043), and the retrospective
+argued it should transfer *better* to a league, because international schedules are near-symmetric
+while Premier League congestion is genuinely asymmetric: European midweek fixtures hit six to eight
+clubs, not the whole division.
+
+### What the corpus can support, and what it cannot
+
+The corpus is football-data.co.uk's E0-E3. **It has no cup ties and no European fixtures**, and
+neither can be derived from it. So rest measured here is *days since that club's previous league
+match*, and for a club that played in Europe on the Thursday it reads seven days where the truth
+is three.
+
+That error is the arm's central problem, and it is not random noise: it falls on exactly the clubs
+whose congestion the arm exists to measure, and it always points the same way — European clubs look
+more rested than they are. Three consequences, all recorded before any result:
+
+1. The `euro` term is the only place that bias has to go. It is a **qualification proxy** derived
+   from the previous season's final league table, not an observation of played matches.
+2. Misclassification attenuates. A club that qualified through a cup the corpus cannot see is
+   scored as not-in-Europe, which pulls the coefficient toward zero rather than away from it.
+3. **The flag is correlated with being good.** Measured on the tuning span, the correlation between
+   the European differential and the fitted strength differential is **+0.66**, and flagged clubs
+   average +0.572 in combined attack-plus-defence against −0.021 for everyone else. A term that
+   fires for strong clubs and not weak ones can absorb strength rather than fatigue.
+
+Point 3 is why the term carries a calendar window. European football runs from mid-September to the
+end of May, so the term is *defined to be zero* outside it — which makes the same coefficient fitted
+on the summer matches alone a placebo, and a sharp one.
+
+The proxy does leave an observable footprint, which is the most that can be checked without the
+fixture list. Restricted to September-April, clubs flagged for Europe play 27.9% of their league
+matches on a Sunday against 16.8% for everyone else, and 52.6% on a Saturday against 62.3%. Within
+the four clubs that appear on both sides of the flag with 200+ matches each, the Sunday share rises
+by 4.8 points in the seasons they are flagged. That is consistent with Thursday and Wednesday
+European fixtures moving weekend games — and equally consistent with big clubs being television
+picks, which is exactly why the window, not the footprint, is the falsifier.
+
+### Four arms, because these are three constructs and two functional forms
+
+Baseline is `dixon-coles`, unchanged. Benjamini–Hochberg applies across the four.
+
+* **`rest`** — differential days since the previous league match, one parameter. The primary term.
+* **`rest-euro`** — differential rest plus the European flag. **The arm the plan specifies.**
+* **`rest-split`** — differential rest with its attack and defence halves free rather than tied.
+* **`congestion`** — league matches already played in a trailing window, instead of the gap since
+  the last one. A club that played twice in eight days and one that played once are both "four days
+  rested" by the first measure; this is what can tell them apart.
+
+A context term is a temporary strength adjustment, so it enters exactly where strength does:
+
+```
+diff    log lam += b*(v_home - v_away)          log mu -= b*(v_home - v_away)
+split   log lam += b_att*v_home - b_def*v_away  log mu += b_att*v_away - b_def*v_home
+```
+
+`diff` is `split` with `b_att == b_def`, which is worth stating plainly: the differential form is
+not a separate model, it is **the restriction that a tired side scores less by exactly as much as it
+concedes more**. Under it `log lam + log mu` is untouched, so the term moves who wins without moving
+how many goals. `rest-split` is there so that restriction is a measurement rather than an assumption.
+
+Everything else is held at the production value — same half-life, same cold-start rule, same tau
+correction with the same fitted rho, same warm-started refit cadence. The covariate seam and the
+scoreline-family seam **refuse to run together** in code, because an arm carrying both would be a
+two-axis test wearing a one-axis name.
+
+### Undefined rest is switched off, not filled in
+
+A club's first league match of a season has no previous league match. Its rest is not a small number
+or a large one; it is undefined, and it is never imputed — the whole term goes to zero for that
+match and the count is reported. On the tuning span that is **100 of 3,800 matches, and all 100 have
+it undefined on both sides**, because the opening round is the opening round for both clubs. So the
+differential is zero by symmetry rather than by assumption. A one-sided case would be a genuinely
+different question and is counted separately.
+
+### The tuning grids, and the rule one of them forced
+
+Both settings that are genuinely arbitrary were tuned on the tuning span, scored as each arm's own
+walk-forward RPS. The other three — the seven-day reference, the top-six cut-off, the UEFA window —
+are **causal definitions** and were not tuned, on the same grounds the empty-stadium window was not:
+fitting a definition to the outcome makes the resulting term look better than the evidence deserves.
+
+```
+rest_clip_days      3        4        5        7       10       14       21     (baseline 0.20048)
+RPS              0.20051  0.20049  0.20050  0.20062  0.20060  0.20058  0.20057
+zero differential  99.3%    90.2%    86.4%    68.9%    62.0%    55.6%    54.6%
+```
+
+Every value is worse than the baseline, and the winner — 4, interior after the grid was extended
+down from 7 — **wins by leaving nine matches in ten with a rest differential of exactly zero**. So
+this arm establishes a standing rule: *take the grid winner unless the winner works by switching the
+term off, in which case the grid is answering the arm's question rather than choosing a
+hyperparameter.* The clip is set causally at **14 days** — where extra days stop plausibly meaning
+anything, and which keeps 96% of the correlation with unclipped rest while capping the 2019-20
+suspension's 107-day gap, which is not rest either. The choice cannot change the verdict, only its
+size: every value on the grid rejects.
+
+```
+congestion_window     7       10       14       21       28       42       56       84      120
+RPS                0.20065  0.20059  0.20065  0.20061  0.20052  0.20053  0.20041  0.20051  0.20052
+zero differential    83.6%    80.8%    75.9%    71.3%    67.9%    63.6%    61.0%    59.4%    60.0%
+```
+
+Here the winner is taken: **56 days**, interior after both edges were extended, and — unlike the rest
+clip — it wins by making the term *more* active, not less. It is also the only value that beats the
+baseline, by 0.00008, with both neighbours worse. Read it as "the curve is flat and 56 is a spike of
+one ten-thousandth in it", not as a resolved optimum.
+
+### What the tuning span already says, and it is not encouraging
+
+Weighted log-likelihood at the end of the tuning span, fitted on 5,104 matches:
+
+| specification | Δ weighted log-lik | fitted coefficients |
+|---|---|---|
+| baseline | — | h 0.3240, rho −0.0259 |
+| `rest` | +0.018 | cov_rest **+0.00175** |
+| `rest-euro` | +0.104 | cov_rest +0.00183, cov_euro **+0.01989** |
+| `rest-split` | +0.044 | attack +0.00105, defence +0.00245 |
+| `congestion` | +0.276 | cov_congestion **+0.01774** |
+| `euro` alone | +0.085 | cov_euro +0.01966 |
+| **`euro` PLACEBO, summer only** | +0.105 | cov_euro **+0.03935** |
+
+**Nothing here is identified.** One free parameter buys between two hundredths and three tenths of a
+nat over five thousand matches; the conventional 5% likelihood-ratio benchmark is 1.92, and while a
+decay-weighted likelihood is not exactly χ²-calibrated, nothing on this table is within an order of
+magnitude of it.
+
+**And the placebo has already fired.** The European coefficient fitted on the summer matches — when
+no English club plays a European fixture — is **+0.0394, twice the +0.0197 it takes inside UEFA's own
+season**. The term measures the clubs that carry a European commitment, not the commitment.
+
+The raw association says the same thing in a different voice. On the tuning span, home points by
+rest differential run 0.576 / 0.622 / 0.599 / 0.577 / 0.625 across five bins against a league average
+of 0.598 — non-monotone, and the two extremes are the *highest* two cells. The congestion table is
+non-monotone the other way, and its raw direction (a home side that has played fewer recent matches
+takes more points) is the **opposite sign** to the coefficient the fit chooses. A term whose sign
+depends on whether you condition on strength is a term that is not measuring anything yet.
+
+### Pre-registered bar
+
+The standing rule: paired-bootstrap RPS delta favourable (95% CI excludes 0 **or** P(better) ≥ 0.95)
+**and** no degradation against the Shin de-vigged market on the odds-covered subset. DM as
+corroboration, BH-FDR across the four arms. Test span is the gate; the sensitivity span is reported
+beside it.
+
+### Three falsifiers, all pre-registered
+
+1. **The gain must live where the term is live.** Every term is exactly zero on a match whose two
+   sides carry the same value, and on such a match the arm *is* the baseline. So the delta must
+   decompose almost entirely onto live-differential matches, and the forecast difference on dead
+   matches must be at floating-point floor. If an arm improves while its gain is spread across
+   matches where its covariate contributes nothing, the improvement is a bug.
+2. **The European flag must be idle when Europe is idle.** The summer-only coefficient must be
+   materially smaller than the in-window one. It is not on the tuning span; if it is not on the
+   evaluation spans either, `rest-euro` is not measuring a midweek commitment whatever its RPS says.
+3. **A physiological effect does not change sign between decades.** If `cov_rest` is positive on one
+   evaluation span and negative on the other, the term is measuring a scheduling artefact that moved
+   with the calendar, not a property of tired footballers.
+
+### Predictions, recorded to be scored later
+
+| | prediction | P(clears gate 1) |
+|---|---|---|
+| `rest` | **+0.0000 to +0.0002** (nothing, or slightly worse) | 5% |
+| `rest-euro` | **+0.0000 to +0.0004** (worse) | 3% |
+| `rest-split` | **+0.0000 to +0.0003** (worse) | 4% |
+| `congestion` | **−0.0002 to +0.0002** (nothing) | 12% |
+
+Parameter predictions, which Arm 9 established are the more disciplined kind:
+
+* **The placebo fires on both evaluation spans**: the summer-only `cov_euro` is at least as large as
+  the in-window one.
+* **`cov_rest` has a different sign on the two evaluation decades.**
+* **`cov_rest_attack` and `cov_rest_defence` share a sign and stay within a factor of three of each
+  other** on both spans — the differential restriction is not rejected.
+* **BH-FDR rejects 0 of 4** on both spans.
+
+**Disclosure.** The prediction about `cov_rest` changing sign is not blind. The integration smoke
+test for this seam runs on 2024-25, one season inside the test span, and prints the fitted
+coefficients; it showed `cov_rest ≈ −0.008` where the tuning span gives +0.0018. No scoring metric —
+no RPS, no delta, no comparison of any kind — was computed on that season, and the smoke test is the
+same one every previous arm's seam has used. It is recorded here because a sign prediction made
+after seeing the sign is worth less than one made before, and the ledger should say which this is.
+
+**Where I expect to be wrong, if I am.** `congestion` at 56 days is the only setting anywhere in this
+arm that beat the baseline, and it is also the one whose meaning is least like congestion: eight
+weeks is roughly a dozen fixtures, so the differential is closer to *how far into its fixture list
+each club is* than to fatigue. If anything here surprises me it will be there, and the interesting
+finding would not be that congestion matters but that **fixture-list position** does — a club with
+games in hand is in a different state from one that has played them, and nothing in the model knows
+that. That would be a lead, not an arm.
+
+**On my own record.** Seven arms scored: four magnitude misses, two direction misses, and two
+consecutive arms where the calibration held. The bands above are tight because the tuning span has
+already measured almost all of this and found nothing; if an evaluation span disagrees materially
+with a weighted log-likelihood gain of two hundredths of a nat, the interesting question will be
+*why the windows disagree*, not whether rest matters.
+
+---
+
+## 2026-08-20 — RESULT, Arm 6: REJECT — and the one arm that looked alive is a shrinkage term wearing a fatigue label
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                    RPS  log loss   skill  vs market   vs baseline
+dixon-coles        0.20047    0.9718   16.1%   +0.00824   (baseline)
+rest               0.20051    0.9720   16.1%   +0.00824   +0.00004 [-0.00009, +0.00017] P=0.285
+rest-euro          0.20056    0.9722   16.1%   +0.00833   +0.00009 [-0.00013, +0.00032] P=0.215
+rest-split         0.20051    0.9720   16.1%   +0.00824   +0.00004 [-0.00009, +0.00018] P=0.281
+congestion         0.20051    0.9719   16.1%   +0.00828   +0.00004 [-0.00006, +0.00015] P=0.197
+```
+
+**Sensitivity span, 2006-07..2015-16, 995 barriers, 3,800 matches:**
+
+```
+rest               0.19674   +0.00003 [-0.00010, +0.00017]  P=0.317
+rest-euro          0.19637   -0.00033 [-0.00072, +0.00006]  P=0.951
+rest-split         0.19674   +0.00004 [-0.00010, +0.00017]  P=0.310
+congestion         0.19676   +0.00005 [-0.00007, +0.00017]  P=0.205
+```
+
+All four reject on the gate. Benjamini–Hochberg rejects **0 of 4** on each span; the smallest
+adjusted p-value anywhere is 0.354. Gate 2 is evaluable only on the test span — `avg_closing`
+covers no match before 2019/20, so the sensitivity span has zero market-covered matches and the
+market column there is empty rather than failed.
+
+`rest-euro` clears gate 1 on the *sensitivity* span, at −0.00033 with P=0.951. The rest of this
+entry is mostly about why that is not a rest result, and what it is instead.
+
+### The European flag is a group-level shrinkage term
+
+The pre-registered decomposition asked where each arm's delta comes from. Three of the four answer
+plainly; the fourth does not:
+
+```
+                     live on            delta      of which from live matches
+test span
+  rest            2,023 (53.2%)     +0.000039     +0.000045   (114%)
+  rest-split      3,160 (83.2%)     +0.000042     +0.000042   (100%)
+  congestion      1,098 (28.9%)     +0.000045     +0.000045   (100%)
+  rest-euro       2,023 (53.2%)     +0.000092     +0.000033    (36%)
+sensitivity span
+  rest-euro       1,836 (48.3%)     -0.000334     +0.000100   (-30%)
+```
+
+**On the sensitivity span `rest-euro` is *worse* on every match where its own covariate contributes
+anything, and its entire gain comes from matches where the covariate is switched off.** A term can
+only do that through the parameters it shares with the rest of the model, and it does:
+
+```
+turning the euro flag on, fitted to the end of each span
+
+                        cov_euro    flagged clubs' attack   everyone else's attack
+sensitivity (2016-05)   +0.03765            -0.02398                +0.00514
+test        (2026-05)   +0.01013            -0.00533                +0.00118
+```
+
+The fit moves strength *out* of the six flagged clubs — attack and defence together, by 0.024
+log-goals each on the sensitivity span — and hands part of it back as a season-constant bonus that
+applies only inside UEFA's calendar. Home advantage does not move at all (0.27108 → 0.27100). **This
+is shrinkage of the top clubs' ratings toward the league, dressed as a European term**, and it
+explains every part of the pattern: it helps most where the flag differential is zero (big-six
+against big-six, both ratings moved, no bonus on either side), it helps on 2006-16 when the big four
+were a stable and over-rated group, and it does nothing on 2016-26 when they were not.
+
+That is the third independent arm to point at the same missing piece. Arm 1 wanted per-team
+strengths shrunk toward a prior; Arm 8 found promoted clubs' ratings overstated against the clubs
+they actually face; Arm 5 handed a tree the fitted abilities and asked it to find exactly this, and
+it could not. Here a crude top-six dummy finds it on one decade — worth 0.0003 RPS — while measuring
+nothing about football fixtures at all.
+
+### The placebo, and what its instability means
+
+Pre-registered falsifier 2: European football is not played in the summer, so the same coefficient
+fitted on summer matches alone must be smaller if it measures a midweek commitment.
+
+```
+                      inside UEFA's season    summer only    ratio
+tuning span                     +0.01966        +0.03935      2.0x
+test span                       +0.01334        +0.15871     11.9x
+sensitivity span                +0.03763        -0.02922     opposite sign
+```
+
+On the tuning and test spans the placebo fires hard — the flag is *larger* out of season than in it,
+twelve-fold on the test decade. On the sensitivity span it does not fire at all. The honest reading
+is not "the placebo passes on one span": it is that **a coefficient which doubles, multiplies by
+twelve, or changes sign depending on which window and which decade you fit it on is not measuring
+anything**, and the placebo is picking up the same instability as everything else here. The
+summer-only fit rests on matches where the term fires 5% of the time, so its coefficient is the
+least identified number in this entry.
+
+### Nothing about rest is stable, including its sign
+
+```
+                        cov_rest mean    negative at    range
+tuning span (fit)            +0.00175             --    --
+test span                    -0.00309            75%    [-0.01385, +0.00761]
+sensitivity span             +0.00052            42%    [-0.01122, +0.01038]
+```
+
+Pre-registered falsifier 3 fires: **`cov_rest` has a different sign on the two evaluation decades**,
+and within each decade it crosses zero repeatedly. `congestion` does the same in the opposite
+direction (+0.00094 on the test span, −0.00667 on the sensitivity span). A physiological effect does
+not do this. A scheduling artefact that moved with the television calendar does.
+
+The direction on the test decade is worth naming even though it is not significant, because it is
+the opposite of the hypothesis: `cov_rest` negative means the *better-rested* side does worse. Read
+alongside congestion's positive sign on the same decade, both terms say the same thing — playing
+recently is mildly good, resting is mildly bad — which is the rhythm story, not the fatigue story.
+Neither is identified, so this is a direction to remember, not a finding.
+
+### The differential restriction is not the problem
+
+`rest-split` frees the attack and defence halves that `rest` ties together. The two halves agree on
+sign on both spans (test −0.00257 and −0.00363; sensitivity +0.00096 and +0.00008), and `rest-split`
+scores within 0.00001 of `rest` on both. The extra parameter buys nothing. **The differential
+encoding the research report recommends is not what is holding this arm back** — there is nothing
+for either encoding to find.
+
+### A falsifier I specified wrongly
+
+Falsifier 1 as pre-registered said the forecast difference on a *dead* match — one where the
+covariate contributes exactly zero — must be at floating-point floor. **That is wrong, and it is
+wrong in an instructive way.** A covariate is estimated *jointly*: adding one moves every team's
+attack and defence, so a match where the term contributes nothing still gets a different forecast.
+Measured: 3.9e-03 for `rest`, 5.5e-02 for `rest-euro`.
+
+The mistake was treating a covariate as a post-hoc adjustment layered on a frozen fit, which is what
+the *pooling* arms are and what these are not. The decomposition survives the correction and is
+sharper than the floor test would have been: it is exactly the dead-match difference that exposed
+`rest-euro` as a strength term. The falsifier should have said *the delta must decompose onto live
+matches*, and that is what the table above reports.
+
+### Scoring the predictions
+
+| prediction | outcome |
+|---|---|
+| `rest` +0.0000 to +0.0002 | **right** — +0.00004 test, +0.00003 sensitivity |
+| `rest-euro` +0.0000 to +0.0004 | **half** — +0.00009 test, but −0.00033 on sensitivity |
+| `rest-split` +0.0000 to +0.0003 | **right** — +0.00004 both spans |
+| `congestion` −0.0002 to +0.0002 | **right** — +0.00004 test, +0.00005 sensitivity |
+| BH rejects 0 of 4 on both spans | **right** |
+| `cov_rest` differs in sign across the decades | **right** — −0.0031 against +0.0005 |
+| the placebo fires on both evaluation spans | **wrong** — 11.9x on the test span, reversed on the sensitivity span |
+| split halves share a sign, within 3x of each other | **half** — sign yes on both, ratio 1.4x on the test span but 12x on the sensitivity span |
+
+**Six of eight, counting halves as halves: 6.0.** Four consecutive arms now where the RPS bands
+landed, and the two misses are both *parameter* predictions — the reverse of this project's earlier
+pattern, where magnitudes were over-predicted three- to ten-fold and parameters landed.
+
+The ratio test was a badly chosen instrument and I should say so rather than score it generously: on
+the sensitivity span the two halves are +0.00096 and +0.00008, which is a factor of twelve only
+because both are indistinguishable from zero. A ratio between two numbers that are both nothing is
+not a measurement. The question I wanted to ask — *does freeing the restriction change the
+forecast?* — was answered by the RPS gap of 0.00001, and that is how it should have been stated.
+
+### What this does and does not license
+
+It licenses: **days since the previous league match, matches in a trailing window, and a
+previous-table European flag carry no usable information about Premier League results through this
+model.** Four arms over two decades and 2,148 barriers, and the largest effect anywhere -- on the span that
+is not the gate -- is a twenty-fifth of the gap to the closing line.
+
+It does not license "congestion does not matter". The corpus has no cup ties and no European
+fixtures, so *every* rest figure here is measured from league matches alone and is wrong by exactly
+the amount that matters most — three or four days for the clubs that played on the Thursday. The
+`euro` term was the arm's attempt to give that bias somewhere to go, and instead of correcting the
+measurement it found a shrinkage parameter. **The honest conclusion is that this question cannot be
+answered from football-data.co.uk**, and that answering it needs a fixture list the project does not
+have.
+
+That is a data conclusion, not a modelling one, and it is the fourth WC2026 lead not to transfer.
+
+### Two things recorded for later
+
+**The group-shrinkage lead is now three arms deep and worth its own arm.** A season-constant offset
+applied to an identifiable group of clubs bought −0.0003 RPS on 2006-16 through the team parameters
+alone. The right version of that is not a top-six dummy — it is hierarchical shrinkage of the team
+parameters toward a league prior, which is what Arm 1 asked for and what Arm 8's promotion discount
+is a special case of. It should be tested as a *prior*, not as a covariate.
+
+**Gate 2 is not evaluable on the sensitivity span**, and every future arm's report should say so
+rather than printing a failed gate. `avg_closing` begins in 2019/20; the 2006-16 window has zero
+covered matches, so `vs_market` is empty and the comparison `nan <= nan` reads as a failure it is
+not. The verdict lines in `arm6_sensitivity.json` carry `gate2=False` for all four arms for this
+reason and should be read as "not evaluable".
+
+### Production status
+
+Unchanged. `model.seams.covariates` stays empty, and empty means the design matrices carry no
+columns and the likelihood is byte-identical. Verified beyond the seam test this time: the full
+test-decade baseline walk re-run after all of this arm's changes reproduces digest `d398b3ca…`,
+written on 2026-08-18 — 3,800 matches over 1,153 barriers, byte for byte.
