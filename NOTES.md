@@ -3802,9 +3802,15 @@ production baseline walk over the test decade, recomputed from scratch in 209 se
 `config.yaml` changed and every cached entry became unreachable, reproduces digest
 `d398b3cab1d04106` across all 3,800 matches, first written on 2026-08-18.
 
-Suite: 495 unit tests pass, from 438, and the six new season integration tests pass against the
-real corpus — including the structural one, that a forecast made at a barrier is byte-identical
-whether or not the rest of the season exists in the corpus. The full 50-test integration suite was
-not run to completion here: the two scoreline-family tests refit a whole season's walk four times
-with a 61-term series and take hours on this machine. What they exercise of this change is the
-`match_rates` refactor, and the recomputed baseline digest already settles that.
+Suite: 495 unit tests pass, from 438, and 48 of the 50 integration tests — everything except the
+two scoreline-family tests, which refit a whole season's walk four times with a 61-term series and
+take hours on this machine. What those two exercise of this change is the `match_rates` refactor,
+and the recomputed baseline digest already settles that.
+
+**The integration run caught one thing, and it was the test rather than the simulator.**
+`test_drift_widens_a_real_season_without_moving_its_centre` built its point-estimate arm by asking
+config.yaml for the default, so the moment that default became `drift` it was comparing drift
+against itself — two identical forecasts and an assertion that they differ. Fixed by naming both
+settings explicitly. Worth recording because the failure mode is silent in the other direction: had
+the assertion been `>=` rather than `>`, a test that compares a thing to itself would have passed
+for the rest of the project's life. A test of one setting against another has to name both.

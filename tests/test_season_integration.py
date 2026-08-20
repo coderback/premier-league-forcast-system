@@ -14,7 +14,7 @@ import pytest
 
 from plmodel.eval.backtest import training_frame
 from plmodel.model.dixon_coles import fit_dixon_coles
-from plmodel.season.simulate import UNCERTAINTY_DRIFT, simulate_season
+from plmodel.season.simulate import UNCERTAINTY_DRIFT, UNCERTAINTY_POINT, simulate_season
 from plmodel.season.validate import (
     actual_table,
     matchweek_barriers,
@@ -45,7 +45,14 @@ def _fit(cfg, matches, barrier):
     )
 
 
-def _forecast(cfg, matches, rows, barrier, *, uncertainty=None):
+def _forecast(cfg, matches, rows, barrier, *, uncertainty=UNCERTAINTY_POINT):
+    """A forecast at a barrier, with the uncertainty mode named rather than defaulted.
+
+    Named on purpose. An earlier version passed ``None`` here and let config.yaml decide, which
+    made the point-versus-drift test compare the configured default against itself the moment that
+    default changed -- two identical forecasts, and an assertion that they differ. A test of one
+    setting against another has to name both.
+    """
     played = rows[(rows["date"] < barrier) & rows["played"]]
     remaining = rows[rows["date"] >= barrier]
     return simulate_season(
@@ -113,6 +120,7 @@ def test_drift_widens_a_real_season_without_moving_its_centre(cfg, corpus, seaso
     point = _forecast(cfg, corpus, season_rows, barrier)
     drift = _forecast(cfg, corpus, season_rows, barrier, uncertainty=UNCERTAINTY_DRIFT)
     band = lambda f: f.points_quantile(0.95) - f.points_quantile(0.05)
+    assert point.uncertainty == UNCERTAINTY_POINT and drift.uncertainty != UNCERTAINTY_POINT
     assert band(drift).mean() > band(point).mean()
     # Centres move by less than the widening does: drift is uncertainty, not a different model.
     centre_shift = np.abs(
