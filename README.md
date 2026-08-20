@@ -46,6 +46,7 @@ pl compare     paired A/B of candidate arms vs baseline, with the market gate
 pl simulate    season Monte Carlo -> title / top-4 / relegation / points distribution
                --validate scores those probabilities against every completed season
                --uncertainty point|drift overrides how strength uncertainty propagates
+pl predict     forecast fixtures typed on the command line -> 1X2, O/U, BTTS, exact scores
 pl reproduce   re-run an external claim on our data
 pl audit       calibration slices: promoted-team, big-six-vs-rest, favourite, by season
 pl live        freeze a matchweek's forecasts before kickoff; score them after

@@ -12,7 +12,14 @@ Why the roster exists as well as the aliases: the real hazard is not a name we h
 it is a name that changes spelling between seasons and silently becomes a *second team* with a
 fresh, empty history. That failure is invisible without a closed roster — the frame still looks
 well-formed, the model just quietly forgets a club's past. Fuzzy matching would paper over exactly
-this, so it is never used.
+this, so **it is never used on the ingest path**.
+
+It is used in exactly one place, at the other end of the program: :func:`resolve_team`, which maps
+what a person typed at a command line onto a canonical name. The two are opposite problems. An
+unrecognised name arriving from the *source* is a data error and must stop the ingest; an
+unrecognised name arriving from a *person* is a typo, and refusing to forecast Man United because
+someone wrote "Man Utd" helps nobody. The resolver never touches the corpus, reports every
+substitution it makes, and refuses to guess between two plausible clubs.
 
 The WC2026 project's two worst bugs were both silent key misses (a substring config key matching
 the wrong tier; an accented tournament name falling through to a fallback). Both were invisible
@@ -20,7 +27,9 @@ until audited. This module is the guard against the same class of bug here.
 """
 from __future__ import annotations
 
+import difflib
 import unicodedata
+from collections.abc import Sequence
 from pathlib import Path
 
 import pandas as pd
@@ -103,3 +112,55 @@ def find_near_duplicates(names: set[str]) -> list[tuple[str, str]]:
             for j in range(i + 1, len(group)):
                 pairs.append((group[i], group[j]))
     return pairs
+
+
+# How much better the best fuzzy match must be than the runner-up before it is accepted
+# without asking. Below this the two names are close enough that guessing is a coin flip.
+_RESOLVE_MARGIN = 0.08
+
+
+# --- resolving a name a human typed ------------------------------------------------------------
+
+class AmbiguousTeamError(TeamNameError):
+    """Raised when typed input matches no club, or several equally well."""
+
+
+def resolve_team(typed: str, known: Sequence[str], *, aliases: dict[str, str] | None = None,
+                 cutoff: float = 0.6) -> str:
+    """Best canonical name for something a person typed at a command line.
+
+    Deliberately separate from :func:`load_aliases`, which maps *source* spellings and is a closed
+    set guarding corpus integrity: a typo there is a data error and must fail. Here a typo is a
+    person in a hurry, and "Man Utd" should reach Man United rather than a stack trace.
+
+    Resolution is reported rather than silent, and an ambiguous input raises with the candidates
+    instead of guessing — picking the alphabetically-first of two plausible clubs is how a forecast
+    ends up quietly about the wrong team.
+    """
+    names = list(known)
+    folded = {_fold(n): n for n in names}
+    key = _fold(typed)
+    if typed in names:
+        return typed
+    if aliases and typed in aliases and aliases[typed] in names:
+        return aliases[typed]
+    if key in folded:
+        return folded[key]
+
+    close = difflib.get_close_matches(typed.lower(), [n.lower() for n in names], n=4, cutoff=cutoff)
+    lower = {n.lower(): n for n in names}
+    if len(close) == 1:
+        return lower[close[0]]
+    if len(close) > 1:
+        best, runner = difflib.SequenceMatcher(None, typed.lower(), close[0]).ratio(), \
+            difflib.SequenceMatcher(None, typed.lower(), close[1]).ratio()
+        # A clear winner is accepted; a near-tie is the caller's to settle.
+        if best - runner >= _RESOLVE_MARGIN:
+            return lower[close[0]]
+        raise AmbiguousTeamError(
+            f"{typed!r} could be any of {[lower[c] for c in close]}; write the name in full"
+        )
+    raise AmbiguousTeamError(
+        f"no club matches {typed!r}. Closest: "
+        f"{difflib.get_close_matches(typed.lower(), [n.lower() for n in names], n=5, cutoff=0.3)}"
+    )

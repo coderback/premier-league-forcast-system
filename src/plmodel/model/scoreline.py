@@ -151,3 +151,41 @@ def tau_is_valid(lam: np.ndarray, mu: np.ndarray, rho: float) -> bool:
         and np.all(1.0 + mu * rho > 0)
         and (1.0 - rho > 0)
     )
+
+
+# --- markets derived from the scoreline grid ---------------------------------------------------
+#
+# All of these are the same object read differently: the joint distribution over (home, away)
+# goals that the model already produces. Nothing here is a new model, which is the point --
+# over/under and both-teams-to-score fall out of a goals model for free, and a separate fit for
+# each would be several models that could disagree about the same match.
+
+def totals_probability(joint: np.ndarray, line: float) -> tuple[np.ndarray, np.ndarray]:
+    """``(over, under)`` for a total-goals line. A whole-number line would push; a .5 line cannot."""
+    x, y = _goal_axes(joint)
+    total = x + y
+    return joint.sum(axis=(1, 2), where=(total > line)), joint.sum(axis=(1, 2), where=(total < line))
+
+
+def both_teams_to_score(joint: np.ndarray) -> np.ndarray:
+    """Probability each side scores at least once."""
+    x, y = _goal_axes(joint)
+    return joint.sum(axis=(1, 2), where=((x > 0) & (y > 0)))
+
+
+def top_scorelines(joint: np.ndarray, n: int) -> list[list[tuple[int, int, float]]]:
+    """The ``n`` most likely exact scores per match, most likely first."""
+    out: list[list[tuple[int, int, float]]] = []
+    for grid in joint:
+        flat = np.argsort(grid, axis=None)[::-1][:n]
+        rows, cols = np.unravel_index(flat, grid.shape)
+        out.append([(int(i), int(j), float(grid[i, j])) for i, j in zip(rows, cols)])
+    return out
+
+
+def _goal_axes(joint: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    if joint.ndim != N_OUTCOMES:
+        raise ValueError(f"expected an (N, G+1, G+1) grid; got {joint.shape}")
+    x = np.arange(joint.shape[1]).reshape(1, -1, 1)
+    y = np.arange(joint.shape[2]).reshape(1, 1, -1)
+    return x, y

@@ -19,6 +19,16 @@ from plmodel.config import ConfigError, load_config
 # command the project set out to build exists.
 _PLANNED: dict[str, str] = {}
 
+# Accepted spellings of "against" in a fixture typed at the command line.
+_FIXTURE_SEPARATORS = (" v ", " vs ", " V ", " - ")
+
+# Back-off from the tau validity boundary, matching the model's own prediction-time clamp.
+_PREDICT_RHO_MARGIN = 0.01
+
+# A club above the cold-start floor but below this multiple of it has parameters that look
+# confident and are not. Hull's 2017 rating is the case this exists to surface.
+_STALE_MULTIPLE = 3.0
+
 # External claims this project has re-run on its own data, by paper id.
 _REPRODUCIBLE: tuple[str, ...] = ("pitcan2026",)
 
@@ -646,6 +656,184 @@ def _print_validation(summary: dict, seasons: tuple[str, ...]) -> None:
           "title, so the rows inside a season are anything but independent.")
 
 
+def cmd_predict(args: argparse.Namespace) -> int:
+    """Forecast fixtures typed at the command line, or read from a file."""
+    import numpy as np
+    import pandas as pd
+
+    from plmodel.data.teams import AmbiguousTeamError, load_aliases, resolve_team
+    from plmodel.model.scoreline import (
+        both_teams_to_score,
+        clamp_rho_for_rates,
+        collapse_three_class,
+        scoreline_matrix,
+        top_scorelines,
+        totals_probability,
+    )
+
+    cfg = load_config(args.config)
+    _, matches = _load_corpus(cfg)
+    ref = pd.Timestamp(args.asof) if args.asof else matches["date"].max() + pd.Timedelta(days=1)
+    train = matches[matches["date"] < ref]
+    if train.empty:
+        print(f"no matches before {ref.date()}", file=sys.stderr)
+        return 2
+
+    try:
+        pairs = _parse_fixtures(args)
+    except ValueError as exc:
+        print(f"could not read the fixtures: {exc}", file=sys.stderr)
+        return 2
+    if not pairs:
+        print("no fixtures given; use --fixtures, --file, or --home/--away", file=sys.stderr)
+        return 2
+
+    fit = _season_fit(cfg, matches, ref)
+    known = sorted(set(matches["home_team"]) | set(matches["away_team"]))
+    aliases = load_aliases(cfg.static_dir)
+    resolved: list[tuple[str, str]] = []
+    for home, away in pairs:
+        try:
+            resolved.append((resolve_team(home, known, aliases=aliases),
+                             resolve_team(away, known, aliases=aliases)))
+        except AmbiguousTeamError as exc:
+            print(f"{exc}", file=sys.stderr)
+            return 2
+    for (typed_h, typed_a), (h, a) in zip(pairs, resolved):
+        if typed_h != h or typed_a != a:
+            print(f"read '{typed_h} v {typed_a}' as '{h} v {a}'")
+
+    frame = pd.DataFrame([{"date": ref, "home_team": h, "away_team": a} for h, a in resolved])
+    lam, mu = fit.match_rates(frame)
+    rho, _ = clamp_rho_for_rates(lam, mu, fit.rho, margin=_PREDICT_RHO_MARGIN)
+    grid = scoreline_matrix(lam, mu, rho, cfg.model.max_goals)
+    outcome = collapse_three_class(grid)
+    over, under = totals_probability(grid, args.line)
+    btts = both_teams_to_score(grid)
+    scores = top_scorelines(grid, args.top)
+    quality = _team_history(train, fit, ref, cfg)
+
+    print(f"as of     : {ref.date()}   ({len(train):,} matches behind the barrier)")
+    print(f"half-life : {fit.half_life_days:.0f} days   home advantage {fit.home_advantage:+.4f}")
+    for i, (h, a) in enumerate(resolved):
+        print(f"\n{h} v {a}")
+        print(f"  expected goals   {lam[i]:.2f} - {mu[i]:.2f}")
+        print(f"  home / draw / away   {outcome[i, 0]:.3f} / {outcome[i, 1]:.3f} / "
+              f"{outcome[i, 2]:.3f}")
+        print(f"  over {args.line} / under {args.line}   {over[i]:.3f} / {under[i]:.3f}"
+              f"        both to score  {btts[i]:.3f} / {1.0 - btts[i]:.3f}")
+        print("  likeliest scores " + ",  ".join(
+            f"{x}-{y} {p:.3f}" for x, y, p in scores[i]))
+        for club in (h, a):
+            note = quality[club]
+            if note:
+                print(f"  ! {club}: {note}")
+
+    payload = {
+        "as_of": str(ref.date()),
+        "n_train": int(len(train)),
+        "line": args.line,
+        "fixtures": [
+            {
+                "home_team": h, "away_team": a,
+                "expected_goals": [float(lam[i]), float(mu[i])],
+                "home": float(outcome[i, 0]), "draw": float(outcome[i, 1]),
+                "away": float(outcome[i, 2]),
+                "over": float(over[i]), "under": float(under[i]),
+                "both_teams_to_score": float(btts[i]),
+                "top_scorelines": [
+                    {"home_goals": x, "away_goals": y, "p": p} for x, y, p in scores[i]
+                ],
+                "warnings": [quality[c] for c in (h, a) if quality[c]],
+            }
+            for i, (h, a) in enumerate(resolved)
+        ],
+        "not_modelled": (
+            "Half-time/full-time, first goalscorer, assists, cards and corners are NOT produced "
+            "here. Every market above is a reading of one full-time scoreline distribution; "
+            "anything needing a half-time state or a player is a model this project has not built."
+        ),
+    }
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.output_dir / (args.out or "predict.json")
+    out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+    print(f"\nHalf-time/full-time is not modelled — see `pl predict --help`.")
+    print(f"report    : {out_path}")
+    return 0
+
+
+def _parse_fixtures(args: argparse.Namespace) -> list[tuple[str, str]]:
+    """Fixtures from --home/--away, --fixtures, or a CSV file. Any mix is accepted."""
+    import pandas as pd
+
+    pairs: list[tuple[str, str]] = []
+    if args.home or args.away:
+        if not (args.home and args.away):
+            raise ValueError("--home and --away must be given together")
+        pairs.append((args.home.strip(), args.away.strip()))
+    if args.fixtures:
+        for chunk in args.fixtures.split(","):
+            text = chunk.strip()
+            if not text:
+                continue
+            for token in _FIXTURE_SEPARATORS:
+                if token in f" {text} ":
+                    home, _, away = text.partition(token.strip() if token != " - " else " - ")
+                    if home.strip() and away.strip():
+                        pairs.append((home.strip(), away.strip()))
+                        break
+            else:
+                raise ValueError(f"{text!r} is not 'Home v Away'")
+    if args.file:
+        frame = pd.read_csv(args.file)
+        missing = {"home_team", "away_team"} - set(frame.columns)
+        if missing:
+            raise ValueError(f"{args.file} is missing columns {sorted(missing)}")
+        pairs.extend((str(r.home_team), str(r.away_team)) for r in frame.itertuples(index=False))
+    return pairs
+
+
+def _team_history(train, fit, ref, cfg) -> dict[str, str]:
+    """A warning per club whose parameters rest on little or old evidence, keyed by club.
+
+    The season validation put promoted clubs' relegation Brier at three to four times everyone
+    else's, and the worst case is not the club the fit has never seen -- that one is visibly pinned
+    at the league average -- but the club whose last top-flight match was years ago and which
+    therefore carries a confident-looking number fitted to almost nothing.
+    """
+    import numpy as np
+
+    from plmodel.model.dixon_coles import decay_weights
+
+    weights = decay_weights(train["date"], ref, cfg.model.decay_half_life_days)
+    effective: dict[str, float] = {}
+    last_seen: dict[str, object] = {}
+    for side in ("home_team", "away_team"):
+        for club, w, when in zip(train[side], weights, train["date"]):
+            effective[club] = effective.get(club, 0.0) + float(w)
+            if club not in last_seen or when > last_seen[club]:
+                last_seen[club] = when
+    median = float(np.median(list(effective.values()))) if effective else 0.0
+    floor = median * cfg.model.min_effective_share
+
+    notes: dict[str, str] = {}
+    for club in set(fit.teams) | set(effective) | set(fit.cold_start_teams):
+        share = effective.get(club, 0.0)
+        seen = last_seen.get(club)
+        if share == 0.0:
+            notes[club] = ("never seen in this division — pinned at the league average, which "
+                           "rates it as a typical club of this tier")
+        elif share < floor:
+            notes[club] = (f"cold-started: {share:.1f} effective matches against a median of "
+                           f"{median:.0f}; last seen {seen.date()}")
+        elif share < floor * _STALE_MULTIPLE:
+            notes[club] = (f"thin evidence: {share:.1f} effective matches, last seen "
+                           f"{seen.date()} — the parameters look confident and are not")
+        else:
+            notes[club] = ""
+    return notes
+
+
 def _planned(name: str) -> int:
     print(f"`pl {name}` is not built yet: {_PLANNED[name]}.", file=sys.stderr)
     return 2
@@ -719,6 +907,28 @@ def build_parser() -> argparse.ArgumentParser:
     ps.add_argument("--progress", action="store_true", help="print each barrier as it runs")
     ps.add_argument("--out", default=None, help="report filename within the output directory")
     ps.set_defaults(func=cmd_simulate)
+
+    pp = sub.add_parser(
+        "predict",
+        help="forecast fixtures given on the command line",
+        description=(
+            "Full-time markets for any fixture: home/draw/away, over/under, both teams to "
+            "score, and the likeliest exact scores. All of it is one scoreline distribution "
+            "read different ways. Half-time/full-time, goalscorers, assists, cards and corners "
+            "are NOT modelled and this command will not invent them."
+        ),
+    )
+    pp.add_argument("--fixtures", default=None,
+                    help="comma-separated, e.g. \"Arsenal v Coventry, Man Utd v Hull\"")
+    pp.add_argument("--file", default=None, help="CSV with home_team and away_team columns")
+    pp.add_argument("--home", default=None, help="a single fixture's home side")
+    pp.add_argument("--away", default=None, help="a single fixture's away side")
+    pp.add_argument("--asof", default=None,
+                    help="forecast as of this date (default: after the last match in the corpus)")
+    pp.add_argument("--line", type=float, default=2.5, help="total-goals line (default 2.5)")
+    pp.add_argument("--top", type=int, default=6, help="how many exact scores to list")
+    pp.add_argument("--out", default=None, help="report filename within the output directory")
+    pp.set_defaults(func=cmd_predict)
 
     for name, purpose in _PLANNED.items():
         p = sub.add_parser(name, help=f"[not built yet] {purpose}")
