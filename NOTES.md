@@ -2589,3 +2589,280 @@ dependence device costs a `CountSpec` rather than a rewrite. And the sign revers
 dependence is a standing fact about this corpus that any later work on draws will need: a device
 calibrated on one decade of Premier League scorelines is being calibrated on a parameter that has
 changed sign within the span of the data.
+
+---
+
+## 2026-08-20 — PRE-REGISTRATION, Arm 5: the Dixon-Coles ⊕ LightGBM hybrid, and its blend weight
+
+*Written before any comparison was run on either evaluation span. Everything below is either
+descriptive statistics or hyperparameter selection on the **tuning span** (1996-97..2005-06), the
+third window neither evaluation span touches. No arm result existed.*
+
+### Hypothesis
+
+Feeding the Dixon-Coles fit's own ability parameters to a gradient-boosted per-team goals
+regressor, and logarithmically pooling the two, lowers pooled RPS — the Groll, Ley, Schauberger &
+Van Eetvelde (2019) hybrid, and the one change that ever passed the bar in the WC2026 project
+(`ens-gbm`, −0.0021 [−0.0034, −0.0008], P=0.999, market gap +0.0075 → +0.0061).
+
+### This arm is narrower than the plan's one-liner, and narrower than WC2026's
+
+The plan lists Arm 5 as "blend weight re-fit … H: optimal ≠ 50/50", which presumes the blend
+already exists. Here it does not: the `ensemble` seam has been declared and empty since the
+skeleton. So the arm has to answer three questions, and it is run as three arms rather than one:
+
+* **`gbm`** — the gradient-boosted parent alone. Run because *"the blend beat the baseline"* and
+  *"the blend beat both its parents"* are different claims, and only the second is an ensemble
+  result rather than a better single model wearing a blend's clothes.
+* **`ens-gbm-half`** — the fixed 50/50 pool WC2026 shipped.
+* **`ens-gbm`** — the pool with its weight fitted by predictive likelihood. The plan's actual arm.
+
+Benjamini–Hochberg applies across the three. Baseline is `dixon-coles`, unchanged.
+
+**The information set is held fixed and only the functional form varies.** Every one of the ten
+features is derived from the Dixon-Coles fit at the same barrier or from the fixture's position in
+the season: both sides' attack and defence, the model's own log rate for that side, each club's
+decay-weighted history, each club's match index, and a home flag. Rest and congestion belong to
+Arm 6 and are deliberately absent; availability belongs to Arm 7; rating trajectories are out of
+scope for the project. **This therefore does not test the hybrid pattern as WC2026 ran it** — that
+version fed its trees genuinely extra covariates. It tests something sharper and smaller: *does
+Dixon-Coles' log-additive map from abilities to goal rates leave anything a tree can find?*
+
+There is a specific reason to think it might. `log lam = c + h + Attack[home] − Defence[away]` makes
+a strong attack meeting a weak defence exactly the sum of two effects. Two arms have independently
+pointed at that additivity: Arm 1 wanted per-team strengths shrunk toward a prior, and Arm 8
+measured a promoted club's rating as badly overstated against the clubs it actually faces. A tree
+given attack and defence separately *and* their combination can express a shrinkage the sum cannot.
+
+**Everything else is held at the production value** — the same decay half-life, the same cold-start
+rule, and the same tau correction with the same fitted rho applied to the trees' rates. Arm 9
+established the scoreline family as its own axis, so borrowing it keeps this arm to one axis. If the
+arm is accepted, the acceptance rule's mandated retune is where the half-life gets to move.
+
+### The tree settings were tuned here, and they are a finding in themselves
+
+Coordinate descent cycled to convergence on the tuning span, scored on the gradient-boosted parent's
+own walk-forward RPS. Two axes first won at a grid edge and the grid was extended downward until
+they did not.
+
+```
+TUNED: n_estimators 200, learning_rate 0.05, num_leaves 5, min_data_in_leaf 20   RPS 0.20101
+```
+
+Every axis interior. **Five leaves is a tree model asking to do as little as possible**, and
+capacity in either direction is punished hard: 31 leaves scores 0.20458, 800 rounds 0.20206, against
+the optimum's 0.20101. Nothing was inherited from WC2026, whose settings were fitted to
+international football on a corpus a fraction of this size.
+
+### What the tuning span already says, and it is not encouraging
+
+```
+dixon-coles                     0.20048
+gbm (at its own tuned optimum)  0.20101      +0.00053 worse
+```
+
+The tree parent is **worse than Dixon-Coles alone**, at settings chosen to flatter it. WC2026's
+`gbm` alone was −0.0024 *better* than its baseline; the sign has flipped, which is now the third
+WC2026 conclusion not to transfer to a league.
+
+And the reason a blend cannot rescue it:
+
+| quantity, tuning span | value |
+|---|---|
+| correlation of the two parents' goal rates | 0.9713 |
+| correlation of their P(home) | 0.9821 |
+| **correlation of their per-match RPS errors** | **0.9838** |
+
+Ensemble gain comes from *decorrelated* errors. There are none here — the trees, fed Dixon-Coles'
+own abilities and nothing else, reproduce Dixon-Coles. The pooled loss curve says the same thing:
+
+```
+weight on gbm   0.00     0.15     0.25     0.50     0.75     1.00
+pooled RPS   0.20048  0.20047  0.20048  0.20056  0.20074  0.20101
+```
+
+The optimum is at **w = 0.15 and is worth 0.00001 RPS** — one hundred-thousandth. A 50/50 split
+costs +0.00008 against the baseline.
+
+### Pre-registered bar
+
+The standing rule: paired-bootstrap RPS delta favourable (95% CI excludes 0 **or** P(better) ≥ 0.95)
+**and** no degradation against the Shin de-vigged market on the odds-covered subset. DM as
+corroboration, BH-FDR across the three arms. Test span is the gate; the sensitivity span is reported
+beside it.
+
+### The sub-analysis, and it is a real falsifier
+
+**Any blend arm that improves RPS must do so with a per-match error correlation materially below
+0.98.** That is not a hope about where the effect will land, it is what an ensemble *is*: pooling
+two forecasts that make the same errors cannot help beyond rounding. If a blend arm improves while
+its parents' errors remain at 0.98, the improvement is noise or a bug, and it should not be believed
+whatever the pooled number says.
+
+### Predictions, recorded to be scored later
+
+| | prediction | P(clears gate 1) |
+|---|---|---|
+| `gbm` | **+0.0004 to +0.0010** (worse) | 2% |
+| `ens-gbm-half` | **+0.0000 to +0.0004** (worse) | 5% |
+| `ens-gbm` | **−0.0001 to +0.0001** (nothing) | 10% |
+
+Parameter predictions, which Arm 9 established are the more disciplined kind:
+
+* **The fitted weight averages between 0.05 and 0.30**, nowhere near the even split. So the plan's
+  H₀ — that the optimum is 50/50 — is rejected, but in the direction of *the tree parent deserving
+  far less*, which makes the correctly-weighted blend a null rather than a win.
+* **The per-match error correlation on the test span exceeds 0.97.**
+
+**Where I expect to be wrong, if I am.** The test decade contains the empty-stadium season and three
+promoted clubs a year that the baseline pins at the league average. A tree fed `own_effective_n`
+can treat a club with almost no history differently without anyone hard-coding what promotion means,
+and that is the one place the additive form is measurably wrong (Arm 8 put it at 0.35 log-goals).
+If any arm here surprises me, it will be through the promoted slice — so that slice is reported.
+
+**On my own record.** Six arms scored: four magnitude misses, two direction misses. Arm 9 was the
+first where the magnitudes were about right and both parameter predictions landed, and it taught
+that predicting a parameter is more disciplined than predicting a delta. The bands above are
+deliberately tighter than habit because the tuning span has already measured almost all of this;
+if the test span disagrees materially with 0.9838 error correlation and a 0.15 optimal weight, the
+interesting finding will be *why the two windows disagree*, not the arm.
+
+---
+
+## 2026-08-20 — RESULT, Arm 5: REJECT — and the weight fitter answers before RPS does
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                    RPS  log loss   skill  vs market   vs baseline
+dixon-coles        0.20047    0.9718   16.1%   +0.00824   (baseline)
+gbm                0.20102    0.9739   15.9%   +0.00862   +0.00055 [-0.00002, +0.00113] P=0.028
+ens-gbm            0.20059    0.9722   16.1%   +0.00824   +0.00012 [-0.00000, +0.00027] P=0.026
+ens-gbm-half       0.20059    0.9723   16.1%   +0.00830   +0.00012 [-0.00016, +0.00041] P=0.197
+```
+
+**Sensitivity span, 2006-07..2015-16, 995 barriers, 3,800 matches:**
+
+```
+gbm                0.19739   +0.00068 [+0.00006, +0.00129]  P=0.017
+ens-gbm            0.19672   +0.00001 [-0.00000, +0.00002]  P=0.059
+ens-gbm-half       0.19688   +0.00017 [-0.00014, +0.00048]  P=0.135
+```
+
+All three reject on both gates, on both decades. Benjamini–Hochberg rejects **0 of 3** on each.
+Every P(better) is a *P(worse)* here — the signs are all positive.
+
+**This is the third WC2026 conclusion not to transfer**, and the most surprising one: `ens-gbm` was
+the only change that ever passed the bar in a whole year of that project (−0.0021, P=0.999), and the
+retrospective's advice was "expect it to work again".
+
+### The weight fitter reached the verdict long before RPS did
+
+The plan framed Arm 5 as "is the optimal blend weight 50/50?". The answer is not just *no* — the
+fitted weight goes to **exactly zero and stays there**:
+
+```
+              mean    max   share pinned at zero   last non-zero barrier
+test span   0.0238  1.0000               91.3%      269 of 1,153
+sens span   0.0045  0.1300               92.1%      —
+```
+
+On the test span the weight is non-zero at only 100 barriers, **all of them between barrier 107 and
+269** — the first season and a half after the 380-match minimum history is met. From barrier 270
+onward it is zero for **884 consecutive barriers**. The instrument is not ambivalent; it has
+decided.
+
+And the decomposition is exact:
+
+```
+matches at a zero-weight barrier          3,429 of 3,800  (90.2%)
+  ens-gbm vs baseline there                max difference 3.3e-16
+  delta on those matches                   +0.000000
+delta on the 371 live-weight matches       +0.001219
+live-weight share of the pooled penalty    100.0%
+```
+
+**The entire +0.00012 penalty comes from 9.8% of matches**, and within those, from barriers 107-175
+where the fitter — working off roughly 400 resolved forecasts — put the weight at **1.0**, handing
+the whole forecast to the worse parent. That is the boundary-solution hazard `pooling.py`'s own
+docstring warns about, met in the wild. On the sensitivity span the weight never exceeds 0.13 and
+the arm costs +0.00001 accordingly.
+
+So the honest reading of `ens-gbm` is: **a correctly-weighted blend of these two parents is the
+baseline**, and the only measurable difference is the cost of the weight estimator's early-sample
+instability.
+
+### Why: the parents make the same errors
+
+The pre-registered falsifier was the error correlation, on the grounds that pooling two forecasts
+that err identically cannot help beyond rounding.
+
+```
+correlation of per-match RPS errors, dixon-coles vs gbm
+  tuning span   0.9838
+  test span     0.9905
+  sensitivity   0.9893
+```
+
+A tree fed Dixon-Coles' own abilities and nothing else reproduces Dixon-Coles. There is no
+decorrelated error for a pool to exploit, and the fitted weight is simply reporting that.
+
+The tuned hyperparameters said the same thing before any arm ran, and they said it more plainly
+than a correlation does: coordinate descent converged on **five leaves** — capacity in either
+direction is punished hard, 31 leaves scoring 0.20458 against the optimum's 0.20101. A tree model
+whose best configuration is the one that does as little as possible has nothing to find.
+
+### What this does and does not license
+
+It licenses one conclusion: **Dixon-Coles' log-additive map from abilities to goal rates is not
+leaving anything on the table that a tree can find *from those abilities alone*.** The shrinkage
+that Arms 1 and 8 both pointed at is either not there, or not reachable from these features.
+
+It does **not** license "the hybrid pattern does not work on league football". The information set
+was deliberately held fixed — no rest, no congestion, no availability, no rating trajectories —
+because those axes belong to later arms and mixing them in would have confounded two questions.
+WC2026's hybrid fed its trees genuinely extra covariates. **What this arm rules out is the
+functional form; it says nothing about the features.** If Arm 6 or Arm 7 finds a covariate that
+carries real information, the hybrid becomes worth retrying *with that covariate*, and the
+machinery now exists to do it for the cost of a feature name.
+
+That distinction is the whole reason the arm was scoped this narrowly, and it is the reason this
+null is informative rather than merely disappointing.
+
+### Scoring the predictions
+
+| prediction | outcome |
+|---|---|
+| `gbm` +0.0004 to +0.0010 | **right** — +0.00055 test, +0.00068 sensitivity |
+| `ens-gbm-half` +0.0000 to +0.0004 | **right** — +0.00012 test, +0.00017 sensitivity |
+| `ens-gbm` −0.0001 to +0.0001 | **just outside** — +0.00012 test, +0.00001 sensitivity |
+| error correlation > 0.97 | **right** — 0.9905 and 0.9893 |
+| fitted weight mean in [0.05, 0.30] | **wrong** — 0.0238 and 0.0045, below the band |
+| none clears gate 1 (2% / 5% / 10%) | **right** |
+
+**Four of six, with the two RPS-magnitude bands both landing** — the first time in this project that
+a predicted effect size has fallen inside its stated interval rather than being over-predicted by a
+factor of three to ten. Seven arms now: four magnitude misses, two direction misses, and two
+consecutive arms where the calibration held.
+
+The one miss is instructive. I predicted the weight would be *small*; it is smaller than small — it
+is zero, and I had no band that could express "the estimator will decide this parent is worthless".
+Predicting a parameter's *magnitude* is easier than predicting that it collapses to a boundary.
+
+### Two things recorded for later
+
+**`min_pool_history: 380` is too small for this estimator.** One season of resolved forecasts left
+the weight free to reach 1.0 and stay there for 68 barriers. The same fitter was used by Arm 4,
+where it reported a stable mean weight of 0.457 — worth knowing that its early behaviour on a
+thousand-match history is not to be trusted, whichever arm is using it. A `weight_profile` trace at
+the first few live barriers would have shown a nearly flat loss curve, which is exactly the
+diagnostic that module was built to provide and that this arm did not consult until afterwards.
+
+**The tree model is ~4x the cost of the production fit** (0.65s against 0.16s per barrier at the
+tuned settings) and requires an optional dependency the production path never imports. Nothing here
+argues for paying that.
+
+### Production status
+
+Unchanged. `model.seams.ensemble.enabled` stays `false`, and off means the production model never
+imports lightgbm at all.

@@ -237,7 +237,33 @@ model:
       # Grid density for the weight search. The weight is bounded in [0, 1] and the log-loss
       # surface is smooth, so 101 points resolves it to 0.01 — finer than the question needs.
       pool_weight_grid: 101
-    ensemble: {enabled: false}          # blend with an ML goals regressor
+    # Blend with a gradient-boosted per-team goals regressor (the Groll hybrid). `enabled: false`
+    # is off, and off means the production model never imports lightgbm at all.
+    #
+    # The regressor consumes the Dixon-Coles fit's own abilities as features and produces goal
+    # rates, which then go through the SAME tau correction with the SAME fitted rho. So this arm
+    # varies the map from abilities to rates and nothing else -- not the information set, not the
+    # memory, not the scoreline family.
+    ensemble:
+      enabled: false
+      # Weight on the gradient-boosted parent in the logarithmic pool.
+      #   fitted -> chosen online at every barrier by minimising log loss over every EARLIER
+      #             barrier's already-resolved out-of-sample forecasts. Leak-free by construction.
+      #   0.5    -> the fixed even split the WC2026 project shipped, kept so "is 50/50 actually
+      #             optimal?" is a measurement rather than an assumption.
+      blend_weight: fitted
+      # Resolved out-of-sample matches required before the weight is fitted at all; below this it
+      # is pinned at zero and the arm IS the goals baseline. One full season, so the weight is
+      # never chosen from a handful of matches. Matches the second-channel seam's threshold.
+      min_pool_history: 380
+      # Grid density for the weight search, before a local polish. The weight is bounded in [0, 1]
+      # and the log-loss surface is smooth, so 101 points resolves it to 0.01.
+      pool_weight_grid: 101
+      # The fixed even split the WC2026 project shipped. Used by the ens-gbm-half comparison arm
+      # only, and present so that "is 50/50 actually optimal?" is a measurement rather than an
+      # assumption inherited from a different competition.
+      even_split_weight: 0.5
+
     # global | trend | empty | trend+empty. See model/home_advantage.py.
     # The empty-stadium window is CAUSAL — every match played without a crowd — not fitted to
     # where the effect appears. The 2020 restart (2020-06-17 onward) shows no loss of home
@@ -271,6 +297,27 @@ model:
       # too early is the one way this family can be quietly wrong, so the series' cancellation is
       # measured at every fit and reported as `series_condition` rather than assumed away.
       n_series_terms: 60
+  # LightGBM settings for the hybrid arm. TUNED on backtest.tuning_span and inherited from nowhere:
+  # the WC2026 project's values were fitted to international football on a corpus a fraction of
+  # this size. See NOTES.md for the trace.
+  #
+  # Determinism is not among the tunables. `deterministic` and a single thread are pinned in code,
+  # because this project asserts byte-identical output in several places and the WC2026 project was
+  # bitten by a forest predicting in nondeterministic chunk order.
+  gbm:
+    # SELECTED by coordinate descent cycled to convergence on the tuning span, scored on the
+    # gradient-boosted parent's own walk-forward RPS. Every axis is interior; two of them
+    # (num_leaves, min_data_in_leaf) first won at a grid edge and the grid was extended downward
+    # until they did not, which moved num_leaves from 7 to 5 and improved 0.20125 to 0.20101.
+    #
+    # Read the tuned model for what it is: **five leaves and two hundred small steps is a tree
+    # model asking to do as little as possible.** Capacity in either direction is punished hard --
+    # 31 leaves scores 0.20458 and 800 rounds 0.20206 against the optimum's 0.20101 -- which is
+    # what a model with nothing much to find looks like when it is honestly tuned.
+    n_estimators: 200
+    learning_rate: 0.05
+    num_leaves: 5
+    min_data_in_leaf: 20
 
 # ---------------------------------------------------------------------------------------------
 # BACKTEST

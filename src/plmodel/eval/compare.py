@@ -292,6 +292,110 @@ def _dc_gas(ctx: ArmContext) -> np.ndarray:
     return dynamic.predict_proba(ctx.test)
 
 
+def _gbm_spec(cfg: Config):
+    """The tree settings, read from config rather than defaulted anywhere in code."""
+    from plmodel.model.hybrid import GbmSpec
+
+    gbm = cfg.model.gbm
+    return GbmSpec(
+        n_estimators=int(gbm["n_estimators"]),
+        learning_rate=float(gbm["learning_rate"]),
+        num_leaves=int(gbm["num_leaves"]),
+        min_data_in_leaf=int(gbm["min_data_in_leaf"]),
+        seed=int(cfg.seed),
+    )
+
+
+def _hybrid_parents(ctx: "ArmContext") -> tuple[np.ndarray, np.ndarray]:
+    """``(dc_probs, gbm_probs)`` at this barrier, from one shared Dixon-Coles fit.
+
+    Shared on purpose. The tree model consumes the level fit's abilities, so refitting the level
+    separately for each parent would let them drift apart in ways that have nothing to do with the
+    axis under test.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+    from plmodel.model.hybrid import fit_hybrid
+
+    model = ctx.cfg.model
+    if ctx.state.get("level") is None or ctx.split.is_refit:
+        ctx.state["level"] = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("level"),
+            max_iter=model.max_iter,
+        )
+        ctx.state["hybrid"] = fit_hybrid(
+            ctx.train, ctx.state["level"], spec=_gbm_spec(ctx.cfg)
+        )
+        ctx.state.setdefault("fits", []).append(ctx.state["hybrid"])
+    return (
+        ctx.state["level"].predict_proba(ctx.test),
+        ctx.state["hybrid"].predict_proba(ctx.test),
+    )
+
+
+@register("gbm")
+def _gbm(ctx: ArmContext) -> np.ndarray:
+    """The gradient-boosted parent on its own.
+
+    Run because an ensemble result is uninterpretable without it. "The blend beat the baseline" and
+    "the blend beat both its parents" are different claims, and only the second is an ensemble
+    result rather than a better single model wearing a blend's clothes.
+    """
+    return _hybrid_parents(ctx)[1]
+
+
+def _blend_arm(ctx: "ArmContext", *, fixed_weight: float | None) -> np.ndarray:
+    """Logarithmic pool of the two parents, at a fixed weight or one fitted online.
+
+    With ``fixed_weight=None`` the weight is chosen at every barrier by minimising log loss over
+    every EARLIER barrier's already-resolved forecasts -- matches that are all strictly before this
+    barrier, so the choice is leak-free by construction. Until enough resolved history has
+    accumulated the weight is pinned at zero, which makes the arm exactly the goals baseline rather
+    than a guess.
+    """
+    from plmodel.model.baselines import outcomes_of
+    from plmodel.reproduce.pooling import fit_pair_weight, log_pool
+
+    seam = ctx.cfg.model.seams.get("ensemble") or {}
+    dc_probs, gbm_probs = _hybrid_parents(ctx)
+
+    weight = fixed_weight
+    if weight is None:
+        weight = 0.0
+        resolved = ctx.state.setdefault("resolved", [])
+        if resolved:
+            past_outcomes = np.concatenate([r[2] for r in resolved])
+            if len(past_outcomes) >= int(seam["min_pool_history"]):
+                weight = fit_pair_weight(
+                    np.vstack([r[1] for r in resolved]),
+                    np.vstack([r[0] for r in resolved]),
+                    past_outcomes,
+                    n_grid=int(seam["pool_weight_grid"]),
+                )["weight"]
+        resolved.append((dc_probs, gbm_probs, outcomes_of(ctx.test)))
+
+    ctx.state.setdefault("weights", []).append(float(weight))
+    return log_pool([gbm_probs, dc_probs], [weight, 1.0 - weight])
+
+
+@register("ens-gbm")
+def _ens_gbm(ctx: ArmContext) -> np.ndarray:
+    """The blend with its weight fitted by predictive likelihood -- the arm the plan specifies."""
+    return _blend_arm(ctx, fixed_weight=None)
+
+
+@register("ens-gbm-half")
+def _ens_gbm_half(ctx: ArmContext) -> np.ndarray:
+    """The blend at the fixed even split the WC2026 project shipped."""
+    seam = ctx.cfg.model.seams.get("ensemble") or {}
+    return _blend_arm(ctx, fixed_weight=float(seam["even_split_weight"]))
+
+
 def _family_arm(ctx: "ArmContext", *, marginal: str, dependence: str) -> np.ndarray:
     """Shared body for the alternative scoreline families.
 
@@ -852,6 +956,7 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
         ),
         **_dynamics_block(fits),
         **_family_block(fits),
+        **_blend_block(state),
     }
 
 
@@ -877,6 +982,30 @@ def _dynamics_block(fits: Sequence[object]) -> dict[str, object]:
             },
             "n_state_clipped": int(sum(s.n_state_clipped for s in states if s is not None)),
             "n_tau_invalid": int(sum(s.n_tau_invalid for s in states if s is not None)),
+        }
+    }
+
+
+def _blend_block(state: dict) -> dict[str, object]:
+    """The pool weight over the walk -- the headline parameter of a blend arm.
+
+    Empty for arms that carry no pool. For the ones that do, this separates "the blend was tried
+    and the weight settled near zero" from "the blend was never given any weight to begin with",
+    which are different findings and only one of them says anything about the second parent.
+    """
+    weights = state.get("weights")
+    if not weights:
+        return {}
+    w = np.asarray(weights, dtype=float)
+    return {
+        "blend": {
+            "weight_on_gbm": {
+                "mean": float(w.mean()), "min": float(w.min()), "max": float(w.max()),
+                "final": float(w[-1]),
+                "share_zero": float((w == 0.0).mean()),
+                f"share_above_{_MATERIAL_POOL_WEIGHT}": float((w > _MATERIAL_POOL_WEIGHT).mean()),
+            },
+            "n_barriers": int(w.size),
         }
     }
 

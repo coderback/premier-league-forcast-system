@@ -81,6 +81,7 @@ class ModelConfig:
     max_iter: int
     param_bounds: dict[str, tuple[float, float]]
     seams: dict[str, Any]
+    gbm: dict[str, Any] = field(default_factory=dict)
 
     def seams_are_inert(self) -> bool:
         """True when every seam is off — the configuration the byte-identity tests pin."""
@@ -299,6 +300,7 @@ def load_config(path: Path | str | None = None) -> Config:
                 k: (float(v[0]), float(v[1])) for k, v in m["param_bounds"].items()
             },
             seams=dict(m["seams"] or {}),
+            gbm=dict(m.get("gbm") or {}),
         ),
         elo=EloRatingConfig(**{k: float(e[k]) for k in elo_keys}),
         season=_section(raw, "season"),
