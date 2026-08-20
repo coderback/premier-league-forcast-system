@@ -325,3 +325,42 @@ def test_real_corpus_team_match_counts_are_exact() -> None:
     # 42 for the 22-team seasons, 38 thereafter. Nothing else is acceptable for a completed E0.
     assert set(per_season.unique()) == {38, 42}
     assert set(per_season[per_season == 42].index) == {"1993-94", "1994-95"}
+
+
+# --- staying current --------------------------------------------------------------------------
+
+def test_only_the_in_progress_season_is_refetched() -> None:
+    """A completed season's file never changes; the current one changes every matchday.
+
+    Without this distinction `pl ingest` reuses a cached copy of the season in progress and the
+    model silently forecasts from a corpus that stopped updating, while the only way to refresh it
+    is `--refresh`, which re-downloads every season ever published.
+    """
+    from plmodel.data.football_data import is_in_progress
+
+    assert is_in_progress("2627", 2026)
+    assert not is_in_progress("2526", 2026)
+    assert not is_in_progress("9394", 2026)
+    # A season that has not started yet is still "in progress" for this purpose: the file may
+    # appear at any moment, and a missing one is handled as a skip rather than an error.
+    assert is_in_progress("2728", 2026)
+
+
+def test_load_matches_refetches_the_current_season_only(monkeypatch, tmp_path: Path) -> None:
+    """The decision reaches the fetcher, checked without touching the network."""
+    from plmodel.data import football_data as fd
+
+    cfg = load_config()
+    asked: dict[str, bool] = {}
+
+    def fake_fetch(_cfg, division, code, *, refresh=False):
+        asked[f"{division}{code}"] = refresh
+        raise fd.MissingSeasonError("not fetching in a test")
+
+    monkeypatch.setattr(fd, "fetch_season", fake_fetch)
+    with pytest.raises(fd.IngestError, match="no season files loaded"):
+        fd.load_matches(cfg, divisions=("E0",), through_year=2026)
+
+    assert asked["E02627"] is True
+    assert asked["E02526"] is False
+    assert asked["E09394"] is False

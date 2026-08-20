@@ -136,6 +136,17 @@ def season_codes(first_code: str, through_year: int) -> list[str]:
     return [season_code(y) for y in range(first, through_year + 1)]
 
 
+def is_in_progress(code: str, current_season_start: int) -> bool:
+    """Whether this season's file can still gain rows.
+
+    A completed season's CSV never changes again, so a cached copy of it is permanently valid. The
+    in-progress season's grows every matchday, which makes a cached copy stale by construction the
+    moment another match is played. The distinction is what lets ``pl ingest`` stay current with
+    four requests instead of the 136 that ``--refresh`` costs.
+    """
+    return season_start_year(code) >= current_season_start
+
+
 def latest_started_season(today: pd.Timestamp) -> int:
     """The start year of the most recent season to have kicked off.
 
@@ -392,7 +403,10 @@ def load_matches(
     for division in divisions:
         for code in codes:
             try:
-                path, cached = fetch_season(cfg, division, code, refresh=refresh)
+                # Always re-fetch the in-progress season: see is_in_progress.
+                path, cached = fetch_season(
+                    cfg, division, code, refresh=refresh or is_in_progress(code, last),
+                )
             except MissingSeasonError as exc:
                 # Normal near a season boundary: the source publishes divisions at different
                 # times. Recorded so an unexpected gap is still visible in the coverage report.
