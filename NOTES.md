@@ -3275,3 +3275,145 @@ Unchanged. `model.seams.covariates` stays empty, and empty means the design matr
 columns and the likelihood is byte-identical. Verified beyond the seam test this time: the full
 test-decade baseline walk re-run after all of this arm's changes reproduces digest `d398b3ca…`,
 written on 2026-08-18 — 3,800 matches over 1,153 barriers, byte for byte.
+
+---
+
+## 2026-08-20 — Arm 7, the FPL availability adjustment: NOT RUN, and the drift check is why
+
+Arm 7 is the announced-XI availability adjustment — *"the only arm that can, in principle, narrow
+the information gap"*, and the most expensive on the roadmap at 6-10 dev-days. The plan gates it on
+a data survey and a collection-era drift check, for a specific reason: the WC2026 project's `avail`
+arm was **significantly harmful** (+0.0018 [+0.0004, +0.0033], P=0.01) because its 60-day
+appearance window measured league coverage rather than fitness, and the retrospective's own verdict
+was that *"a half-day sanity analysis — does this feature drift with the data-collection era? —
+would have caught it"*.
+
+This entry is that half-day. **The arm is not run**, and the reason is a property of the data rather
+than an opinion about the hypothesis.
+
+### The survey: what exists, and at what time-point
+
+The measurement Arm 7 needs is *per-match, pre-kickoff player availability*, for the 3,800 matches
+of the test decade. Every candidate source was checked directly rather than from documentation.
+
+| source | availability at a barrier? | coverage | licence | verdict |
+|---|---|---|---|---|
+| FPL API `bootstrap-static` | yes — `status`, `chance_of_playing_next_round`, `news` | **current season only** (checked: 599 elements, 38 events, first deadline 2026-08-21) | Premier League terms | no history of any kind |
+| `vaastav/Fantasy-Premier-League` `gws/gw{n}.csv` | **no** — minutes, goals, bonus: post-match results | 2016-17 → | MIT covers the *code*; the repo states the data is "property of fantasy.premierleague.com" and not owned | wrong quantity |
+| `vaastav` `players_raw.csv` | yes — carries the flags | 2016-17 →, but **one snapshot per season** | as above | wrong time-point |
+| `fpl-2018-19-data` S3 archive | yes — twice daily, exactly the right shape | **2018-09-12 → 2019-05-12, 487 snapshots** | none stated | one season |
+| `olbauday/FPL-Core-Insights` | yes — per gameweek | **2024-25 → 2026-27** (repo created 2024-12-30) | none stated; "feel free to use… please link back" | two complete seasons |
+| Kaggle `player-injuries-and-team-performance-dataset` | injury spells, not squad availability | 7 clubs, 2019-23, ~600 records | **CC0** | wrong shape and scope |
+
+Collection permissions were checked before anything was fetched, as the Understat decision
+established. `fantasy.premierleague.com` serves no `robots.txt` at all — the request returns the
+single-page-app shell with a 200, which is an absence of a rule rather than a permission.
+`www.premierleague.com/robots.txt` disallows only tracking query parameters, no content paths. The
+S3 archive is explicitly published as public. Nothing here was blocked; the problem is not access.
+
+**The best possible stitch is 2018-19 + 2024-25 + 2025-26**: three non-contiguous seasons, about
+1,140 matches, from two different collectors, with a five-year hole in the middle.
+
+### The drift check, and it fails on its own terms
+
+Availability flags sampled monthly across the 2018-19 archive, and per gameweek from the other
+collector's two seasons. Shares are of all players carried in that snapshot.
+
+```
+fpl-2018-19-data (487 twice-daily snapshots)
+month     players   status a     d      i      s      u    news set  chance set
+2018-09       537      0.771  0.058  0.084  0.006  0.078     0.229      0.406
+2018-12       555      0.807  0.045  0.061  0.007  0.076     0.193      0.634
+2019-02       591      0.717  0.052  0.073  0.003  0.144     0.283      0.746
+2019-05       615      0.714  0.054  0.080  0.003  0.140     0.286      0.800
+
+FPL-Core-Insights 2024-25            FPL-Core-Insights 2025-26
+gw   players    a      u   chance    gw   players    a      u   chance
+ 1       616  0.839  0.057  0.170     1       759  0.665  0.203  0.609
+19       709  0.681  0.158  0.674     7       752  0.688  0.205  1.000
+37       801  0.680  0.208  0.753    13       755  0.679  0.204  0.581
+                                     37       840  0.652  0.257  0.750
+```
+
+Three things in that table, and each one alone would be disqualifying.
+
+**The field's population rate more than doubles inside a single season, in both archives.**
+`chance_of_playing_next_round` is set for 40.6% of players in September 2018 and 80.0% in May 2019;
+0.170 at gameweek 1 of 2024-25 and 0.753 at gameweek 37 — a factor of **4.4**. Injuries do not
+quadruple between August and May. The field accumulates: once FPL writes a value it stays written,
+so the share of players carrying one is a measure of *how long the season has been running*. A
+covariate built on it would put a season-clock into the model and call it fitness.
+
+**The unavailable share steps at the transfer window.** `status = 'u'` sits at 0.076 through
+December 2018 and jumps to 0.144 in February — players who left the league in January remain in the
+dataset flagged unavailable. Squad bookkeeping, not team news.
+
+**The two collectors disagree at matched points in the season.** At the opening of a season the
+available share reads 0.771 (2018-19), 0.839 (2024-25) and 0.665 (2025-26) — a seventeen-point
+spread on "how many players are fit" at the equivalent moment of three seasons. The same repository
+even changes its own file layout between its two seasons. Since the two archives cover
+non-overlapping years, **any effect measured across them would be perfectly confounded with which
+collector supplied the row**, which is the `avail` failure with the confounder made explicit rather
+than hidden.
+
+### The structural reason, which is the one that actually decides it
+
+Even granting a fix for all of the above, this project cannot tune a hyperparameter for this arm.
+
+```
+tuning span      1996-97 .. 2005-06     FPL availability data: none
+sensitivity span 2006-07 .. 2015-16     FPL availability data: none
+test span        2016-17 .. 2025-26     FPL availability data: 2018-19, 2024-25, 2025-26
+```
+
+**Every window that exists to protect the acceptance instrument is empty, and the only data lives
+inside the instrument itself.** Every choice this arm needs — what counts as unavailable, how to
+weight a doubtful player, how to convert a squad flag into a strength adjustment, how to normalise
+the season-clock artefact above — would have to be made on the test decade. The project's standing
+rule since the first entry is *never tune against your acceptance instrument*, and a sensitivity
+check that has been tuned on is not a sensitivity check either. There is no third window here and
+no way to construct one.
+
+### And it would not be the arm the plan specifies
+
+The plan's arm is the **announced XI**, published about an hour before kickoff — that is where the
+market's edge is said to live. What these archives hold is an injury flag as it stood at the end of
+the previous gameweek, up to a week stale. Using the most recent snapshot strictly behind the
+barrier is leak-free and would be the correct design, but it is a materially weaker signal than the
+one the hypothesis is about, and it is much closer to WC2026's `avail` — a squad-availability
+proxy — than to a lineup. A null on it would not falsify the announced-XI hypothesis, and a win
+would be hard to attribute.
+
+### Verdict
+
+**Arm 7 is not runnable on the data available to this project, and is recorded as blocked rather
+than as a null.** The distinction matters: a null is a measurement, and no measurement was made. The
+hypothesis that lineups carry a chunk of the market's +0.00824 gap is untouched by this entry.
+
+What would unblock it, in order of how much it would cost:
+
+1. **A licensed per-gameweek availability feed covering 2016-17 onward** — one collector, one
+   schema, snapshots taken at the gameweek deadline rather than after it. None was found.
+2. **Beginning a snapshot archive now**, twice daily against `bootstrap-static`, so that a future
+   version of this project has a clean prospective series. That is cheap (a few KB a day, no
+   licence question about data the project collects itself for research) and it is the only action
+   here with a positive expected value. **It does nothing for the current test decade** — the first
+   usable evaluation would be seasons away — so it is infrastructure, not an arm.
+3. **A commercial lineup feed** (Sportradar, SportMonks and similar publish historical
+   `Sport Event Lineups`). That buys the announced XI properly and is the only route to the arm as
+   specified. It is a purchase decision, not a modelling one.
+
+Nothing was built and no code changed. The cost of this entry was the survey and the drift check,
+which is what the roadmap asked for and which is exactly the step the WC2026 project skipped.
+
+### What this says about the information ceiling
+
+The research report's central claim is that the ~0.006-0.008 market gap is *information* — team
+news, lineups, money flow — and not miscalibration, and that only adding the market's inputs can
+close it. Six arms in this project have now failed to close it by re-slicing the goals pipe, which
+is consistent with that claim rather than a challenge to it. Arm 7 was the one arm pointed at the
+information itself, and it is blocked on data rather than refuted.
+
+**So the honest current position is that the gap is unexplained and, with this corpus, unclosable**,
+and the remaining scope should be read in that light: the season simulator and the promotion/
+shrinkage lead are about making the model *useful* and *correct*, not about catching the market.
