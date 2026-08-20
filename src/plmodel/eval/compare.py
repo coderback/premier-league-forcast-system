@@ -36,6 +36,7 @@ from plmodel.eval import metrics
 from plmodel.eval.backtest import Split, training_frame, validate_splits
 from plmodel.eval.calibration import calibration_report
 from plmodel.eval.slices import add_slice_columns, all_slices
+from plmodel.model.counts import INDEPENDENT_KAPPA, UNIT_SHAPE
 
 # A pool weight this size or larger counts as the channel materially contributing, for
 # reporting only — nothing is gated on it. Matches the threshold the reproduction used when
@@ -289,6 +290,64 @@ def _dc_gas(ctx: ArmContext) -> np.ndarray:
     dynamic = DynamicFit(level, filter_states(ctx.train, level, spec), spec)
     ctx.state.setdefault("fits", []).append(dynamic)
     return dynamic.predict_proba(ctx.test)
+
+
+def _family_arm(ctx: "ArmContext", *, marginal: str, dependence: str) -> np.ndarray:
+    """Shared body for the alternative scoreline families.
+
+    One function so the four cells of the marginal-by-dependence square cannot drift from each
+    other, and so the only thing that separates any of them from the production model is the family
+    itself: same half-life, same cold-start rule, same warm-started refit cadence.
+
+    The half-life is deliberately NOT re-tuned per family, unlike the score-driven and Elo arms.
+    Those two replace the mechanism that tracks change over time, so handing them the production
+    memory would have been a handicap. A count law and a dependence device say nothing about time
+    at all -- they change the shape of a single match's scoreline distribution -- so there is no
+    fairness argument here, and giving one anyway would turn a one-axis test into a two-axis one.
+    """
+    from plmodel.model.counts import CountSpec
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    spec = CountSpec(
+        marginal=marginal,
+        dependence=dependence,
+        n_series_terms=int(model.seams["scoreline"]["n_series_terms"]),
+    )
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+            family=spec,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
+
+
+@register("dc-copula")
+def _dc_copula(ctx: ArmContext) -> np.ndarray:
+    """Poisson margins, Frank copula: the dependence device changed and nothing else."""
+    return _family_arm(ctx, marginal="poisson", dependence="frank")
+
+
+@register("dc-weibull")
+def _dc_weibull(ctx: ArmContext) -> np.ndarray:
+    """Weibull counts, tau correction: the marginal law changed and nothing else."""
+    return _family_arm(ctx, marginal="weibull", dependence="tau")
+
+
+@register("dc-weibull-copula")
+def _dc_weibull_copula(ctx: ArmContext) -> np.ndarray:
+    """Both at once -- the specification the literature actually proposes."""
+    return _family_arm(ctx, marginal="weibull", dependence="frank")
 
 
 def _pooled_channel_arm(ctx: "ArmContext", *, channel_name: str) -> np.ndarray:
@@ -792,6 +851,7 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
             sum(getattr(f, "diagnostics", {}).get("rho_clamped", 0) for f in fits)
         ),
         **_dynamics_block(fits),
+        **_family_block(fits),
     }
 
 
@@ -821,6 +881,44 @@ def _dynamics_block(fits: Sequence[object]) -> dict[str, object]:
     }
 
 
+def _family_block(fits: Sequence[object]) -> dict[str, object]:
+    """The alternative scoreline family's own two parameters over the walk.
+
+    Empty for every arm on the production family, so a baseline report is unchanged by this seam
+    existing. For the arms that carry one, the trajectories ARE the result: a shape that never left
+    1 and a dependence parameter that never left 0 would mean the family was switched on and found
+    nothing to do, which is a different finding from the family not working.
+
+    ``series_condition`` is the cancellation loss of the Weibull count's alternating sum, worst over
+    the walk. It is reported rather than merely asserted because it is the one number that says
+    whether these fits are numerics or noise.
+    """
+    families = [getattr(f, "family", None) for f in fits]
+    if not any(f is not None for f in families):
+        return {}
+    shape = np.array([f.shape for f in fits])
+    kappa = np.array([f.kappa for f in fits])
+    conditions = [getattr(f, "diagnostics", {}).get("series_condition", 0.0) for f in fits]
+    deficits = [getattr(f, "diagnostics", {}).get("tail_deficit", 0.0) for f in fits]
+    return {
+        "scoreline_family": {
+            "family": next(f.label() for f in families if f is not None),
+            "weibull_shape": {
+                "mean": float(shape.mean()), "min": float(shape.min()),
+                "max": float(shape.max()), "final": float(shape[-1]),
+                "share_above_one": float((shape > UNIT_SHAPE).mean()),
+            },
+            "frank_kappa": {
+                "mean": float(kappa.mean()), "min": float(kappa.min()),
+                "max": float(kappa.max()), "final": float(kappa[-1]),
+                "share_negative": float((kappa < INDEPENDENT_KAPPA).mean()),
+            },
+            "worst_series_condition": float(max(conditions)),
+            "worst_tail_deficit": float(max(deficits)),
+        }
+    }
+
+
 def _parameter_count(fit) -> int:
     """How many free parameters a fit carries — the axis Arm 1 is actually about.
 
@@ -831,7 +929,13 @@ def _parameter_count(fit) -> int:
     if teams is None:
         return int(fit.as_dict().get("n_params", 0))
     # intercept, home advantage, rho, plus (n_teams - 1) free attack and defence parameters.
-    return 3 + 2 * (len(teams) - 1)
+    count = 3 + 2 * (len(teams) - 1)
+    # An alternative scoreline family swaps rho for its own scalars rather than adding to it: a
+    # copula arm has no rho at all, so counting both would overstate what it spends.
+    family = getattr(fit, "family", None)
+    if family is not None:
+        count += int(family.fits_shape) + int(family.fits_kappa) - int(not family.fits_rho)
+    return count
 
 
 def _market_block(

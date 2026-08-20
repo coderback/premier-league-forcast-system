@@ -15,6 +15,8 @@ from typing import Any
 
 import yaml
 
+from plmodel.model.counts import CountSpec
+
 # Repo root = three levels up from this file (src/plmodel/config.py -> repo root).
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "config.yaml"
@@ -90,7 +92,20 @@ class ModelConfig:
             and not (s.get("ensemble") or {}).get("enabled", False)
             and (s.get("home_advantage") or {}).get("mode", "global") == "global"
             and list(s.get("tiers", ["E0"])) == ["E0"]
+            and self._scoreline_spec().is_inert
         )
+
+    def _scoreline_spec(self) -> CountSpec:
+        return CountSpec(**(self.seams.get("scoreline") or {}))
+
+    def scoreline_family(self) -> CountSpec | None:
+        """The configured family, or None when it IS the production Poisson-and-tau path.
+
+        None rather than an inert spec, so that switching the seam off does not merely produce the
+        same numbers by a longer route -- it removes the family code from the call graph entirely.
+        """
+        spec = self._scoreline_spec()
+        return None if spec.is_inert else spec
 
 
 @dataclass(frozen=True)

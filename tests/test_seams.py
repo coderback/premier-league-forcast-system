@@ -27,26 +27,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from plmodel.config import load_config
 from plmodel.eval.backtest import walk_forward
 from plmodel.eval.compare import ArmSpec, run_arm
 
-SEAM_NAMES = ("covariates", "dynamics", "observation", "ensemble", "home_advantage", "tiers")
-
-
-@pytest.fixture(scope="module")
-def cfg():
-    return load_config()
-
-
-@pytest.fixture(scope="module")
-def corpus(cfg) -> pd.DataFrame:
-    path = cfg.cache_dir / "matches.parquet"
-    if not path.exists():
-        pytest.skip("run `pl ingest` first")
-    df = pd.read_parquet(path)
-    df = df[(df["division"] == cfg.backtest.prediction_division) & df["played"]]
-    return df.sort_values("date", kind="stable").reset_index(drop=True)
+SEAM_NAMES = ("covariates", "dynamics", "observation", "ensemble", "home_advantage",
+              "tiers", "scoreline")
 
 
 def _digest(probs: np.ndarray) -> str:
@@ -86,6 +71,8 @@ def test_seam_is_recognised_as_on_when_flipped(cfg, seam: str) -> None:
         "ensemble": {"enabled": True},
         "home_advantage": {**cfg.model.seams["home_advantage"], "mode": "trend"},
         "tiers": ["E0", "E1"],
+        "scoreline": {**cfg.model.seams["scoreline"], "marginal": "weibull",
+                      "dependence": "frank"},
     }[seam]
     flipped = dataclasses.replace(cfg.model, seams={**cfg.model.seams, seam: on})
     assert not flipped.seams_are_inert(), f"flipping {seam} was not detected"
@@ -112,6 +99,8 @@ def test_each_seam_off_explicitly_is_byte_identical(cfg, corpus, seam: str) -> N
         "ensemble": {"enabled": False},
         "home_advantage": {**cfg.model.seams["home_advantage"], "mode": "global"},
         "tiers": ["E0"],
+        "scoreline": {**cfg.model.seams["scoreline"], "marginal": "poisson",
+                      "dependence": "tau"},
     }[seam]
     baseline = _run(cfg, corpus)
     explicit = _run(cfg, corpus, seams={**cfg.model.seams, seam: off})

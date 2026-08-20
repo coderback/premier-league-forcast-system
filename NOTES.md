@@ -2193,3 +2193,399 @@ Unchanged. `model.seams.tiers` stays `[E0]`. The lower divisions remain ingested
 reachable by any arm through `ArmContext.tiers`, which is barrier-truncated by the splitter's own
 guard, so the next attempt at this — with a promotion discount — costs a fraction of what this one
 did.
+
+---
+
+## 2026-08-19 — CORRECTION: the low-score dependence sign recorded earlier was read off the wrong quantity
+
+The Phase 6 entry above states, on the strength of a decisively negative fitted rho, that "the
+Premier League behaves like Ligue 1" and that "Arm 9's premise survives". **The parameter was
+measured correctly and the inference from it was wrong**, and it was wrong because rho's sign and
+the sign of the dependence are opposites in the Dixon-Coles parameterisation.
+
+Read the correction off its own definition:
+
+```
+tau(0,0) = 1 - lam*mu*rho     tau(0,1) = 1 + lam*rho
+tau(1,0) = 1 + mu*rho         tau(1,1) = 1 - rho
+```
+
+A **negative** rho therefore *lifts* 0-0 and 1-1 and *suppresses* 0-1 and 1-0. Lifting the diagonal
+is exactly what **positive** association between the two goal counts looks like. Dixon & Coles'
+own 1997 estimate was negative for English football and meant the same thing: an excess of low
+draws.
+
+Measured directly, convention-free — observed scorelines against what independent Poisson at the
+same fitted rates predicts, so nothing depends on anyone's sign convention:
+
+| window | 0-0 | 0-1 | 1-0 | 1-1 | all draws | residual corr |
+|---|---|---|---|---|---|---|
+| 1996-97..2005-06 | **1.158** | 0.931 | 1.020 | 1.022 | **1.091** | +0.066 |
+| 2006-07..2015-16 | **1.148** | 0.898 | 0.989 | 0.981 | **1.096** | +0.048 |
+| 2016-17..2025-26 | 0.978 | 0.872 | 0.962 | 1.018 | 1.016 | **-0.041** |
+| whole corpus | **1.123** | 0.898 | 0.997 | 1.004 | **1.064** | +0.010 |
+
+The corpus shows *more* low draws than independence, not fewer. **The dependence is positive**, and
+the Premier League behaves like the four leagues in the five-league study rather than like Ligue 1.
+The research report's §A was right and the ledger entry disputing it was wrong.
+
+Two things follow. The finding that "rho is negative in 92% of 1,153 fits" stands exactly as
+recorded — it is a fact about a parameter. Every sentence interpreting it as *negative dependence*
+is struck. And the free gate the plan wanted is still open, but for a different reason than the one
+recorded: a Frank copula **fits its dependence parameter with a sign**, so it is the right tool
+under either answer. What the gate really established is that there is dependence to model at all.
+
+The final row is its own warning: **in the test decade the sign flips**. The dependence this arm
+exists to capture is not stable across eras, which is a fact worth having before the arm runs
+rather than after.
+
+---
+
+## 2026-08-19 — CORRECTION: the production model under-predicts goals by 2.4%
+
+Found while measuring the count distribution for Arm 9, and unrelated to it. Over the test decade's
+3,800 walk-forward forecasts the production model's expected goals average **1.3845** per side
+against **1.4175** actually scored.
+
+It is not a normalisation error. The tau correction is *exactly* mass-preserving over the full
+support — its four cell adjustments cancel to zero identically, which is now asserted by a test —
+so the production likelihood is right not to carry a normalising constant.
+
+The bias matters here because it is large enough to masquerade as something else. A raw dispersion
+statistic on those forecasts reads 1.029, which looks like over-dispersed counts and would have
+been read as a premise for the Weibull half of this arm. Rescale the rates to match the observed
+mean and the dispersion falls to **1.005**. Two thirds of the apparent signal was the level bias.
+
+Recorded as an open lead, not chased here: candidates are the decay-weighted fit lagging a rising
+scoring rate, and the cold-start teams that are dropped from the fit but predicted at the league
+average.
+
+---
+
+## 2026-08-19 — PRE-REGISTRATION, Arm 9: Weibull counts and a Frank copula
+
+*Written before any comparison was run on either evaluation span. Everything below is descriptive
+statistics and in-sample likelihood on the tuning and sensitivity windows; no arm result existed.*
+
+### Hypothesis
+
+Replacing the production scoreline family — two Poisson counts joined by the Dixon-Coles tau
+correction — with Boshnakov, Kharrat & McHale's (2017) Weibull counts joined by a Frank copula
+lowers pooled RPS.
+
+### This is two changes, and it is being run as four cells rather than one arm
+
+The published model moves two independent things at once:
+
+| | production | replacement |
+|---|---|---|
+| marginal count law | Poisson, variance = mean | Weibull count, free shape `c` |
+| dependence device | tau, four low-scoring cells | Frank copula, whole table |
+
+The score-driven arm was accepted and only *then* decomposed, at the cost of a second full walk and
+a wrong regime prediction that a decomposition would have caught in advance. So the square is run
+as a square:
+
+* **`dc-copula`** — Poisson margins, Frank copula. The dependence device alone.
+* **`dc-weibull`** — Weibull margins, tau correction. The marginal law alone.
+* **`dc-weibull-copula`** — both. The published specification.
+
+Three arms is a family, so Benjamini–Hochberg applies across it. The baseline is the production
+model, unchanged, and it is the fourth cell of the same square.
+
+**The half-life stays at the production value**, unlike the Elo and score-driven arms. Those two
+replace the mechanism that tracks change *over time*, so handing them the production memory would
+have been a handicap and the fairness argument was real. A count law and a dependence device say
+nothing about time — they reshape a single match's scoreline distribution — so there is no such
+argument here, and granting a second axis anyway is exactly the mistake this decomposition exists
+to avoid.
+
+### What is already known about both parameters, and it is not encouraging
+
+**The marginal is Poisson.** Conditional on the production model's own forecast rates over the test
+decade, and after removing the 2.4% level bias recorded above:
+
+```
+goals    observed   expected   obs/exp      z
+    0        2026     2056.7     0.985   -0.82
+    1        2480     2490.7     0.996   -0.26
+    2        1730     1679.8     1.030   +1.40
+    3         851      839.0     1.014   +0.45
+    4         348      347.6     1.001   +0.02
+    5         123      126.6     0.972   -0.32
+    6          29       41.9     0.693   -2.01
+   7+          13       17.8     0.729   -1.15
+                       sum of squared z over 8 cells = 8.4
+```
+
+Eight cells with the level consumed leaves about seven degrees of freedom, whose expected value is
+seven. **8.4 is dead centre.** The variance-to-mean ratio at the matched level is 0.984. There is
+no over- or under-dispersion here for a shape parameter to absorb, and the single cell past |z| = 2
+is the one holding 29 events.
+
+**The dependence is real but small, and it changes sign.** Fitting all four families in-sample at
+the last barrier of each non-test window, at the production half-life:
+
+| window | shape ĉ | ĉ gain | κ̂ | κ gain |
+|---|---|---|---|---|
+| tuning, at 2006-06-01, 5,104 matches | 1.0299 | +0.40 | **+0.548** | **+3.42** |
+| sensitivity, at 2016-06-01, 8,904 matches | 1.0187 | +0.17 | **+0.407** | **+1.86** |
+
+(Gains are weighted log-likelihood against `poisson+tau`, one extra parameter each.)
+
+The shape earns 0.40 and 0.17 for its parameter — less than the one nat a coin-flip parameter earns
+on average, so it is not paying for itself even before it has to generalise. The copula earns 3.42
+and 1.86, which *is* a real in-sample edge over tau. But at a barrier inside the test decade the
+same fit returns **κ̂ = −0.18**: the sign has flipped, matching the table in the correction above.
+
+### Why an in-sample likelihood edge need not survive the metric
+
+The copula's gain is on the **scoreline** likelihood, and RPS scores the three-class collapse. Mass
+the copula moves between 3-1 and 4-1 is invisible; only mass crossing the win/draw/loss boundaries
+counts. A Frank copula's lever on that boundary is the diagonal, so this arm is, in RPS terms,
+almost entirely a bet on draw probabilities — and the standing expectation recorded at the start of
+this project is that **draw resolution does not move**, because nothing in the literature moves it.
+
+Scaled: 3.42 nats over ~5,100 effective matches is 0.0007 per match, and that is the *scoreline*
+gain before the collapse throws most of it away.
+
+### Pre-registered bar
+
+The standing rule: paired-bootstrap RPS delta favourable (95% CI excludes 0 **or** P(better) ≥ 0.95)
+**and** no degradation against the Shin de-vigged market on the odds-covered subset. DM as
+corroboration, BH-FDR across the three arms. Test span is the gate; the sensitivity span is
+reported beside it.
+
+### The sub-analysis, and it is a real falsifier again
+
+**Any RPS gain from `dc-copula` must appear in the draw class.** The copula cannot move a
+three-class forecast except through the diagonal — that is not a hope about where the effect will
+land, it is the arithmetic of what the device does. So if `dc-copula` improves pooled RPS while
+draw calibration is unchanged, the improvement is not coming from the mechanism this arm claims,
+and it should not be believed whatever the pooled number says.
+
+The corresponding check for `dc-weibull` is on the fitted parameter rather than a slice: the shape
+must move away from 1 by more than its own noise, or the arm is a null by construction.
+
+### Predictions, recorded to be scored later
+
+**All three arms land within ±0.0005 of the baseline and none clears gate 1.** Point estimates:
+`dc-copula` −0.0002, `dc-weibull` 0.0000, `dc-weibull-copula` −0.0002. I put **20%** on `dc-copula`
+clearing gate 1, **10%** on `dc-weibull`, **20%** on `dc-weibull-copula`.
+
+Two sharper predictions, because an RPS null is a cheap thing to predict and a parameter is not:
+
+* **ĉ lands in [1.00, 1.06] on the test span.** The count distribution above says 1.00 and both
+  non-test windows say 1.02–1.03. If ĉ comes back outside that band my reading of the marginal is
+  wrong, and that matters more than the arm.
+* **κ̂ is negative on the test span**, having been +0.55 and +0.41 on the two earlier windows. This
+  is the era flip, and a walk-forward fit re-estimates κ at every barrier, so the arm is not stuck
+  with the old sign — which is precisely why the flip is a prediction rather than a death sentence.
+
+**Where I expect to be wrong, if I am.** The one honest mechanism for the copula to beat tau is
+that tau is a four-cell patch while Frank acts on the whole diagonal, and the test decade shows the
+production model over-predicting draws (883 observed against 914 predicted, 0.966) and
+under-predicting 2-2 specifically (obs/DC 1.142). A negative κ̂ pushes predicted draws down, which is
+the right direction. That is a real route to a real gain and it is why `dc-copula` gets 20% rather
+than the 5% the arithmetic alone would suggest.
+
+**And the standing correction to my own record.** Five arms scored so far: four magnitude misses,
+two direction misses. The one time I deliberately shaded a literature effect down (Arm 3) the shaded
+number was right. Here the bias runs the other way — predicting a null is the safe call and I should
+be suspicious of it for that reason — so the 20% figures are deliberately above what the log-
+likelihood arithmetic on its own would justify.
+
+---
+
+## 2026-08-20 — RESULT, Arm 9: the rule says ACCEPT for one arm, and the rule is wrong
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                    RPS  log loss   skill  vs market   vs baseline
+dixon-coles        0.20047    0.9718   16.1%   +0.00824   (baseline)
+dc-copula          0.20035    0.9713   16.2%   +0.00820   -0.00011 [-0.00022, -0.00001] P=0.986
+dc-weibull         0.20046    0.9718   16.1%   +0.00829   -0.00001 [-0.00008, +0.00006] P=0.604
+dc-weibull-copula  0.20042    0.9714   16.2%   +0.00831   -0.00005 [-0.00017, +0.00007] P=0.810
+```
+
+**`dc-copula` passes both gates.** The 95% CI excludes zero, P(better) is 0.986, and the market gap
+*improves* from +0.00824 to +0.00820. Under the rule written verbatim in `config.yaml` that is an
+acceptance, and it is recorded as one rather than quietly reinterpreted. Gate 1 also survives every
+one of twenty alternative bootstrap seeds, so it is not a resampling artefact.
+
+**It should not be believed, and four independent checks say so.**
+
+### 1. The family-wise correction does not reject
+
+```
+                 DM p    BH-adjusted
+dc-copula       0.032          0.097
+dc-weibull-copula 0.387        0.580
+dc-weibull      0.783          0.783
+```
+
+Benjamini–Hochberg rejects **0 of 3** at α = 0.05. Three arms were pre-registered as a family
+precisely so that the best of three could not be read as if it had been the only one.
+
+### 2. The earlier decade shows exactly nothing
+
+Sensitivity span, 2006-07..2015-16, 995 barriers, 3,800 matches:
+
+```
+dc-copula          0.19671   +0.00000 [-0.00015, +0.00016]  P=0.488
+dc-weibull         0.19669   -0.00002 [-0.00009, +0.00005]  P=0.708
+dc-weibull-copula  0.19670   -0.00001 [-0.00021, +0.00021]  P=0.522
+```
+
+Not "smaller". **Zero to five decimal places, with P(better) of 0.488 — a coin flip.**
+
+### 3. Inside the test decade the effect is confined to one five-season window
+
+```
+2016-17..2020-21   n=1900   -0.000299 [-0.000469, -0.000139]  P=1.000
+2021-22..2025-26   n=1900   +0.000070 [-0.000060, +0.000194]  P=0.142
+```
+
+The whole result lives in 2016-2021 and is absent, with the sign reversed, in the five seasons
+since. Half the pooled gain comes from ten matches out of 3,800: dropping them takes −0.000115 to
+−0.000060.
+
+So of the twenty seasons this arm has been measured on, it helps in five and does nothing in
+fifteen.
+
+### 4. On its own natural metric the replacement family is *worse*
+
+RPS scores three classes; this family models a 13x13 scoreline table. So the obvious question is
+whether it improves the distribution it was actually built for and the metric simply cannot see it.
+Scored out of sample on the log probability each arm gave the scoreline that happened (refit cadence
+coarsened to 12 barriers — a diagnostic, not the gate, and identical for every arm):
+
+```
+arm                 scoreline log loss   vs baseline   share of resamples worse
+dixon-coles                    2.94815    (baseline)
+dc-weibull                     2.94842      +0.00027              68.7%
+dc-copula                      2.94898      +0.00083              86.8%
+dc-weibull-copula              2.94904      +0.00089              83.6%
+```
+
+**All three are worse, and the two copula arms are the worst.** Not significantly so — but the
+direction is consistent, and it is the opposite of what an arm earning a real RPS improvement should
+show. I expected the reverse before running it: that the family would improve the scoreline and the
+three-class collapse would throw the gain away.
+
+### What is actually happening, and it is not a mechanism
+
+The pre-registered falsifier was the draw class, on the grounds that a copula cannot reach a
+three-class forecast except through the diagonal. It fired, and then it explained the result:
+
+```
+                    P(draw)  observed  pred/obs        window
+dixon-coles          0.2405    0.2324     1.035   test 2016-26
+dc-copula            0.2324    0.2324     1.000   test 2016-26
+dixon-coles          0.2512    0.2582     0.973   sens 2006-16
+dc-copula            0.2494    0.2582     0.966   sens 2006-16
+```
+
+Replacing tau with a Frank copula **lowers predicted draws in both eras**, by 0.0081 in the test
+decade and 0.0018 in the earlier one. In 2016-26 the baseline over-predicts draws by 3.5% and that
+push lands it on 1.000 — perfect. In 2006-16 the baseline already *under*-predicts draws and the
+same push makes it worse.
+
+The copula is not adaptively correcting draw calibration. It has a fixed directional bias relative
+to tau, and the test decade is the era where that bias happens to point the right way. That is a
+coincidence of era, not a model improvement, and it is why the gain does not survive to the
+scoreline metric or to any other window.
+
+### The parameters are estimated well, which is what makes the null informative
+
+```
+                  shape c (mean)        kappa (mean)   share of fits with kappa < 0
+test 2016-26              1.030              -0.061                          69%
+sens 2006-16              1.039              +0.440                           0%
+```
+
+The dependence parameter is **strongly positive in 2006-16 and negative in 2016-26**, and the
+transition is a smooth monotone drift: sampled across the test decade it runs +0.43 in 2016-17,
++0.21 in 2018-19, through zero around 2019-20, to −0.29 by 2025-26. Low-score dependence in the
+Premier League has genuinely reversed sign over twenty years. That is a real finding about the
+league and it is recorded as one.
+
+It also sharpens the null. The earlier decade has κ averaging **+0.44 — larger in magnitude than
+anything in the test decade** — and buys exactly zero RPS. If the copula's dependence were doing
+forecasting work, the era with the strongest dependence would show the largest gain. It shows none.
+
+### Scoring the predictions
+
+The pre-registration said: all three arms within ±0.0005, none clears gate 1; point estimates
+−0.0002 / 0.0000 / −0.0002; 20% / 10% / 20% on clearing gate 1; **ĉ in [1.00, 1.06]**; **κ̂ negative
+on the test span**.
+
+| prediction | outcome |
+|---|---|
+| all three within ±0.0005 | **right** (−0.00011, −0.00001, −0.00005) |
+| none clears gate 1 | **wrong** — `dc-copula` did, an outcome I had put at 20% |
+| magnitudes | −0.0002 vs −0.00011, 0.0000 vs −0.00001, −0.0002 vs −0.00005 |
+| ĉ in [1.00, 1.06] | **right** — 1.030 on the test span, 1.039 on the sensitivity span |
+| κ̂ negative on the test span | **right** — −0.061, negative in 69% of 1,153 fits |
+
+**This is the first arm where the effect sizes were approximately right rather than over-predicted
+by a factor of three to ten.** Six arms now: four magnitude misses, two direction misses, and this
+one, where two fitted-parameter predictions both landed and the RPS magnitudes were inside a factor
+of two on two of three arms. Predicting a *parameter* turns out to be a far more disciplined
+exercise than predicting an RPS delta, and future pre-registrations should carry one wherever the
+arm admits it.
+
+The headline call was still wrong: I said none would clear gate 1 and one did.
+
+### A process failure worth more than the arm
+
+The first version of this result had all three arms rejecting, with `dc-copula` at −0.00003. That
+number was wrong, and the way it was wrong is the lesson.
+
+Chasing an outlier in the draw falsifier — a single fixture whose draw probability had moved 0.17
+when nothing else moved more than 0.024 — turned up a cached forecast that the current code could
+not reproduce. The fitted κ at that barrier was −0.249 and stable across its neighbours, six of the
+seven matches that day matched κ = −0.249 to four decimals, and only the seventh behaved as if κ
+were pinned at its −5.0 bound. No single κ explains all seven, so it was not the fit. Re-running the
+walk from the current tree changed **3,756 of 3,800 rows** and moved the arm from −0.00003 to
+−0.00011 — across the gate-1 threshold.
+
+The cause: **walks were launched and then source was edited while they ran.** The cache fingerprint
+covers configuration, not source, and `cache.py`'s own docstring says so in as many words —
+"delete the cache directory whenever model or eval code changes". Every arm was re-walked from one
+frozen tree before any number here was reported.
+
+Two harness weaknesses this exposed, both recorded rather than fixed today:
+
+* **A wrong cache key fails silently and expensively.** A resumable walk wrote its entry with
+  `extra=""` where `run_arm` passes `"no-tiers"`. The reader simply missed and recomputed — fifty
+  minutes of walk that looks exactly like a slow import. A miss on an arm the caller believes is
+  cached deserves to be loud.
+* **Piping a long run through `tail` hides every progress line until it exits.** That cost a
+  process kill on a job that was working, and it produced a diagnosis — "stalled" — that was
+  entirely an artefact of the pipe. Redirect and poll; never pipe a long run through a buffering
+  filter.
+
+### Production status
+
+Unchanged. `model.seams.scoreline` stays `poisson` + `tau`.
+
+The rule's verdict on `dc-copula` is ACCEPT and the rule also says an accepted variant earns a
+hyperparameter retune before production wiring. **My recommendation is not to wire it**, and the
+grounds are on the record above: zero effect on the earlier decade, zero effect on the last five
+seasons, worse on the scoreline metric, no family-wise significance, and a mechanism that is a fixed
+directional bias rather than an adaptive correction. Wiring it would also change the baseline every
+remaining arm is measured against, in exchange for one ten-thousandth of an RPS point that fifteen
+of twenty measured seasons say is not there.
+
+That is a decision about the production model rather than about this experiment, so it is left
+open rather than taken.
+
+### What is left behind
+
+The scoreline family is a seam now, with both axes independent, so any future count law or
+dependence device costs a `CountSpec` rather than a rewrite. And the sign reversal in low-score
+dependence is a standing fact about this corpus that any later work on draws will need: a device
+calibrated on one decade of Premier League scorelines is being calibrated on a parameter that has
+changed sign within the span of the data.

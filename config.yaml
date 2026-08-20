@@ -167,6 +167,17 @@ model:
     # ha_empty is the whole crowd effect in log-goal units. The 2020-21 collapse is about
     # -0.10 on the home:away goal ratio, so 1.0 is generous in both directions.
     ha_empty: [-1.0, 1.0]
+    # Alternative scoreline family (model.seams.scoreline). weibull_log_shape is log(c), so 0 IS
+    # the Poisson and the seam's inertness point sits at the centre of its own box rather than on
+    # an edge. The box spans c in [0.61, 1.65]: the published football estimate is near 1.1 and
+    # this corpus's own count distribution says 1.00, so both live far inside it, and a fit that
+    # reached either end would be reporting a shape no goal process plausibly has.
+    weibull_log_shape: [-0.5, 0.5]
+    # Frank copula dependence. k -> 0 is independence and the sign is the direction of dependence.
+    # A Kendall tau of 0.03 -- roughly the residual correlation measured in this corpus -- is
+    # k = 0.27, so 5 is nearly twenty times any dependence football has shown and is an outer box
+    # rather than a constraint.
+    frank_kappa: [-5.0, 5.0]
     # Outer box on a score-driven team state (model.seams.dynamics), in log-goal units of
     # deviation from the team's fitted level. exp(1.5) = 4.5x the team's own long-run rate, which
     # no run of form produces; this is a divergence guard for a recursion that could in principle
@@ -237,6 +248,29 @@ model:
       empty_start: "2020-06-17"    # Project Restart: first match back behind closed doors
       empty_end: "2021-05-23"      # final day of 2020-21
     tiers: [E0]                         # divisions in the joint fit
+    # The scoreline family: which count law the goals follow and which device couples the two
+    # sides. `poisson` + `tau` IS the Dixon-Coles specification, so that pair is the inert setting
+    # and it does not merely approximate the production path -- it bypasses the family code
+    # entirely, leaving the production likelihood untouched.
+    #
+    #   marginal:   poisson | weibull   -- weibull adds a shape parameter, fitted, where 1 is the
+    #                                      Poisson, below 1 over-disperses and above 1 under-.
+    #   dependence: tau | frank         -- tau adjusts four low-scoring cells; frank is a copula
+    #                                      applied across the whole table, with a fitted parameter
+    #                                      whose sign is the direction of dependence.
+    #
+    # The two axes are separate on purpose. The published model (Boshnakov, Kharrat & McHale 2017)
+    # moves both at once, and this project has already paid once for reading a two-axis result as
+    # if it were one -- see the score-driven arm, which had to be decomposed after the fact.
+    scoreline:
+      marginal: poisson
+      dependence: tau
+      # Terms kept in the Weibull count's alternating series. The terms behave like Poisson terms
+      # rate**j / j!, so they vanish once j is past the rate; 60 is ~40 beyond anything football
+      # produces, and the cost is one 61x61 matrix product per likelihood evaluation. Truncating
+      # too early is the one way this family can be quietly wrong, so the series' cancellation is
+      # measured at every fit and reported as `series_condition` rather than assumed away.
+      n_series_terms: 60
 
 # ---------------------------------------------------------------------------------------------
 # BACKTEST

@@ -26,3 +26,26 @@ for _variable in (
     "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS", "OMP_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"
 ):
     os.environ.setdefault(_variable, "1")
+
+# Below the pin on purpose, not by accident: importing pandas pulls in numpy, which is when the
+# BLAS commits its scratch buffers. Anything that imports numpy must come after the loop above.
+import pandas as pd  # noqa: E402
+import pytest  # noqa: E402
+
+from plmodel.config import load_config  # noqa: E402
+
+
+@pytest.fixture(scope="session")
+def cfg():
+    return load_config()
+
+
+@pytest.fixture(scope="session")
+def corpus(cfg) -> pd.DataFrame:
+    """The played top-flight matches, sorted by date. Skips when nothing has been ingested."""
+    path = cfg.cache_dir / "matches.parquet"
+    if not path.exists():
+        pytest.skip("run `pl ingest` first")
+    frame = pd.read_parquet(path)
+    frame = frame[(frame["division"] == cfg.backtest.prediction_division) & frame["played"]]
+    return frame.sort_values("date", kind="stable").reset_index(drop=True)
