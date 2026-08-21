@@ -3990,3 +3990,81 @@ list of open questions land on the same square.
 Recorded as a measurement, not an arm. What it licenses is a pre-registration, and the honest
 prediction is that it will barely move RPS — because if it moved RPS, the half-life grid would
 already have found it.
+
+---
+
+## 2026-08-21 — DECISION: `dc-copula` is rejected; `dc-gas` is accepted and blocked on its retune
+
+Both arms passed the acceptance rule as written. Both were left open at the time because wiring
+either changes the baseline every later arm is measured against, and that is a decision about the
+production model rather than about an experiment. Taken now, side by side, because taking them
+apart is how two very different results end up treated the same way.
+
+```
+                          dc-gas                        dc-copula
+test span            -0.00187 P=0.995             -0.00011 P=0.986
+  as a share of the market gap     23%                        1.3%
+sensitivity span     -0.0008  P=0.927   same sign   +0.00000 P=0.488   a coin flip
+Diebold-Mariano      p=0.011                        p=0.032, BH-adjusted 0.097
+family correction    single pre-registered arm      BH rejects 0 of 3
+log loss             -0.0051 P=0.988, agrees        agrees, at the same trivial size
+placebo              scrambled results LOSE 0.0061  not applicable
+mechanism            measured: the half-life        a fixed directional bias
+                     crossover, monotone
+within-decade        ahead in 8 of 10 seasons       confined to one five-season window
+```
+
+### `dc-copula`: rejected
+
+The recommendation recorded on 2026-08-20 stands and is now taken as a decision. It buys **one
+ten-thousandth of an RPS point** — a seventeenth of what `dc-gas` buys — and four independent
+checks say even that is not there: no family-wise significance, exactly zero on the earlier decade
+to five decimal places, an effect living in one five-season window, and a mechanism that is a fixed
+directional adjustment rather than anything that adapts.
+
+The rule accepting it is the strongest argument this project has produced for **amending the rule**,
+prospectively: it reports Benjamini-Hochberg without making it binding, and it says nothing about
+the sensitivity span. Both would have caught this. That amendment is now the open governance item,
+and it must be written before the next family of arms is run, never after.
+
+`model.seams.scoreline` stays `poisson` + `tau`.
+
+### `dc-gas`: accepted, and the rule already says what happens next
+
+The evidence is of a different kind, not merely a different size. The **placebo** is the part that
+matters most: fed the same fixtures with the results randomly permuted, the arm *loses* 0.0061
+where real results gain 0.0075. A structural artefact would have survived that. The **half-life
+crossover** is the second: a longer memory hurts the static model monotonically and helps the
+dynamic one, which is a mechanism rather than a coincidence, and it says the states are what make
+old data usable. Diebold-Mariano and log loss both agree independently, and the sensitivity span
+carries the same sign at half the size.
+
+It is also not a large effect and this entry does not claim one. One season carries about half the
+pooled delta; drop it and −0.0011 remains, which is the sensitivity span's number. **The honest
+estimate is nearer −0.001 than −0.0019.**
+
+**The rule's own text decides the next step: "An accepted variant earns a hyperparameter retune
+BEFORE production wiring."** That retune has not been run, and Arm 3 recorded exactly what it must
+answer first — whether `dc-gas` does better at 730 days than at the 2555 it currently carries. That
+question could not be answered then and cannot be answered on the test span now, because selecting a
+half-life there is tuning against the acceptance instrument. It belongs on `tuning_span`, where the
+arm's half-life was originally chosen against a grid that stopped at 1825 and never saw the
+interaction.
+
+So `dc-gas` is **accepted and not yet wired**, and the gap between those two is a scheduled task
+rather than an unresolved argument.
+
+### What wiring will actually cost, recorded so it is not discovered halfway
+
+The dynamics seam is read in exactly one place — `compare.py`'s arm. Nothing else touches it:
+
+* `pl fit`, `pl predict` and `pl simulate` all call `fit_dixon_coles` directly and would each need
+  to accept a `DynamicFit`;
+* the season simulator refuses anything that is not the production scoreline, and a `DynamicFit` is
+  not a `DixonColesFit`;
+* `seams_are_inert()` and the byte-identity tests are written around the production model being
+  plain Dixon-Coles, and pin a forecast digest that wiring would deliberately change.
+
+That last point is the one worth stating plainly: **`d398b3cab1d04106` is the digest of the current
+production baseline, and adopting `dc-gas` retires it.** It should be replaced deliberately, with
+the old value kept in this ledger, rather than quietly updated when a test fails.
