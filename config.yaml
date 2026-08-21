@@ -15,16 +15,42 @@
 # verbatim into every harness JSON report — never re-typed in code, so a report can never claim a
 # rule the config does not state.
 #
-# Why two gates, not one: in the WC2026 project the `rsfit` arm passed gate 1 decisively
-# (-0.0011, P=0.99) while DEGRADING the market scoreboard (+0.0065 -> +0.0077). It improved the
-# instrument's own distribution at the expense of the target distribution. Gate 2 exists to catch
-# exactly that.
+# Why gate 2: in the WC2026 project the `rsfit` arm passed gate 1 decisively (-0.0011, P=0.99)
+# while DEGRADING the market scoreboard (+0.0065 -> +0.0077). It improved the instrument's own
+# distribution at the expense of the target distribution.
+#
+# Why gates 3 and 4, added 2026-08-21: this project's own `dc-copula` passed the two-gate rule and
+# should not have. It bought one ten-thousandth of an RPS point, Benjamini-Hochberg rejected 0 of
+# its family of 3, and the earlier decade showed exactly zero at P=0.488 -- a coin flip. The rule
+# REPORTED both of those facts and acted on neither, because neither was a gate.
+#
+# Gate 3 makes the multiplicity correction binding rather than decorative. Three arms were
+# pre-registered as a family precisely so the best of three could not be read as if it had been
+# the only one, and then the rule read it that way anyway.
+#
+# Gate 4 is deliberately WEAK -- it asks the earlier decade only to lean the same way, not to
+# reach significance. The two evaluation spans are different eras and a real effect can be
+# genuinely smaller on one; demanding significance twice would reject findings that are true.
+# What it catches is the arm that is *nothing* on the span it was not selected against, which is
+# what `dc-copula` was.
+#
+# Both gates are PROSPECTIVE. They were written after `dc-copula` exposed the hole and they do not
+# reverse any decision already taken; `dc-copula` was rejected on the evidence, by judgement, and
+# this rule now encodes that judgement so the next one does not need it. Tested against the whole
+# arm record before adoption -- see NOTES.md, which records that gate 3 would also have failed the
+# retuned `dc-gas` configuration, and that this is a finding rather than an inconvenience.
 # ---------------------------------------------------------------------------------------------
 acceptance_rule: |
-  Accept a candidate change iff BOTH:
-    (1) its paired-bootstrap RPS delta vs baseline on the test pool is favourable
+  Accept a candidate change iff ALL FOUR:
+    (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable
         (95% CI excludes 0, OR P(better) >= 0.95), AND
-    (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade.
+    (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade
+        (where the market covers no match, this gate is NOT EVALUABLE, which is not a pass
+        and not a failure), AND
+    (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at
+        backtest.fdr_alpha, on the Diebold-Mariano p-values, AND
+    (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.
+        A single-span run therefore cannot accept anything.
   An accepted variant earns a hyperparameter retune BEFORE production wiring.
 
 # Explicit seed for every stochastic step (bootstrap resampling, Monte Carlo season sim).

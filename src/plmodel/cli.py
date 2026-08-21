@@ -10,6 +10,7 @@ import argparse
 import json
 import math
 import sys
+from pathlib import Path
 
 from plmodel import __version__
 from plmodel.config import ConfigError, load_config
@@ -163,14 +164,36 @@ def cmd_compare(args: argparse.Namespace) -> int:
         big_six=cfg.audit.big_six,
     )
 
-    payload = report_json(report)
+    sensitivity = _sensitivity_deltas(args.against_span)
+    payload = report_json(report, sensitivity=sensitivity)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     out_path = cfg.output_dir / (args.out or "compare.json")
     out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
     _print_compare(payload, report)
+    if sensitivity is None:
+        print("\n  gate 4 was not evaluated: no sensitivity-span report was supplied, so nothing "
+              "in this run\n  can be accepted. Run with --sensitivity, then re-run the test span "
+              "with\n  --against-span pointing at that report.")
     print(f"\nreport    : {out_path}")
     return 0
+
+
+def _sensitivity_deltas(path: str | None) -> dict[str, dict[str, float]] | None:
+    """Per-arm deltas from a previously written report, for the acceptance rule's fourth gate.
+
+    Read from a file rather than recomputed, because the two spans are two expensive walks and the
+    rule only needs one number from the second. The file is a report this project wrote, so a
+    missing key is a bug rather than a user error and raises.
+    """
+    if not path:
+        return None
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    return {
+        name: block["vs_baseline"]
+        for name, block in payload["arms"].items()
+        if block.get("vs_baseline")
+    }
 
 
 def _print_compare(payload: dict, report) -> None:
@@ -203,12 +226,17 @@ def _print_compare(payload: dict, report) -> None:
         for line in payload["acceptance_rule"].splitlines():
             print(f"  {line}")
         print()
+        label = {True: "pass", False: "FAIL", None: "n/a"}
         for name, verdict in payload["verdicts"].items():
-            gate2 = {True: "pass", False: "FAIL", None: "n/a"}[verdict["gate2_vs_market"]]
             mark = "ACCEPT" if verdict["accepted"] else "reject"
-            print(f"  {mark:7} {name:16} gate1 "
-                  f"{'pass' if verdict['gate1_vs_baseline'] else 'FAIL'} "
-                  f"({verdict['gate1_reason']}), gate2 {gate2}")
+            print(f"  {mark:7} {name:16} "
+                  f"gate1 {label[verdict['gate1_vs_baseline']]} ({verdict['gate1_reason']})")
+            print(f"  {'':7} {'':16} gate2 {label[verdict['gate2_vs_market']]}"
+                  f"   gate3 {label[verdict['gate3_family_wise']]}"
+                  f"   gate4 {label[verdict['gate4_sensitivity']]}")
+            for key in ("gate3_reason", "gate4_reason"):
+                if verdict.get(key):
+                    print(f"  {'':7} {'':16}   {verdict[key]}")
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
@@ -893,6 +921,8 @@ def build_parser() -> argparse.ArgumentParser:
                       help="run on the earlier decade instead of the test span")
     pcmp.add_argument("--first-season", default=None, help="override the pool's first season")
     pcmp.add_argument("--last-season", default=None, help="override the pool's last season")
+    pcmp.add_argument("--against-span", default=None,
+                      help="a report from the other span, supplying the rule's fourth gate")
     pcmp.add_argument("--out", default=None, help="report filename within the output directory")
     pcmp.set_defaults(func=cmd_compare)
 

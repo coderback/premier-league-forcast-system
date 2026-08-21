@@ -4165,3 +4165,80 @@ Two things this does **not** fix, recorded so the adoption is not oversold:
   configuration will do far worse. Per-parameter decay remains the fix, and remains queued.
 * **The season simulator is untested under `dc-gas`.** It refuses a non-production fit today. Home
   advantage enters all 380 fixtures, so it must be measured there before the simulator ships on it.
+
+---
+
+## 2026-08-21 — AMENDMENT: the acceptance rule gains two gates, and one of them bites immediately
+
+The rule has stood unchanged since the first entry. It is amended now because `dc-copula` passed it
+and should not have, and because the two facts that should have stopped it were **printed in the
+same report that accepted it**:
+
+* Benjamini-Hochberg rejected 0 of its family of 3, and
+* the sensitivity span showed exactly zero at P=0.488, a coin flip.
+
+The rule reported both and acted on neither, because neither was a gate. A multiplicity correction
+that is computed, printed, and then ignored is decoration.
+
+### The amendment
+
+```
+  (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at
+      backtest.fdr_alpha, on the Diebold-Mariano p-values, AND
+  (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.
+      A single-span run therefore cannot accept anything.
+```
+
+Gate 2 also gains an explicit statement that an uncovered market is **not evaluable** — neither a
+pass nor a failure. Arm 6 recorded that `nan <= nan` was printing as a failed gate on the
+sensitivity span, where `avg_closing` covers no match before 2019/20. That was a reporting bug
+being read as a verdict.
+
+**Gate 4 is deliberately weak, and that is a design decision rather than timidity.** It asks the
+earlier decade only to *lean* the same way. The two evaluation spans are different eras and a real
+effect can be genuinely smaller on one of them — Arm 3's is, at half the size — so demanding
+significance twice would reject findings that are true. What the gate catches is the arm that is
+*nothing* on the span it was not selected against.
+
+It also has a structural consequence worth stating plainly: **a single-span run can no longer
+accept anything.** `gate_verdicts` returns `gate4 = None` without a sensitivity result and
+`accepted = False`, so the two-span discipline now lives in the machinery instead of in someone's
+memory of the protocol.
+
+### Tested against the record before adoption, which is how it should have been proposed
+
+Only arms that ever cleared gate 1 can be affected, since gate 1 is unchanged. There are three.
+
+```
+arm                               g1    g2    g3    g4    old rule -> new rule
+dc-gas  (first values, 2555d)   pass  pass  pass  pass    ACCEPT -> ACCEPT
+dc-gas  (retuned, 7300d)        pass  pass  FAIL  pass    ACCEPT -> reject
+dc-copula                       pass  pass  FAIL  FAIL    ACCEPT -> reject
+```
+
+`dc-copula` now fails on both new gates, which is the outcome the judgement already reached. The
+rule now encodes that judgement so the next one does not need it.
+
+**And the amendment fails `dc-gas` at its shipping configuration.** The retuned recursion's DM
+p-value is 0.065 against an alpha of 0.05, on a family of one. That is not an inconvenience to be
+argued around — it is the second independent line, arriving from a different direction, saying the
+same thing this morning's half-life work said: **the 7300-day configuration is too thin.** The
+retune entry said it first, in its own words: *"it passes, and it passes by less than the
+configuration it replaced."*
+
+### What this does and does not change
+
+It does **not** reverse a decision already taken. `dc-gas` was accepted under the rule in force at
+the time and that entry stands; rules are prospective, and retro-applying one to unaccept a past
+result would be the mirror image of the sin this amendment exists to prevent.
+
+It does change what happens next. **Wiring `dc-gas` now requires a fresh gate run of whatever
+configuration is chosen, under four gates, with both spans.** The configuration recommended this
+morning — the retuned recursion at a 2555-day level half-life — has never been scored on the test
+span at all: the 2555 row above is the *original* recursion. So the sequence is:
+
+1. run the chosen configuration on the sensitivity span;
+2. run it on the test span with `--against-span` pointing at that report;
+3. wire it only if all four gates pass.
+
+That is more work than flipping `enabled: true`, and it is the work the rule now asks for.

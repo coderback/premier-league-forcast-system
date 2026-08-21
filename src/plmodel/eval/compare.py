@@ -1222,14 +1222,27 @@ def _fdr_block(results: Sequence[ArmResult], cfg: Config) -> dict[str, object] |
     return metrics.benjamini_hochberg(p_values, alpha=cfg.backtest.fdr_alpha)
 
 
-def gate_verdicts(report: CompareReport) -> dict[str, dict[str, object]]:
-    """Apply the acceptance rule's two gates to each non-baseline arm.
+def gate_verdicts(
+    report: CompareReport, *, sensitivity: dict[str, dict[str, float]] | None = None
+) -> dict[str, dict[str, object]]:
+    """Apply the acceptance rule's four gates to each non-baseline arm.
 
-    Gate 1 passes when the paired delta is favourable — 95% CI excluding 0, or P(better) >= 0.95.
-    Gate 2 passes when the arm's delta against the market does not degrade relative to baseline.
-    Both must pass; the verdict is reported, never acted on automatically.
+    Gate 1 — the paired delta is favourable: 95% CI excluding 0, or P(better) >= 0.95.
+    Gate 2 — the delta against the market does not degrade. Where the market covers no match this
+             is NOT EVALUABLE, which is neither a pass nor a failure; the sensitivity span has no
+             market coverage before 2019/20 and every arm run there returns None here.
+    Gate 3 — Benjamini-Hochberg across this run's family of arms rejects the null for this arm.
+             Reported since the first arm; binding since 2026-08-21, because `dc-copula` passed a
+             rule that printed "BH rejects 0 of 3" beside its own acceptance.
+    Gate 4 — the sensitivity span does not contradict: P(better) there >= 0.5. Deliberately weak.
+             It cannot be computed from a single run, so ``sensitivity`` must be supplied, and
+             **a run without it accepts nothing** — which is the point, since the alternative is
+             remembering to look.
+
+    The verdict is reported, never acted on automatically.
     """
     baseline = report.arms[0]
+    rejected = ((report.fdr or {}).get("rejected") or {}) if report.fdr else {}
     verdicts: dict[str, dict[str, object]] = {}
     for arm in report.arms[1:]:
         delta = arm.vs_baseline or {}
@@ -1240,6 +1253,13 @@ def gate_verdicts(report: CompareReport) -> dict[str, dict[str, object]]:
         gate2 = None
         if arm.vs_market is not None and baseline.vs_market is not None:
             gate2 = bool(arm.vs_market["delta_rps"] <= baseline.vs_market["delta_rps"])
+
+        gate3 = bool(rejected.get(arm.name, False)) if report.fdr else None
+
+        other = (sensitivity or {}).get(arm.name)
+        gate4 = None if other is None else bool(
+            float(other.get("p_a_better", 0.0)) >= _SENSITIVITY_LEAN_BAR
+        )
 
         verdicts[arm.name] = {
             "gate1_vs_baseline": gate1,
@@ -1253,24 +1273,44 @@ def gate_verdicts(report: CompareReport) -> dict[str, dict[str, object]]:
                 f"arm gap {arm.vs_market['delta_rps']:+.5f} vs baseline gap "
                 f"{baseline.vs_market['delta_rps']:+.5f}"
             ),
-            "accepted": bool(gate1 and (gate2 is not False)),
+            "gate3_family_wise": gate3,
+            "gate3_reason": (
+                None if gate3 is None else
+                f"BH-adjusted p = {(report.fdr or {}).get('p_adjusted', {}).get(arm.name, float('nan')):.3f} "
+                f"at alpha {(report.fdr or {}).get('alpha', float('nan')):.2f} "
+                f"across {(report.fdr or {}).get('n_tests', 0)} arm(s)"
+            ),
+            "gate4_sensitivity": gate4,
+            "gate4_reason": (
+                "not evaluated: no sensitivity-span result supplied" if gate4 is None
+                else f"sensitivity P(better) = {float(other.get('p_a_better', 0.0)):.3f}"
+            ),
+            "accepted": bool(
+                gate1 and (gate2 is not False) and bool(gate3) and bool(gate4)
+            ),
         }
     return verdicts
 
+
+# The sensitivity span is asked only to lean the same way, not to reach significance: the two
+# evaluation decades are different eras and a real effect can be genuinely smaller on one.
+_SENSITIVITY_LEAN_BAR = 0.5
 
 # The acceptance rule's one-sided bar: P(better) >= 0.95. Stated in config.yaml's rule text; kept
 # here as a named constant so the code and the rule cannot drift apart silently.
 _P_BETTER_BAR = 0.95
 
 
-def report_json(report: CompareReport) -> dict[str, object]:
+def report_json(
+    report: CompareReport, *, sensitivity: dict[str, dict[str, float]] | None = None
+) -> dict[str, object]:
     """The JSON report. The acceptance rule is embedded verbatim, as the brief requires."""
     return {
         "acceptance_rule": report.acceptance_rule,
         "splits": report.splits,
         "market": report.market,
         "fdr": report.fdr,
-        "verdicts": gate_verdicts(report),
+        "verdicts": gate_verdicts(report, sensitivity=sensitivity),
         "arms": {
             arm.name: {
                 "pooled": arm.pooled,

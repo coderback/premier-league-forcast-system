@@ -196,14 +196,67 @@ def test_gate2_fails_when_the_market_gap_widens(cfg) -> None:
     assert verdict["accepted"] is False, "gate 1 alone must not accept an arm"
 
 
-def test_acceptance_needs_both_gates(cfg) -> None:
+def _passing(cfg):
+    """A report rigged so every gate passes, as the starting point for knocking one out."""
     report = _run(cfg, ["uniform", "home-rate"])
     report.arms[1].vs_baseline = {
         "delta_rps": -0.01, "ci_low": -0.02, "ci_high": -0.005, "p_a_better": 0.999, "n": 100
     }
     report.arms[0].vs_market = {"delta_rps": +0.0060}
     report.arms[1].vs_market = {"delta_rps": +0.0041}
-    assert gate_verdicts(report)["home-rate"]["accepted"] is True
+    report.fdr = {
+        "alpha": 0.05, "n_tests": 1, "n_rejected": 1, "threshold": 0.05,
+        "p_adjusted": {"home-rate": 0.01}, "rejected": {"home-rate": True},
+    }
+    return report, {"home-rate": {"p_a_better": 0.8}}
+
+
+def test_acceptance_needs_every_gate(cfg) -> None:
+    report, sens = _passing(cfg)
+    assert gate_verdicts(report, sensitivity=sens)["home-rate"]["accepted"] is True
+
+
+def test_a_single_span_run_accepts_nothing(cfg) -> None:
+    """Gate 4 cannot be computed from one span, and the alternative is remembering to look."""
+    report, _ = _passing(cfg)
+    verdict = gate_verdicts(report)["home-rate"]
+    assert verdict["gate4_sensitivity"] is None
+    assert verdict["accepted"] is False
+    assert "not evaluated" in verdict["gate4_reason"]
+
+
+def test_the_family_wise_correction_is_binding(cfg) -> None:
+    """`dc-copula` passed a rule that printed "BH rejects 0 of 3" beside its own acceptance."""
+    report, sens = _passing(cfg)
+    report.fdr["rejected"]["home-rate"] = False
+    report.fdr["p_adjusted"]["home-rate"] = 0.097
+    verdict = gate_verdicts(report, sensitivity=sens)["home-rate"]
+    assert verdict["gate3_family_wise"] is False and verdict["accepted"] is False
+
+
+def test_a_sensitivity_span_that_leans_the_other_way_blocks_acceptance(cfg) -> None:
+    """The `dc-copula` case: exactly zero on the decade it was not selected against."""
+    report, _ = _passing(cfg)
+    verdict = gate_verdicts(report, sensitivity={"home-rate": {"p_a_better": 0.488}})["home-rate"]
+    assert verdict["gate4_sensitivity"] is False and verdict["accepted"] is False
+
+
+def test_the_sensitivity_gate_is_deliberately_weak(cfg) -> None:
+    """It asks the earlier decade to lean the same way, not to reach significance."""
+    report, _ = _passing(cfg)
+    for p_better, expected in ((0.51, True), (0.5, True), (0.49, False)):
+        verdict = gate_verdicts(
+            report, sensitivity={"home-rate": {"p_a_better": p_better}}
+        )["home-rate"]
+        assert verdict["gate4_sensitivity"] is expected, p_better
+
+
+def test_an_unevaluable_market_gate_is_neither_pass_nor_failure(cfg) -> None:
+    """The sensitivity span has no market coverage before 2019/20; that is not a failure."""
+    report, sens = _passing(cfg)
+    report.arms[0].vs_market = report.arms[1].vs_market = None
+    verdict = gate_verdicts(report, sensitivity=sens)["home-rate"]
+    assert verdict["gate2_vs_market"] is None and verdict["accepted"] is True
 
 
 # --- the real corpus ------------------------------------------------------------------------------

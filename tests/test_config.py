@@ -14,11 +14,16 @@ from plmodel.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 
 # The rule as the build brief states it. Any edit to config.yaml's wording must be a deliberate
 # change to this constant too — that is the point.
-EXPECTED_ACCEPTANCE_RULE = """\
-Accept a candidate change iff BOTH:
-  (1) its paired-bootstrap RPS delta vs baseline on the test pool is favourable
+EXPECTED_ACCEPTANCE_RULE = """Accept a candidate change iff ALL FOUR:
+  (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable
       (95% CI excludes 0, OR P(better) >= 0.95), AND
-  (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade.
+  (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade
+      (where the market covers no match, this gate is NOT EVALUABLE, which is not a pass
+      and not a failure), AND
+  (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at
+      backtest.fdr_alpha, on the Diebold-Mariano p-values, AND
+  (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.
+      A single-span run therefore cannot accept anything.
 An accepted variant earns a hyperparameter retune BEFORE production wiring."""
 
 
@@ -35,12 +40,14 @@ def test_acceptance_rule_is_verbatim(cfg: Config) -> None:
     assert cfg.acceptance_rule == EXPECTED_ACCEPTANCE_RULE
 
 
-def test_acceptance_rule_states_both_gates(cfg: Config) -> None:
+def test_acceptance_rule_states_every_gate(cfg: Config) -> None:
     """A rule that lost a gate would still load; these assert it still says what it must."""
     rule = cfg.acceptance_rule
-    assert "paired-bootstrap RPS delta vs baseline" in rule
-    assert "Shin de-vigged market" in rule
+    assert "paired-bootstrap RPS delta vs baseline" in rule      # gate 1
+    assert "Shin de-vigged market" in rule                       # gate 2
     assert "does not degrade" in rule
+    assert "Benjamini-Hochberg" in rule                          # gate 3
+    assert "SENSITIVITY span does not contradict" in rule        # gate 4
     assert "retune BEFORE production wiring" in rule
 
 
