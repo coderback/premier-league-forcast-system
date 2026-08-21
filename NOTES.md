@@ -3814,3 +3814,89 @@ against itself — two identical forecasts and an assertion that they differ. Fi
 settings explicitly. Worth recording because the failure mode is silent in the other direction: had
 the assertion been `>=` rather than `>`, a test that compares a thing to itself would have passed
 for the rest of the project's life. A test of one setting against another has to name both.
+
+---
+
+## 2026-08-21 — DATA SURVEY: xG stays blocked, and Arm 7's structural killer is no longer true
+
+A second search for the two blocked inputs — expected goals beyond 2023-24, and pre-kickoff
+availability outside the test decade. Every source below was checked directly: robots.txt read
+before anything was fetched, licence read from the publisher rather than a listing, and coverage
+read from the rows rather than from the description.
+
+That last point earned itself. `abrarhossainhimself/understat-data-for-teams-players-2014-present`
+is CC0, was updated **six days ago**, and is titled "2014-present". **Its data stops in 2019.** The
+listing's date is when the page was touched, not when the data ends, and nothing but opening the
+archive would have caught it.
+
+### xG: no free per-match source exists beyond 2023-24
+
+| source | verdict |
+|---|---|
+| Understat, direct | `Disallow: /`, unchanged. The standing decision holds |
+| FBref | `robots.txt` itself returns **HTTP 403** — permission cannot be established, and unverifiable is not permission |
+| Apify "Understat scrapers" | commissions the exact crawl Understat disallows; a third party doing it does not change the directive |
+| Big Balls Sports Data API | its xG endpoint is `xg-leaders`, a **season leaderboard of players**, not per-match team xG. Pro tier. Wrong granularity at any price |
+| `abrarhossainhimself/...2014-present` (CC0) | per-match team xG, but **stops 2019** |
+| `whisperingkahuna/top-4-european-football-leagues-2010-2026` | reaches 2025-26 but is season aggregates, no per-match rows |
+| `adamgbor/club-football-match-data-2000-2025` (MIT, 98 votes) | **no xG at all** — football-data.co.uk plus Elo, all of which this project already holds |
+| StatsBomb open data | shot-level xG, but only two English top-flight seasons (below) |
+
+**The operational gap is unchanged: 2024-25, 2025-26 and the live 2026-27 season have no
+obtainable per-match xG.** Every remaining route is a commercial feed, which is a purchase decision
+rather than a modelling one. The existing ODbL mirror (2015/16..2023/24) remains the only usable
+series, and Arm 4's null stands on it.
+
+### Arm 7: the reason it was blocked has gone away, and a different one has taken its place
+
+The 2026-08-20 entry killed Arm 7 on a structural argument, not a measurement:
+
+> Every window that exists to protect the acceptance instrument is empty, and the only data lives
+> inside the instrument itself.
+
+**That is no longer true.** StatsBomb's open data carries full per-match lineups for two English
+top-flight seasons, and both fall outside the gate:
+
+```
+England / Premier League   2003/04   -> inside the TUNING span      (1996-97..2005-06)
+England / Premier League   2015/16   -> inside the SENSITIVITY span (2006-07..2015-16)
+```
+
+There is a second correction to make, and it is the one that matters more. That entry treated
+lineups as unobtainable pre-kickoff information. **They are not: the starting XI is published about
+an hour before kickoff, which is precisely why the plan's Arm 7 is about it.** A historical record
+of who started is therefore a record of something that *was* public before the match, and using it
+strictly behind the barrier is leak-free. This is a different kind of object from FPL's
+availability flags, and the difference is exactly what killed the FPL route: who started a match is
+a fact, while `chance_of_playing_next_round` is a collector's judgement whose population rate
+quadrupled inside a single season. **A lineup cannot drift with the collection era in that way.**
+
+### What is still missing, and it is now one thing rather than three
+
+Lineups for the **test decade**. The arm could now be tuned on 2003/04 and sanity-checked on
+2015/16, but it cannot be *scored*, because the gate runs 2016-17..2025-26 and no lineup source
+covering it has been found.
+
+One candidate, unverified: `vaastav/Fantasy-Premier-League` carries per-gameweek player minutes
+from 2016-17, and a player with minutes recorded started or came on. Recovering the XI from minutes
+is an inference rather than a record, and the repo's own licence note — the data is "property of
+fantasy.premierleague.com" — is the same caveat that applied to the availability route. It needs
+checking before it can be relied on, and it is the only lead that would make the arm runnable
+end to end.
+
+Two seasons is also thin for tuning: 760 matches, against an effect the research report already
+describes as a chunk of a 0.008 gap. A hyperparameter fitted on 380 matches is a hyperparameter
+fitted on very little.
+
+### Verdict
+
+**xG: unchanged, still blocked, commercial-only.**
+
+**Arm 7: reclassified.** It was blocked because the data could not be tuned without contaminating
+the acceptance instrument. That objection is answered. It is now blocked on a narrower and more
+ordinary problem — no lineup source for the decade the gate runs on — with one candidate worth
+half a day's verification. The hypothesis remains untested rather than refuted, but the path to
+testing it is shorter than this project believed yesterday.
+
+The licence on the StatsBomb release is a PDF user agreement requiring attribution and their logo,
+and it has not been read here. Nothing should be built on it until it has.
