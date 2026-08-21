@@ -50,6 +50,8 @@ pl predict     forecast fixtures typed on the command line -> 1X2, O/U, BTTS, ex
 pl reproduce   re-run an external claim on our data
 pl audit       calibration slices: promoted-team, big-six-vs-rest, favourite, by season
 pl live        freeze a matchweek's forecasts before kickoff; score them after
+               --dry-run previews without writing; reads the rolling fixtures feed
+               so the first matchday of a season can be frozen before any result exists
 ```
 
 Every command listed above is built.

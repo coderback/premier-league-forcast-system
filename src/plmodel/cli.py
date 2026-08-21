@@ -436,7 +436,11 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
 
 def cmd_live(args: argparse.Namespace) -> int:
     """Freeze a matchday's forecasts before kickoff, or score previously frozen ones."""
-    from plmodel.eval.live import freeze_matchday, score_ledger
+    import pandas as pd
+
+    from plmodel.data.football_data import upcoming_fixtures
+    from plmodel.data.teams import TeamNameError
+    from plmodel.eval.live import freeze_matchday, next_barrier, score_ledger
 
     cfg = load_config(args.config)
     corpus, played = _load_corpus(cfg)
@@ -450,16 +454,43 @@ def cmd_live(args: argparse.Namespace) -> int:
         print(scored.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
         return 0
 
-    fixtures = corpus[
-        (corpus["division"] == cfg.backtest.prediction_division) & ~corpus["played"]
-    ]
+    try:
+        fixtures = upcoming_fixtures(cfg, corpus, use_feed=not args.no_feed)
+    except TeamNameError as exc:
+        # The roster guard, doing its job. Named clubs, not a stack trace, because the fix is one
+        # line in team_aliases.yaml and whoever is standing here has a match about to kick off.
+        print(f"the fixture feed names a club the roster does not know:\n  {exc}", file=sys.stderr)
+        print("\nAdd the mapping to data/static/team_aliases.yaml and run again, or pass "
+              "--no-feed to freeze only from the season file.", file=sys.stderr)
+        return 2
+
+    if fixtures.empty:
+        print(f"no unplayed {cfg.backtest.prediction_division} fixtures known.")
+        print("  the season file carries fixtures only once it has results in it, and the "
+              "rolling feed lags by a day or two.")
+        print("  re-run closer to kickoff, or check https://www.football-data.co.uk/fixtures.csv")
+        return 0
+
+    barrier = next_barrier(fixtures)
+    day = fixtures[fixtures["date"] == barrier]
+    if args.dry_run:
+        print(f"next barrier : {pd.Timestamp(barrier).date()}   {len(day)} fixture(s)")
+        print(f"source       : {'season file only' if args.no_feed else 'season file + feed'}")
+        for row in day.itertuples(index=False):
+            print(f"  {row.home_team} v {row.away_team}")
+        target = ledger_dir / f"{pd.Timestamp(barrier).date()}.json"
+        print(f"\nwould write  : {target}")
+        if target.exists():
+            print("  ! that file already exists and would NOT be overwritten")
+        print("nothing was written (--dry-run).")
+        return 0
+
     frozen = freeze_matchday(
         fixtures, played, cfg, ledger_dir,
         arm_names=[a.strip() for a in args.arms.split(",") if a.strip()],
     )
     if frozen is None:
-        print("no unplayed fixtures in the corpus — nothing to freeze.")
-        print("The source publishes a season's fixtures shortly before it starts.")
+        print("no unplayed fixtures in the corpus - nothing to freeze.")
         return 0
     path, block = frozen
     print(f"froze {block['n_fixtures']} fixture(s) for {block['barrier']}")
@@ -885,10 +916,17 @@ def build_parser() -> argparse.ArgumentParser:
     pa.set_defaults(func=cmd_audit)
 
     pl_ = sub.add_parser("live", help="freeze a matchday's forecasts, or score frozen ones")
-    pl_.add_argument("--arms", default="uniform,home-always,home-rate",
+    # The production model leads the list. The model-free arms cost nothing and are kept as the
+    # floor every frozen block is read against, but the reason this ledger exists at all is that a
+    # FITTED model's belief before kickoff cannot be reconstructed afterwards.
+    pl_.add_argument("--arms", default="dixon-coles,home-rate,uniform",
                      help="comma-separated arms to freeze")
     pl_.add_argument("--score", action="store_true",
                      help="score previously frozen forecasts instead of freezing")
+    pl_.add_argument("--dry-run", action="store_true",
+                     help="show what would be frozen, and write nothing")
+    pl_.add_argument("--no-feed", action="store_true",
+                     help="use only the cached season file, not the rolling fixtures feed")
     pl_.set_defaults(func=cmd_live)
 
     ps = sub.add_parser("simulate", help="Monte Carlo a season's remaining fixtures")

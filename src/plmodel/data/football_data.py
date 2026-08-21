@@ -496,3 +496,119 @@ def observed_team_names(
                 if col in raw.columns:
                     names.update(raw[col].dropna().astype(str).str.strip())
     return {n for n in names if n}
+
+
+# --- the pre-match fixture feed -----------------------------------------------------------------
+#
+# A season file appears only once it has results in it. That is fine for everything historical and
+# useless for the one job that cannot be redone later: freezing a forecast before the first ball of
+# a season is kicked. The source publishes a separate rolling feed of upcoming fixtures, and this
+# reads it into the same canonical frame the season files produce, so `pl live` takes one path
+# whichever supplied the row.
+
+FIXTURES_URL = "https://www.football-data.co.uk/fixtures.csv"
+
+
+def fetch_fixtures(
+    cfg: Config, *, divisions: tuple[str, ...] | None = None, today: pd.Timestamp | None = None
+) -> pd.DataFrame:
+    """Upcoming fixtures from the rolling feed, canonicalised and flagged unplayed.
+
+    Returns an empty frame with the right columns when the feed carries nothing for the requested
+    divisions, which is the normal state for most of the week rather than an error.
+
+    The team names go through the same alias map and the same closed roster as the ingest path. A
+    fixture naming a club the roster does not know is a name change or a promotion the static files
+    have not caught up with, and it must be fixed deliberately rather than silently admitted.
+    """
+    wanted = tuple(divisions or (cfg.backtest.prediction_division,))
+    now = today if today is not None else pd.Timestamp.today().normalize()
+    try:
+        resp = requests.get(FIXTURES_URL, timeout=_DOWNLOAD_TIMEOUT)
+    except requests.RequestException as exc:
+        raise IngestError(f"could not fetch {FIXTURES_URL}: {exc}") from exc
+    if resp.status_code != requests.codes.ok:
+        raise IngestError(f"{FIXTURES_URL} returned HTTP {resp.status_code}")
+    text, _ = decode(resp.content, FIXTURES_URL)
+    if not text.lstrip("\ufeff").lstrip().startswith(_EXPECTED_FIRST_FIELD):
+        raise IngestError(
+            f"{FIXTURES_URL} did not return a fixtures CSV (body starts {text.lstrip()[:40]!r})"
+        )
+
+    header, body = _rows_from_text(text, FIXTURES_URL)
+    raw = pd.DataFrame(body, columns=header, dtype=str)
+    raw = raw.loc[:, [c for c in raw.columns if not c.startswith("_pad")]].replace({"": None})
+    raw = raw[raw["Div"].notna() & raw["Date"].notna()]
+    raw = raw[raw["Div"].astype(str).str.strip().isin(wanted)].copy()
+
+    columns = ["date", "division", "season", "home_team", "away_team", "home_goals",
+               "away_goals", "result", "played", "matchday", "home_match_index",
+               "away_match_index"]
+    if raw.empty:
+        return pd.DataFrame({c: pd.Series(dtype="object") for c in columns})
+
+    aliases = load_aliases(cfg.static_dir)
+    roster = load_roster(cfg.static_dir)
+    date = parse_dates(raw["Date"], FIXTURES_URL)
+    cols: dict[str, object] = {
+        "date": date,
+        "division": raw["Div"].astype(str).str.strip(),
+        "season": [season_label(season_code(latest_started_season(d))) for d in date],
+        "home_team": canonicalise(raw["HomeTeam"], aliases, roster, source=FIXTURES_URL),
+        "away_team": canonicalise(raw["AwayTeam"], aliases, roster, source=FIXTURES_URL),
+        # No scores exist yet, and that is the point: these rows are the fixture list, never
+        # training data. `played` is False for every one of them by construction.
+        "home_goals": pd.Series([pd.NA] * len(raw), index=raw.index, dtype="Float64"),
+        "away_goals": pd.Series([pd.NA] * len(raw), index=raw.index, dtype="Float64"),
+        "result": None,
+        "played": False,
+    }
+    for src_col, dest in schema.TEXT_COLUMNS.items():
+        if src_col in raw.columns:
+            cols[dest] = raw[src_col].astype(str).str.strip().replace({"": None, "nan": None})
+    for col in raw.columns:
+        if schema.is_odds_column(col):
+            cols[col] = pd.to_numeric(raw[col], errors="coerce")
+
+    out = pd.DataFrame(cols, index=raw.index)
+    out = out[out["date"] >= now]
+    out = out.sort_values(["date", "home_team"], kind="stable").reset_index(drop=True)
+    out["matchday"] = derive_matchdays(out["date"]) if len(out) else pd.Series(dtype=int)
+    if len(out):
+        out["home_match_index"], out["away_match_index"] = derive_team_match_index(
+            out["date"], out["home_team"], out["away_team"]
+        )
+    else:
+        out["home_match_index"] = out["away_match_index"] = pd.Series(dtype=int)
+    return out
+
+
+def upcoming_fixtures(
+    cfg: Config, corpus: pd.DataFrame, *, division: str | None = None,
+    use_feed: bool = True, today: pd.Timestamp | None = None,
+) -> pd.DataFrame:
+    """Every unplayed fixture known for a division, from the corpus and the rolling feed.
+
+    The corpus wins on any fixture both describe: once the season file carries a row, that row is
+    the one every other command sees, and a live ledger built off a second description of the same
+    match would be scored against the first.
+    """
+    div = division or cfg.backtest.prediction_division
+    known = corpus[(corpus["division"] == div) & ~corpus["played"]]
+    if not use_feed:
+        return known.sort_values(["date", "home_team"], kind="stable").reset_index(drop=True)
+
+    feed = fetch_fixtures(cfg, divisions=(div,), today=today)
+    if feed.empty:
+        return known.sort_values(["date", "home_team"], kind="stable").reset_index(drop=True)
+
+    seen = {
+        (pd.Timestamp(r.date).normalize(), r.home_team, r.away_team)
+        for r in corpus[corpus["division"] == div].itertuples(index=False)
+    }
+    fresh = feed[[
+        (pd.Timestamp(r.date).normalize(), r.home_team, r.away_team) not in seen
+        for r in feed.itertuples(index=False)
+    ]]
+    combined = pd.concat([known, fresh], ignore_index=True)
+    return combined.sort_values(["date", "home_team"], kind="stable").reset_index(drop=True)

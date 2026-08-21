@@ -3,8 +3,14 @@
 # Only names that differ from their canonical form belong here. A name absent from this file must
 # already be on the roster, or ingest raises.
 #
-# football-data.co.uk needs no entries: all 116 spellings across E0-E3 1993/94-2025/26 are
-# internally consistent, so each is its own canonical name (verified 2026-08-17).
+# football-data.co.uk's SEASON FILES need no entries: all 116 spellings across E0-E3
+# 1993/94-2025/26 are internally consistent, so each is its own canonical name (verified
+# 2026-08-17).
+#
+# Its FIXTURES feed (fixtures.csv, the rolling pre-match list) does not share that convention and
+# spells some clubs more fully. Only names actually observed in the feed are listed below; the
+# feed carries a handful of divisions at a time, so this list will grow as fixtures for other
+# divisions appear, and an unrecognised name is meant to stop the ingest until someone looks at it.
 #
 # Understat (via the Kaggle mirror, see data/xg.py) uses full club names where football-data.co.uk
 # uses short ones. These six are the complete set of differences across the 33 clubs appearing in
@@ -21,3 +27,8 @@ Newcastle United: Newcastle
 Nottingham Forest: Nott'm Forest
 West Bromwich Albion: West Brom
 Wolverhampton Wanderers: Wolves
+
+# Observed in fixtures.csv on 2026-08-21, against season-file spellings 'Bradford' and
+# 'Sheffield Weds'. Both confirmed by division and opponent before being written here.
+Bradford City: Bradford
+Sheffield Wed: Sheffield Weds
