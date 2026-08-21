@@ -20,6 +20,11 @@ from plmodel.config import ConfigError, load_config
 # command the project set out to build exists.
 _PLANNED: dict[str, str] = {}
 
+# The registered arm the production model is scored as. `pl backtest` reads its block out of the
+# report by name, and a lookup that missed used to return an empty dict and skip the entire
+# readout without a word — a trap laid directly in the path of ever renaming or replacing it.
+PRODUCTION_ARM = "dixon-coles"
+
 # Accepted spellings of "against" in a fixture typed at the command line.
 _FIXTURE_SEPARATORS = (" v ", " vs ", " V ", " - ")
 
@@ -292,25 +297,16 @@ def cmd_fit(args: argparse.Namespace) -> int:
     """Fit the production model on everything available, and dump what it believes."""
     import pandas as pd
 
-    from plmodel.model.dixon_coles import fit_dixon_coles, fit_summary
+    from plmodel.model.dixon_coles import fit_summary
 
     cfg = load_config(args.config)
     _, matches = _load_corpus(cfg)
     ref = pd.Timestamp(args.asof) if args.asof else matches["date"].max() + pd.Timedelta(days=1)
-    train = matches[matches["date"] < ref]
-    if train.empty:
+    if matches[matches["date"] < ref].empty:
         print(f"no matches before {ref.date()}", file=sys.stderr)
         return 2
 
-    fit = fit_dixon_coles(
-        train,
-        half_life_days=args.half_life or cfg.model.decay_half_life_days,
-        ref_date=ref,
-        max_goals=cfg.model.max_goals,
-        param_bounds=cfg.model.param_bounds,
-        min_effective_share=cfg.model.min_effective_share,
-        max_iter=cfg.model.max_iter,
-    )
+    fit = _season_fit(cfg, matches, ref, half_life_days=args.half_life)
     summary = fit_summary(fit)
 
     print(f"as of     : {ref.date()}   ({fit.n_obs:,} matches, effective {fit.effective_n:.0f})")
@@ -325,11 +321,19 @@ def cmd_fit(args: argparse.Namespace) -> int:
     table = fit.team_table()
     current = set(matches[matches["season"] == matches["season"].max()]["home_team"])
     table = table[table["team"].isin(current)]
+    # Rates from the fit's own predictor rather than re-derived here. This used to be
+    # `exp(intercept + home_advantage + attack)` written out by hand — a second implementation of
+    # the linear predictor living in the CLI, and one that silently drops the structural
+    # home-advantage terms, the covariate context and the log-rate clip. An unrecognised opponent
+    # takes the league average by construction, so this reads as "against an average side".
+    against_average = pd.DataFrame({
+        "date": ref, "home_team": list(table["team"]), "away_team": "<league average>",
+    })
+    lam, mu = fit.match_rates(against_average)
     print(f"\n{'team':18}{'attack':>9}{'defence':>9}{'exp goals for':>15}{'against':>9}")
-    for row in table.itertuples(index=False):
-        lam = math.exp(fit.intercept + fit.home_advantage + row.attack)
-        mu = math.exp(fit.intercept - row.defence)
-        print(f"{row.team:18}{row.attack:>+9.3f}{row.defence:>+9.3f}{lam:>15.2f}{mu:>9.2f}")
+    for row, home_rate, away_rate in zip(table.itertuples(index=False), lam, mu):
+        print(f"{row.team:18}{row.attack:>+9.3f}{row.defence:>+9.3f}"
+              f"{home_rate:>15.2f}{away_rate:>9.2f}")
 
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     out_path = cfg.output_dir / "fit.json"
@@ -351,7 +355,7 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     span = cfg.backtest.sensitivity_span if args.sensitivity else cfg.backtest.test_span
     splits = _build_splits(cfg, matches, span=span)
     report = run_compare(
-        matches, splits, cfg, ["home-rate", "dixon-coles"],
+        matches, splits, cfg, ["home-rate", PRODUCTION_ARM],
         history=corpus[corpus["division"] == cfg.backtest.prediction_division],
         n_bins=cfg.audit.calibration_bins, big_six=cfg.audit.big_six,
     )
@@ -361,7 +365,11 @@ def cmd_backtest(args: argparse.Namespace) -> int:
     out_path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
 
     _print_compare(payload, report)
-    dc = payload["arms"].get("dixon-coles", {})
+    if PRODUCTION_ARM not in payload["arms"]:
+        print(f"the backtest report carries no {PRODUCTION_ARM!r} block; the production arm did "
+              "not run, so there is nothing to report against.", file=sys.stderr)
+        return 2
+    dc = payload["arms"][PRODUCTION_ARM]
     if dc.get("fit"):
         f = dc["fit"]
         print(f"\nfits      : {f['n_fits']} ({f['n_converged']} converged, "
@@ -564,6 +572,7 @@ def cmd_simulate(args: argparse.Namespace) -> int:
     )
     forecast = simulate_season(
         fit, played, remaining, spec=spec, seed=cfg.seed, season=season, barrier=barrier,
+        history=matches[matches["date"] < barrier],
         deductions=cfg.season.points_deductions.get(season, {}),
     )
     _print_simulation(forecast, cfg)
@@ -575,19 +584,14 @@ def cmd_simulate(args: argparse.Namespace) -> int:
     return 0
 
 
-def _season_fit(cfg, matches, barrier):
-    """The production fit at a barrier, with the standing strictly-before rule enforced."""
-    from plmodel.eval.backtest import training_frame
-    from plmodel.model.dixon_coles import fit_dixon_coles
+def _season_fit(cfg, matches, barrier, *, half_life_days=None):
+    """The production fit at a barrier. See plmodel.model.production for why it lives there."""
+    from plmodel.model.production import production_fit
 
-    train = training_frame(matches, barrier)
-    if train.empty:
-        raise SystemExit(f"no matches before {barrier.date()} to fit on")
-    return fit_dixon_coles(
-        train, half_life_days=cfg.model.decay_half_life_days, ref_date=barrier,
-        max_goals=cfg.model.max_goals, param_bounds=cfg.model.param_bounds,
-        min_effective_share=cfg.model.min_effective_share, max_iter=cfg.model.max_iter,
-    )
+    try:
+        return production_fit(cfg, matches, barrier, half_life_days=half_life_days)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
 
 
 def _print_simulation(forecast, cfg) -> None:

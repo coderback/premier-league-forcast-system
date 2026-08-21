@@ -4242,3 +4242,106 @@ span at all: the 2555 row above is the *original* recursion. So the sequence is:
 3. wire it only if all four gates pass.
 
 That is more work than flipping `enabled: true`, and it is the work the rule now asks for.
+
+---
+
+## 2026-08-21 — PREREQUISITE: the dynamic fit is now wireable, and three latent bugs are gone
+
+`dc-gas` is accepted and unwired. Wiring it was scoped today and deliberately **not** done, for a
+reason that is a mechanism rather than tidiness.
+
+`dc-gas` wants a **long** memory, because its states are what make old data usable. Home advantage
+and the league scoring rate need a **short** one, because both drift fast — the walk reports home
+advantage falling +0.2711 -> +0.1774 across the test decade alone. Today one half-life governs all
+four parameters, so `dc-gas` can only buy its long team memory by also buying a stale home
+advantage, which is exactly the 9.2-point home/away split gap measured this morning. **Per-parameter
+decay removes that trade-off**, and `dc-gas` on a decayed level could plausibly score better than
+any configuration measured so far. Gating it now would measure it at its worst.
+
+So: interface work now, per-parameter decay next, `dc-gas` gated on the new baseline after that.
+`model.seams.dynamics.enabled` stays `false` and no forecast moved.
+
+### Pre-commitment, recorded now so it binds later
+
+When `dc-gas` is gated, its three test-span scorings — original @2555, retuned @7300, retuned
+@2555 — count as **one family of three**, so gate 3's threshold is α/3 = 0.0167 rather than 0.05.
+
+Gate 3 as written controls multiplicity *within* a run and does not count serial re-scorings of one
+arm across configurations. That is a hole in the rule amended this morning, found the same day by
+trying to use it. It is recorded here rather than patched into the rule because the fix belongs in
+a prospective amendment, and because a pre-commitment written before the number is seen is worth
+more than a threshold chosen after.
+
+### Three latent bugs, all wrong today
+
+1. **The season simulator crashed where it meant to refuse.** `simulate_season` guards on
+   `fit.family is not None`; `DynamicFit` exposed no `family`, so it raised `AttributeError` before
+   the guard could be read. Delegating `family` fixes it *and* correctly lets the simulator accept
+   a production `DynamicFit` — a level with no family IS the Poisson-and-tau scoreline, and the
+   states only shift the rates.
+
+2. **The covariate seam was dropped on both sides, in opposite directions.** `DynamicFit.rates`
+   called the level's `rates` without `context=`, so prediction omitted the covariates; and
+   `filter_states` did the same, so the filter's baseline omitted them too. Fixing only the first
+   would have been worse than fixing neither — the states would have absorbed the covariate effect
+   during filtering and it would then have been applied a second time at prediction. Both now route
+   through `match_rates`, which builds the context in the code that owns it, and `filter_states`
+   uses `match_rates(history, history.iloc[:0])` — the same empty-history form `fit_dixon_coles`
+   uses to build its own design. Inert while the seam ships empty; correct when it does not.
+
+3. **`pl backtest` would have failed silently on a renamed arm.**
+   `payload["arms"].get("dixon-coles", {})` returns `{}` and skips the entire fit/rho/home-advantage
+   /market-gap readout without a word — a trap laid directly in the path of ever replacing the
+   production arm. Now a named constant and a lookup that exits.
+
+### Two test weaknesses, both of which would have gone quiet rather than red
+
+4. **The seam detector was one adoption away from proving nothing.** It flipped each seam *from the
+   shipped config* and asserted the result was not inert. The moment any seam ships on, all seven
+   parametrisations pass regardless of the seam under test. Demonstrated before fixing: with
+   dynamics shipped on, flipping `tiers` to its off value still reported non-inert. Now anchored on
+   an explicit `ALL_OFF` mapping, with `ADOPTED_SEAMS` alongside so adoption day is a one-tuple
+   change rather than a deleted test.
+
+5. **Nothing pinned the baseline arm to the production model.** If `compare.py`'s `dixon-coles` arm
+   ever followed `model.seams`, every paired delta in this ledger would silently become a comparison
+   against a different baseline, nothing would go red, and none of the recorded numbers would be
+   reproducible. Now pinned: flipping every seam on must leave its forecasts byte-identical, and its
+   fits must still be `DixonColesFit`.
+
+### Semantics worth stating: what a dynamic fit's "attack" is
+
+`DynamicFit.attack` returns the **level**, not level-plus-state. Tempting to return the effective
+strength, and wrong: every array named `attack` in this codebase means the fitted level, and
+`_warm_start_vector` seeds the next optimiser run from `previous.attack`. Folding the filtered
+deviations in there would re-filter on top of them, compounding every barrier into something that
+reads as slow drift rather than as a bug.
+
+The effective strength is not hidden — `team_table()` carries `attack`, `attack_state` and
+`attack_effective` as separate columns and sorts by the last, because the arm's whole claim is that
+the level and the state do different jobs. The table also now covers clubs the *filter* knows and
+the *level* does not: a cold-started club is pinned at the league average, which is 0.0 rather than
+unknown, and it acquires a state within weeks.
+
+There is **no** `__getattr__` forwarding, deliberately. It is the tempting six-liner and it inverts
+the failure mode this refactor exists to remove: delete the `match_rates` override and a blanket
+forward would silently answer with the level, dropping the states from the forecast without a word.
+
+### One more bug found and not fixed
+
+`DixonColesFit.team_table()`'s `cold_start` column can never be `True`: it tests
+`t in cold_start_teams for t in self.teams`, and `fit_dixon_coles` builds `teams` as *every team
+not in cold*. The two sets are disjoint by construction, so the column is dead — and `pl fit`
+consequently omits promoted clubs from its printed table entirely. Left for its own commit, because
+fixing it changes `pl fit`'s JSON output and this entry's claim is that nothing moved.
+
+### Verified rather than argued
+
+* **`dc-gas`'s own forecasts are byte-identical across the refactor** — `695127628ac7f0f2` on both
+  the pre-refactor tree and this one, over 2024-25, computed in a detached worktree at the previous
+  commit rather than reasoned about. The `dixon-coles` arm likewise at `4ff8e0e3eaf37c48`.
+* `pl fit` prints the same numbers, now via the fit's own predictor: the CLI used to re-derive
+  `exp(intercept + home_advantage + attack)` by hand, a second implementation of the linear
+  predictor that silently dropped the structural home-advantage terms, the covariate context and
+  the log-rate clip.
+* 576 unit tests pass, from 541.

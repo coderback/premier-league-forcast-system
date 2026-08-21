@@ -72,6 +72,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from plmodel.model.counts import CountSpec
 from plmodel.model.dixon_coles import DixonColesFit
 from plmodel.model.scoreline import clamp_rho_for_rates, three_class_from_rates
 
@@ -222,6 +223,11 @@ def filter_states(history: pd.DataFrame, fit: DixonColesFit, spec: GasSpec) -> G
     if missing:
         raise ValueError(f"history missing columns: {sorted(missing)}")
 
+    if fit.family is not None:
+        raise DynamicsError(
+            "the filter's score is the score of the Poisson-and-tau likelihood; a level fitted "
+            "under another scoreline family would be updated by the wrong derivative"
+        )
     teams = tuple(sorted(set(history["home_team"]) | set(history["away_team"])))
     if spec.is_inert:
         zeros = np.zeros(len(teams))
@@ -229,10 +235,14 @@ def filter_states(history: pd.DataFrame, fit: DixonColesFit, spec: GasSpec) -> G
 
     # The level rates come from the fit itself, so the filter cannot drift from the predictor's
     # own formula: home advantage, structural terms and rate clipping are all already applied.
-    lam0, mu0 = fit.rates(
-        history["home_team"], history["away_team"],
-        history["date"] if "date" in history.columns else None,
-    )
+    #
+    # Through `match_rates` with an empty history, which is how `fit_dixon_coles` builds its own
+    # covariate design (see the cov_design_matrix call there). An earlier version called `rates`
+    # directly and passed no context, so the filter's baseline omitted the covariates while
+    # prediction included them — the states would have absorbed the covariate effect during
+    # filtering and it would then have been applied a second time at prediction. Byte-identical
+    # while the seam ships empty, and wrong the moment it does not.
+    lam0, mu0 = fit.match_rates(history, history.iloc[:0])
     base_log_lam = np.log(lam0).tolist()
     base_log_mu = np.log(mu0).tolist()
 
@@ -318,6 +328,14 @@ class DynamicFit:
     spec: GasSpec
 
     # Delegated so this fit can stand in for a DixonColesFit wherever the harness reports on one.
+    #
+    # Written out one at a time rather than through a __getattr__ that forwards everything, and
+    # that is deliberate. The two members most likely to be reached for are `attack` and
+    # `defence`, and those are exactly the two where forwarding to the level would be WRONG: a
+    # dynamic fit's strength is the level plus its state. A blanket forward would answer them
+    # quietly and wrongly. Everything below is a member where the level's answer IS the answer;
+    # everything the states change is overridden further down, and anything absent from both
+    # raises, which is what it should do.
     @property
     def rho(self) -> float:
         return self.fit.rho
@@ -339,6 +357,10 @@ class DynamicFit:
         return self.fit.home_advantage
 
     @property
+    def intercept(self) -> float:
+        return self.fit.intercept
+
+    @property
     def teams(self) -> tuple[str, ...]:
         return self.fit.teams
 
@@ -350,20 +372,169 @@ class DynamicFit:
     def diagnostics(self) -> dict[str, int]:
         return self.fit.diagnostics
 
-    def rates(self, rows: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-        lam, mu = self.fit.rates(
-            rows["home_team"], rows["away_team"],
-            rows["date"] if "date" in rows.columns else None,
-        )
-        attack_home, defence_home = self.states.deviation(rows["home_team"])
-        attack_away, defence_away = self.states.deviation(rows["away_team"])
+    @property
+    def max_goals(self) -> int:
+        return self.fit.max_goals
+
+    @property
+    def ref_date(self) -> pd.Timestamp:
+        return self.fit.ref_date
+
+    @property
+    def n_obs(self) -> int:
+        return self.fit.n_obs
+
+    @property
+    def effective_n(self) -> float:
+        return self.fit.effective_n
+
+    @property
+    def neg_log_lik(self) -> float:
+        return self.fit.neg_log_lik
+
+    @property
+    def family(self) -> CountSpec | None:
+        """The level's scoreline family — None IS the production Poisson-and-tau path.
+
+        Delegated rather than omitted because callers guard on it. The season simulator asks
+        ``fit.family is not None`` before it will draw, and an absent attribute turned that
+        refusal into an AttributeError raised before the guard could even be read.
+        """
+        return self.fit.family
+
+    @property
+    def shape(self) -> float:
+        return self.fit.shape
+
+    @property
+    def kappa(self) -> float:
+        return self.fit.kappa
+
+    @property
+    def cov_spec(self):
+        return self.fit.cov_spec
+
+    @property
+    def cov_names(self) -> tuple[str, ...]:
+        return self.fit.cov_names
+
+    @property
+    def cov_params(self) -> tuple[float, ...]:
+        return self.fit.cov_params
+
+    @property
+    def ha_names(self) -> tuple[str, ...]:
+        return self.fit.ha_names
+
+    @property
+    def ha_params(self) -> tuple[float, ...]:
+        return self.fit.ha_params
+
+    # --- what the states change, and therefore what this class must answer itself ---------------
+
+    @property
+    def attack(self) -> np.ndarray:
+        """The LEVEL's attack, aligned to :attr:`teams` — not the level plus the state.
+
+        Tempting to return the effective strength here, and wrong. Every array named ``attack`` in
+        this codebase means the fitted level: the season simulator's drift perturbs it, the hybrid
+        consumes it as a feature, and `_warm_start_vector` seeds the next optimiser run from it.
+        That last one decides it — warm-starting a level fit from level-plus-state would fold the
+        filtered deviations into the level and then filter on top of them again, a compounding
+        corruption that would read as slow drift rather than as a bug.
+
+        The effective strength is not hidden; it is a named column in :meth:`team_table`.
+        """
+        return self.fit.attack
+
+    @property
+    def defence(self) -> np.ndarray:
+        """The LEVEL's defence. See :attr:`attack`."""
+        return self.fit.defence
+
+    def _shift(self, lam, mu, home: pd.Series, away: pd.Series):
+        """The level's rates times each side's filtered deviation.
+
+        Shared by :meth:`rates` and :meth:`match_rates` so the two cannot come to express the
+        recursion differently. The multiplication happens *after* the level's log-rate clip rather
+        than inside it, which is what the arm was measured with.
+        """
+        attack_home, defence_home = self.states.deviation(home)
+        attack_away, defence_away = self.states.deviation(away)
         return (
             lam * np.exp(attack_home - defence_away),
             mu * np.exp(attack_away - defence_home),
         )
 
-    def predict_proba(self, rows: pd.DataFrame) -> np.ndarray:
-        lam, mu = self.rates(rows)
+    def rates(
+        self, home: pd.Series, away: pd.Series, dates: pd.Series | None = None,
+        *, context: tuple[np.ndarray, np.ndarray] | None = None,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Expected goals, with the same signature the level takes.
+
+        Identical to ``DixonColesFit.rates`` on purpose. An earlier version took a DataFrame
+        instead, so two classes meant to be interchangeable had a same-named method with
+        incompatible shapes — which is the trap that made this whole refactor necessary.
+        """
+        return self._shift(*self.fit.rates(home, away, dates, context=context), home, away)
+
+    def match_rates(
+        self, rows: pd.DataFrame, history: pd.DataFrame | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Expected goals for a match frame, with every fitted seam applied, then the states.
+
+        Delegated to the level's own ``match_rates`` rather than reimplemented, so the covariate
+        context is built by the code that owns it — including its refusal to forecast a fitted
+        covariate without the history it counts back through.
+        """
+        return self._shift(
+            *self.fit.match_rates(rows, history), rows["home_team"], rows["away_team"]
+        )
+
+    def team_table(self) -> pd.DataFrame:
+        """Level, state and their sum, strongest EFFECTIVE attack first.
+
+        Three pairs of columns rather than one, because the arm's whole claim is that the level
+        and the state do different jobs — long-run quality, and drift away from it — and a table
+        that folded them together would hide the thing worth looking at. ``attack`` keeps the
+        meaning it has everywhere else in this codebase (the level), so a reader who knows the base
+        class is not ambushed; ``attack_effective`` is what the model forecasts with.
+
+        Rows cover the level's teams **and** the filter's. A club cold-started by the fit has no
+        level — it is pinned at the league average, which is 0.0, not unknown — but the filter will
+        give it a state within weeks, and a table that dropped it would be silent about a club the
+        model is actively forecasting.
+        """
+        cold = set(self.fit.cold_start_teams)
+        level = dict(zip(self.fit.teams, zip(self.fit.attack, self.fit.defence)))
+        teams = list(self.fit.teams) + [t for t in self.states.teams if t not in level]
+        state_attack, state_defence = self.states.deviation(pd.Series(teams, dtype=object))
+        attack = np.array([level.get(t, (0.0, 0.0))[0] for t in teams])
+        defence = np.array([level.get(t, (0.0, 0.0))[1] for t in teams])
+        return pd.DataFrame(
+            {
+                "team": teams,
+                "attack": attack,
+                "defence": defence,
+                "attack_state": state_attack,
+                "defence_state": state_defence,
+                "attack_effective": attack + state_attack,
+                "defence_effective": defence + state_defence,
+                "cold_start": [t in cold or t not in level for t in teams],
+            }
+        ).sort_values("attack_effective", ascending=False, kind="stable").reset_index(drop=True)
+
+    def predict_proba(
+        self, rows: pd.DataFrame, history: pd.DataFrame | None = None
+    ) -> np.ndarray:
+        """(N, 3) home/draw/away probabilities, with rho clamped per match as the level does.
+
+        The clamp count lands on the level's ``diagnostics`` dict, which the arm reuses across
+        barriers between refits. That is deliberate: the report wants the total over the walk, not
+        a per-barrier counter that resets every time a fresh DynamicFit is wrapped around the same
+        level.
+        """
+        lam, mu = self.match_rates(rows, history)
         rho, n_clamped = clamp_rho_for_rates(lam, mu, self.fit.rho, margin=_RHO_CLAMP_MARGIN)
         if n_clamped:
             self.fit.diagnostics["rho_clamped"] = (

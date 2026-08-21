@@ -43,6 +43,7 @@ from plmodel.model.dixon_coles import (
     _RHO_CLAMP_MARGIN,
     DixonColesFit,
 )
+from plmodel.model.dynamics import DynamicFit
 from plmodel.model.scoreline import clamp_rho_for_rates
 from plmodel.season.table import Question, SeasonError, points_for, rank, standings
 
@@ -265,7 +266,7 @@ def _team_index(teams: tuple[str, ...], names: pd.Series) -> np.ndarray:
 
 
 def simulate_season(
-    fit: DixonColesFit,
+    fit: DixonColesFit | DynamicFit,
     played: pd.DataFrame,
     remaining: pd.DataFrame,
     *,

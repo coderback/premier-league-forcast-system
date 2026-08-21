@@ -38,9 +38,9 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from plmodel.eval.backtest import LeakageError, training_frame
+from plmodel.eval.backtest import training_frame
 from plmodel.eval.metrics import paired_delta_clustered
-from plmodel.model.dixon_coles import DixonColesFit, fit_dixon_coles
+from plmodel.model.production import production_fit
 from plmodel.season.simulate import SeasonForecast, SeasonSpec, simulate_season
 from plmodel.season.table import Question, SeasonError, standings
 
@@ -260,22 +260,6 @@ def pit_summary(values: np.ndarray) -> dict[str, float]:
     }
 
 
-def _fit_at(matches: pd.DataFrame, barrier: pd.Timestamp, cfg) -> DixonColesFit:
-    """The production fit at a barrier, with the strictly-before rule enforced by the splitter."""
-    train = training_frame(matches, barrier)
-    if train.empty:
-        raise LeakageError(f"no training data before {pd.Timestamp(barrier).date()}")
-    return fit_dixon_coles(
-        train,
-        half_life_days=cfg.model.decay_half_life_days,
-        ref_date=barrier,
-        max_goals=cfg.model.max_goals,
-        param_bounds=cfg.model.param_bounds,
-        min_effective_share=cfg.model.min_effective_share,
-        max_iter=cfg.model.max_iter,
-    )
-
-
 def run_span(
     matches: pd.DataFrame,
     cfg,
@@ -310,12 +294,13 @@ def run_span(
         for barrier in matchweek_barriers(
             rows, weeks=weeks, fixtures_per_week=fixtures_per_week
         ):
-            fit = _fit_at(matches, barrier.date, cfg)
+            fit = production_fit(cfg, matches, barrier.date)
             played = rows[rows["date"] < barrier.date]
             remaining = rows[rows["date"] >= barrier.date]
             for name, spec in specs.items():
                 forecast = simulate_season(
                     fit, played, remaining, spec=spec, seed=cfg.seed,
+                    history=training_frame(matches, barrier.date),
                     deductions=season_deductions, season=season, barrier=barrier.date,
                 )
                 scored = score_forecast(

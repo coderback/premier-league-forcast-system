@@ -336,3 +336,75 @@ def test_spec_validation() -> None:
         DriftSpec(attack_sd=0.1)
     with pytest.raises(SeasonError, match="in \\[-1, 1\\]"):
         DriftSpec(attack_sd=0.1, defence_sd=0.1, correlation=2.0, horizon_exponent=0.5)
+
+
+# --- standing in for a DixonColesFit -------------------------------------------------------------
+#
+# `dc-gas` is accepted and unwired. When it is wired the simulator will be handed a DynamicFit, so
+# these are the prerequisite proofs: it accepts one, the states actually reach the sampler, and a
+# fit it cannot draw from is refused rather than crashed.
+
+def _dynamic(teams, results, *, loading=0.15):
+    """A dynamic fit over a short history, so the states are non-zero and known to be so."""
+    from plmodel.model.dynamics import DynamicFit, GasSpec, filter_states
+
+    level = _fit(teams)
+    history = pd.DataFrame({
+        "date": pd.to_datetime([r[0] for r in results]),
+        "home_team": [r[1] for r in results], "away_team": [r[2] for r in results],
+        "home_goals": [float(r[3]) for r in results],
+        "away_goals": [float(r[4]) for r in results],
+    })
+    spec = GasSpec(score_loading=loading, persistence=0.95, scaling_exponent=1.0,
+                   half_life_days=730.0, state_bound=1.5)
+    return level, DynamicFit(level, filter_states(history, level, spec), spec)
+
+
+def test_the_simulator_accepts_a_dynamic_fit_and_forecasts_from_its_states() -> None:
+    """The regression for a crash, and the proof the states are not silently dropped.
+
+    `simulate_season` guards on `fit.family is not None`. A DynamicFit exposed no `family`, so the
+    guard raised AttributeError before it could be read — a crash where a refusal was intended.
+    Now it is accepted, and the load-bearing assertion is the last one: if the states failed to
+    reach the sampler the two forecasts would be identical.
+    """
+    teams = tuple("ABCDEF")
+    beatings = [(f"2020-01-{d:02d}", "A", "B", 4, 0) for d in range(1, 9)]
+    level, dynamic = _dynamic(teams, beatings)
+    fixtures = _round_robin(teams)
+
+    from_level = simulate_season(level, fixtures.iloc[:0], fixtures, spec=_spec(), seed=5)
+    from_states = simulate_season(dynamic, fixtures.iloc[:0], fixtures, spec=_spec(), seed=5)
+
+    assert from_states.probabilities["title"].sum() == pytest.approx(1.0)
+    assert from_states.position_counts.sum(axis=0).tolist() == [2000] * len(teams)
+    assert (from_states.question_probability("title")["A"]
+            > from_level.question_probability("title")["A"])
+
+
+def test_a_dynamic_fit_with_no_states_simulates_exactly_what_its_level_does() -> None:
+    """The season-shaped inertness contract: byte-identical, not merely close."""
+    teams = tuple("ABCDEF")
+    level, inert = _dynamic(teams, [("2020-01-01", "A", "B", 1, 0)], loading=0.0)
+    fixtures = _round_robin(teams)
+    plain = simulate_season(level, fixtures.iloc[:0], fixtures, spec=_spec(), seed=9)
+    dynamic = simulate_season(inert, fixtures.iloc[:0], fixtures, spec=_spec(), seed=9)
+    assert np.array_equal(plain.position_counts, dynamic.position_counts)
+    assert np.array_equal(plain.points_counts, dynamic.points_counts)
+
+
+def test_a_dynamic_fit_over_a_scoreline_family_is_refused_rather_than_crashed() -> None:
+    """Refused, not crashed — the distinction this whole delegation exists to restore."""
+    from plmodel.model.dynamics import DynamicFit, GasStates
+
+    teams = tuple("ABCDEF")
+    level = dataclasses.replace(
+        _fit(teams), family=CountSpec(marginal="weibull", n_series_terms=60)
+    )
+    zeros = np.zeros(len(teams))
+    states = GasStates(teams, zeros, zeros.copy(), 0, 0, 0)
+    spec = _dynamic(teams, [("2020-01-01", "A", "B", 1, 0)])[1].spec
+    fixtures = _round_robin(teams)
+    with pytest.raises(SeasonError, match="scoreline family"):
+        simulate_season(DynamicFit(level, states, spec), fixtures.iloc[:0], fixtures,
+                        spec=_spec(), seed=1)

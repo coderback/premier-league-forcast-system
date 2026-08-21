@@ -438,3 +438,169 @@ def test_the_filter_uses_nothing_dated_at_or_after_the_barrier(cfg, corpus) -> N
     honest = filter_states(history, fit, spec)
     leaked = filter_states(corpus[corpus["date"] < pd.Timestamp("2024-09-01")], fit, spec)
     assert not np.allclose(honest.attack, leaked.attack)
+
+
+# --- standing in for a DixonColesFit -------------------------------------------------------------
+#
+# `dc-gas` is accepted and unwired. Promoting it means `pl fit`, `pl predict` and `pl simulate`
+# hand a DynamicFit to code written against a DixonColesFit, so the substitutability is a contract
+# now rather than a convenience later. These tests are that contract.
+
+# Every member the three production commands and the season simulator actually touch, gathered in
+# one place so that adding a field to DixonColesFit and forgetting DynamicFit shows up here rather
+# than as an AttributeError in front of a fixture list.
+_REQUIRED_SURFACE = (
+    "teams", "attack", "defence", "intercept", "home_advantage", "rho", "half_life_days",
+    "ref_date", "max_goals", "n_obs", "effective_n", "neg_log_lik", "converged", "n_iterations",
+    "cold_start_teams", "family", "diagnostics", "team_table", "match_rates", "predict_proba",
+    "as_dict",
+)
+
+
+def _dynamic(teams=("A", "B"), rows=None, **spec_kwargs) -> DynamicFit:
+    level = _fit(teams)
+    history = _history(rows or [("2020-01-01", "A", "B", 3, 0)])
+    spec = _spec(**spec_kwargs)
+    return DynamicFit(level, filter_states(history, level, spec), spec)
+
+
+@pytest.mark.parametrize("member", _REQUIRED_SURFACE)
+def test_a_dynamic_fit_carries_everything_production_reads(member: str) -> None:
+    assert hasattr(_dynamic(), member), f"DynamicFit is missing {member!r}"
+
+
+def test_a_missing_member_still_raises_rather_than_reaching_the_level() -> None:
+    """No blanket __getattr__: the members most likely to be reached for are the wrong ones.
+
+    Forwarding everything to the level would answer `attack` quietly and wrongly, because a
+    dynamic fit's strength is the level plus its state.
+    """
+    with pytest.raises(AttributeError):
+        _dynamic().this_member_does_not_exist
+
+
+def test_attack_and_defence_stay_the_level_and_do_not_absorb_the_state() -> None:
+    """Every array named `attack` in this codebase means the fitted level, and one caller relies
+    on it: `_warm_start_vector` seeds the next optimiser run from `previous.attack`. Folding the
+    filtered deviations in there would re-filter on top of them, compounding every barrier."""
+    dynamic = _dynamic(rows=[("2020-01-01", "A", "B", 4, 0)])
+    assert np.array_equal(dynamic.attack, dynamic.fit.attack)
+    assert np.array_equal(dynamic.defence, dynamic.fit.defence)
+    # ... and the states are non-zero, so this is a real distinction rather than a vacuous one.
+    assert np.abs(dynamic.states.attack).max() > 0.0
+
+
+def test_the_team_table_carries_the_level_the_state_and_their_sum() -> None:
+    """`pl fit` prints this. Folding the two together would hide the arm's whole claim."""
+    table = _dynamic(rows=[("2020-01-01", "A", "B", 4, 0)]).team_table()
+    assert {"attack_state", "attack_effective", "defence_state", "defence_effective"} <= set(
+        table.columns
+    )
+    assert np.allclose(table["attack_effective"], table["attack"] + table["attack_state"])
+    assert np.allclose(table["defence_effective"], table["defence"] + table["defence_state"])
+    assert table["attack_effective"].is_monotonic_decreasing
+
+
+def test_the_team_table_shows_a_club_the_filter_knows_but_the_level_does_not() -> None:
+    """A cold-started club has no level — pinned at the league average, which is 0.0, not
+    unknown — but the filter gives it a state within weeks. Dropping it would be silent about a
+    club the model is actively forecasting."""
+    level = _fit(("A", "B"))
+    history = _history([("2020-01-01", "A", "B", 3, 0), ("2020-01-08", "C", "A", 2, 0)])
+    dynamic = DynamicFit(level, filter_states(history, level, _spec()), _spec())
+    table = dynamic.team_table().set_index("team")
+    assert "C" in table.index
+    assert table.loc["C", "attack"] == 0.0 and bool(table.loc["C", "cold_start"])
+    assert table.loc["C", "attack_effective"] != 0.0
+
+
+def test_match_rates_shifts_the_level_by_the_states() -> None:
+    dynamic = _dynamic(rows=[("2020-01-01", "A", "B", 4, 0)])
+    rows = pd.DataFrame({"date": [pd.Timestamp("2020-02-01")],
+                         "home_team": ["A"], "away_team": ["B"]})
+    lam, mu = dynamic.match_rates(rows)
+    level_lam, level_mu = dynamic.fit.match_rates(rows)
+    a_home, d_home = dynamic.states.deviation(rows["home_team"])
+    a_away, d_away = dynamic.states.deviation(rows["away_team"])
+    assert np.allclose(lam, level_lam * np.exp(a_home - d_away))
+    assert np.allclose(mu, level_mu * np.exp(a_away - d_home))
+
+
+def test_match_rates_carries_the_covariate_context_through() -> None:
+    """The regression test for a silent drop.
+
+    An earlier `rates` called the level's `rates` without `context=`, so a fit carrying covariates
+    forecast without them — inert only because the seam ships empty, and the same failure the
+    home-advantage seam already paid for once.
+    """
+    from plmodel.model.covariates import CovariateSpec
+
+    spec = CovariateSpec(terms=("rest",), mode="diff", rest_clip_days=14,
+                         rest_reference_days=7, congestion_window_days=56,
+                         euro_top_k=6, euro_window=("09-14", "05-31"))
+    history = pd.DataFrame({
+        "date": pd.to_datetime(["2020-01-01", "2020-01-08"]),
+        "season": "2019-20", "division": "E0", "played": True,
+        "home_team": ["A", "B"], "away_team": ["B", "A"],
+        "home_goals": [1.0, 2.0], "away_goals": [0.0, 1.0],
+    })
+    level = fit_dixon_coles(
+        history, half_life_days=730.0, ref_date=pd.Timestamp("2020-02-01"), max_goals=12,
+        param_bounds={"intercept": (-2.0, 2.0), "home_advantage": (-1.0, 1.0),
+                      "rho": (-0.2, 0.2), "strength": (-2.0, 2.0), "elo_slope": (0.0, 1.0),
+                      "cov_rest": (-0.05, 0.05)},
+        min_effective_share=0.0, max_iter=200, covariates=spec, cov_division="E0",
+    )
+    dynamic = DynamicFit(level, filter_states(history, level, _spec()), _spec())
+    rows = pd.DataFrame({"date": [pd.Timestamp("2020-02-01")], "season": ["2019-20"],
+                         "division": ["E0"], "played": [False],
+                         "home_team": ["A"], "away_team": ["B"]})
+
+    with_context = dynamic.match_rates(rows, history)  # noqa: F841 - asserted below
+    # Asking for the rates WITHOUT the history is how the covariate seam reports its own absence:
+    # the level refuses rather than silently forecasting a term it fitted.
+    with pytest.raises(ValueError, match="no history"):
+        dynamic.match_rates(rows)
+    assert np.isfinite(with_context[0]).all()
+
+
+def test_the_filter_refuses_a_level_fitted_under_another_scoreline_family() -> None:
+    """The score driving the recursion is the derivative of the Poisson-and-tau likelihood.
+
+    A level fitted under a Weibull marginal or a Frank copula would be updated by the wrong
+    derivative, and nothing downstream would say so — the states would simply be wrong in a way
+    that looks like a result.
+    """
+    from plmodel.model.counts import CountSpec
+
+    level = dataclasses.replace(
+        _fit(), family=CountSpec(marginal="weibull", n_series_terms=60)
+    )
+    with pytest.raises(DynamicsError, match="scoreline family"):
+        filter_states(_history([("2020-01-01", "A", "B", 1, 0)]), level, _spec())
+
+
+def test_rates_takes_the_same_arguments_the_level_does() -> None:
+    """The anti-trap test: it pins exactly the thing that was wrong.
+
+    Two classes meant to stand in for one another had a same-named method with incompatible
+    shapes — a DataFrame here, two Series and a keyword-only context there.
+    """
+    import inspect
+
+    for name in ("rates", "match_rates", "predict_proba"):
+        assert inspect.signature(getattr(DynamicFit, name)) == inspect.signature(
+            getattr(DixonColesFit, name)
+        ), f"{name} has drifted from the level's signature"
+
+
+def test_zero_states_make_the_rates_the_levels_own() -> None:
+    """The method-level inertness contract: byte-identical, not merely close."""
+    level = _fit()
+    inert = DynamicFit(level, filter_states(
+        _history([("2020-01-01", "A", "B", 1, 0)]), level, _spec(score_loading=0.0)
+    ), _spec(score_loading=0.0))
+    rows = pd.DataFrame({"date": [pd.Timestamp("2020-02-01")],
+                         "home_team": ["A"], "away_team": ["B"]})
+    assert np.array_equal(inert.match_rates(rows)[0], level.match_rates(rows)[0])
+    assert np.array_equal(inert.match_rates(rows)[1], level.match_rates(rows)[1])
