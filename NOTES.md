@@ -4115,3 +4115,53 @@ than team strengths do. Wire it after that, and the two changes are tested toget
 baseline rather than serially against a moving one.
 
 This is a sequencing judgement, not a reversal. `dc-gas` remains accepted.
+
+### The tie the retune could not break, broken on the tuning span
+
+The retune recorded a dilemma and deliberately left it: 2555 / 5475 / 7300 tie on tuning-span RPS
+within 0.00001, the first configuration (2555) scored better on the test span, and *"choosing
+between them on test-span evidence would be selecting a hyperparameter against the acceptance
+instrument"*. So it shipped 7300 and said the rule decides, not the number it produces. That was
+right on the evidence available.
+
+There is now a second criterion, and it lives on the tuning span. Monthly refits, 3,800 tuning-span
+matches, `dc-gas` at the shipping recursion with only the level's memory varied:
+
+```
+half-life       RPS   total err   home err   away err   split gap
+      730   0.20373      -1.51%     -1.47%     -1.57%      0.11%
+     1825   0.20342      -1.52%     -1.40%     -1.69%      0.29%
+     2555   0.20338      -1.49%     -1.36%     -1.68%      0.33%
+     5475   0.20341      -1.48%     -1.26%     -1.78%      0.52%
+     7300   0.20338      -1.47%     -1.23%     -1.81%      0.58%
+```
+
+**2555 and 7300 are RPS-identical to five decimal places, and 2555's home/away split is 43%
+better calibrated.** The split gap is monotone in the memory, which is what a level half-life
+inheriting a drifting home advantage should look like. 730 is not a candidate: it costs 0.00035 of
+RPS, comparable to the arm's entire effect, so the plateau does not extend that far.
+
+A tie needs a tie-break, and any criterion measured on the tuning span is protocol-legal. This one
+resolves exactly the dilemma the retune entry recorded, from the side the entry was allowed to look
+at.
+
+**Disclosure, on the same principle as Arm 6's.** I knew the test-span ordering before proposing
+this tie-break, so it is not blind and the ledger should say so. What makes it more than
+rationalisation is the order the evidence arrived in: the goal-rate bias was measured on the
+*production* model this morning, for an unrelated reason — `pl predict` began emitting over/under
+— and it was that measurement's away-side skew that prompted looking at `dc-gas`'s split at all.
+The criterion was not chosen to favour 2555; it was already in hand, and 2555 is where it points.
+
+### Verdict on wiring
+
+**Adopt `dc-gas` at a 2555-day level half-life.** It is the only arm in nine to pass, it passes on
+a placebo that scrambled results fail, its mechanism is measured rather than asserted, and the one
+defect this week's work exposed is halved by a change the tuning span independently prefers.
+
+Two things this does **not** fix, recorded so the adoption is not oversold:
+
+* **Home advantage is still stale at 2555 days.** The tuning span's split gap is 0.33% because home
+  advantage barely moved in 1996-2006; on the test decade it fell +0.2711 -> +0.1774 and the same
+  configuration will do far worse. Per-parameter decay remains the fix, and remains queued.
+* **The season simulator is untested under `dc-gas`.** It refuses a non-production fit today. Home
+  advantage enters all 380 fixtures, so it must be measured there before the simulator ships on it.
