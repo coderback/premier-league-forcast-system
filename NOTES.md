@@ -3993,7 +3993,7 @@ already have found it.
 
 ---
 
-## 2026-08-21 — DECISION: `dc-copula` is rejected; `dc-gas` is accepted and blocked on its retune
+## 2026-08-21 — DECISION: `dc-copula` is rejected; `dc-gas` is accepted and still not wired
 
 Both arms passed the acceptance rule as written. Both were left open at the time because wiring
 either changes the baseline every later arm is measured against, and that is a decision about the
@@ -4043,16 +4043,18 @@ It is also not a large effect and this entry does not claim one. One season carr
 pooled delta; drop it and −0.0011 remains, which is the sensitivity span's number. **The honest
 estimate is nearer −0.001 than −0.0019.**
 
-**The rule's own text decides the next step: "An accepted variant earns a hyperparameter retune
-BEFORE production wiring."** That retune has not been run, and Arm 3 recorded exactly what it must
-answer first — whether `dc-gas` does better at 730 days than at the 2555 it currently carries. That
-question could not be answered then and cannot be answered on the test span now, because selecting a
-half-life there is tuning against the acceptance instrument. It belongs on `tuning_span`, where the
-arm's half-life was originally chosen against a grid that stopped at 1825 and never saw the
-interaction.
+**Correction, made the same day.** This entry first said wiring was blocked on the retune the
+rule mandates. That was wrong: the retune ran on 2026-08-19 and its entry is above. `config.yaml`
+carries the retuned values (K 0.025, B 0.995, e 1.5, 7300 days), the rule's precondition is
+satisfied, and the retune entry says so in as many words — *"production wiring is now permitted,
+and has not been done"*. The error was reading Arm 3's pre-retune values as current. Left visible
+rather than silently fixed, because a ledger that quietly corrects itself is worth less than one
+that shows what it got wrong.
 
-So `dc-gas` is **accepted and not yet wired**, and the gap between those two is a scheduled task
-rather than an unresolved argument.
+So the position is that wiring is **permitted and unforced**, and the shipping configuration is
+thinner than Arm 3's headline: **−0.0013 [−0.0026, −0.0000], P=0.976, DM p=0.065**, against the
+−0.0019 the first, cruder search produced. The retune improved the tuning window by 0.00027 and
+gave back twice that on the test decade — a plateau being read as a peak.
 
 ### What wiring will actually cost, recorded so it is not discovered halfway
 
@@ -4068,3 +4070,48 @@ The dynamics seam is read in exactly one place — `compare.py`'s arm. Nothing e
 That last point is the one worth stating plainly: **`d398b3cab1d04106` is the digest of the current
 production baseline, and adopting `dc-gas` retires it.** It should be replaced deliberately, with
 the old value kept in this ledger, rather than quietly updated when a test fails.
+
+### And a measurement that decides it: `dc-gas` fixes the level and breaks the split
+
+Wiring `dc-gas` was always argued on RPS. `pl predict` now emits over/under, both-teams-to-score
+and correct score, and the season simulator runs 380 fixtures through a home advantage, so the
+question "would this improve the forecast system" is no longer answered by the scoreboard alone.
+Measured on the same monthly-refit protocol used for the production model this morning, shipping
+configuration, 3,800 test-decade matches:
+
+```
+                                        goals/match   error
+actual                                     2.8350       —
+dixon-coles @730  (production)             2.7670    +2.46% under
+dixon-coles @7300 (the level dc-gas uses)  2.7001    +5.00% under
+dc-gas                                     2.8745    -1.37% OVER
+
+                     dc-gas    actual
+home                 1.6402    1.5553    over by 5.5%
+away                 1.2343    1.2797    under by 3.7%
+```
+
+**The level improves and the split gets worse.** Total-goal error roughly halves, from 2.46% under
+to 1.37% over — the states do absorb a league-wide scoring shift, which is not obvious a priori
+since they are per-team, and they manage it because nothing constrains them to sum to zero.
+
+But the home/away imbalance goes from a 2.6-point spread to a **9.2-point** one. The cause is
+structural and was visible in the arm's own design: `dc-gas` fits its level with a 7300-day memory,
+so it inherits a home advantage averaged over two decades, and the walk already reports home
+advantage falling +0.2711 -> +0.1774 across the test decade alone. The states cannot correct it —
+they are team-level and enter attack and defence symmetrically, while home advantage is neither.
+
+That matters more than it would have a week ago:
+
+* every derived market that depends on which side scores — the season simulator puts a home
+  advantage through all 380 fixtures, and a systematically high one distorts the whole table;
+* it is untested in the simulator, and would have to be measured before wiring, not after.
+
+**Recommendation: do not wire `dc-gas` yet, and not because the evidence is weak.** It is because
+the same measurement that makes it look good on RPS shows a known, unaddressed defect that would
+propagate into the season forecast and the derived markets, and the fix is the per-parameter-decay
+work already queued — a league-level rate and a home advantage that are allowed to forget faster
+than team strengths do. Wire it after that, and the two changes are tested together against one
+baseline rather than serially against a moving one.
+
+This is a sequencing judgement, not a reversal. `dc-gas` remains accepted.
