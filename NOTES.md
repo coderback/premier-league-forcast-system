@@ -3900,3 +3900,38 @@ testing it is shorter than this project believed yesterday.
 
 The licence on the StatsBomb release is a PDF user agreement requiring attribution and their logo,
 and it has not been read here. Nothing should be built on it until it has.
+
+### Addendum, same day: the candidate was checked and it fails
+
+The entry above recorded one lead worth "half a day's verification" — recovering the starting XI
+from `vaastav`'s per-gameweek minutes across the test decade. It was checked, and it does not work.
+
+```
+season    columns   `starts` field
+2016-17      55         absent
+2018-19      55         absent
+2020-21      35         absent
+2021-22      35         absent
+2023-24      40         PRESENT
+2025-26      45         PRESENT
+```
+
+FPL began recording `starts` in 2022-23. So the gate decade splits into **six seasons where the XI
+must be inferred from minutes and four where it is recorded** — and the inference is genuinely
+ambiguous, because a player credited with 60 minutes either started and was replaced on the hour or
+came on at the half.
+
+**This is the failure that killed the availability route, wearing different clothes.** Any effect
+measured across 2016-2026 would be confounded with which half of the decade supplied the row. Worse
+than that: the inference error is not random. It is largest for clubs that rotate most, which is
+precisely the quantity the arm exists to measure. A confound correlated with the signal is not
+noise, it is a bias pointing the same way as the hypothesis.
+
+The column count moving 55 -> 35 -> 40 -> 45 across the same span says the same thing more bluntly.
+
+**Verdict: Arm 7 stays blocked, and the lead recorded this morning is closed rather than left
+open.** What would reopen it is a single licensed lineup feed covering 2016-17 to date under one
+schema — a purchase, not a search. On that day it becomes the most valuable arm left, because it is
+the only one aimed at the information itself rather than at re-slicing goals. Until then the
+honest position is unchanged since 2026-08-20: the market's edge is unexplained, and with this
+corpus it is unclosable.
