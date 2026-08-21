@@ -3935,3 +3935,58 @@ schema — a purchase, not a search. On that day it becomes the most valuable ar
 the only one aimed at the information itself rather than at re-slicing goals. Until then the
 honest position is unchanged since 2026-08-20: the market's edge is unexplained, and with this
 corpus it is unclosable.
+
+---
+
+## 2026-08-21 — MEASUREMENT: the goal-rate bias, and why it matters more this week than last
+
+The recorded lead "~2.4% goal-rate under-prediction" was carried for weeks as a footnote, because
+RPS barely sees it: the three-class outcome depends on the *difference* between the two rates and is
+nearly invariant to a common error in their *level*. Over/under, both-teams-to-score and correct
+score are not invariant to it at all, and `pl predict` began emitting all three yesterday. The
+footnote is now load-bearing, so it was measured properly.
+
+Ninety-nine monthly refits across the test decade, every match scored against the fit standing
+before it — 3,800 matches:
+
+```
+predicted total goals per match   2.7670
+actual    total goals per match   2.8350      under-predicted by +2.46%
+
+home:  predicted 1.5351   actual 1.5553   (+1.3%)
+away:  predicted 1.2319   actual 1.2797   (+3.9%)
+```
+
+**The bias is three times larger on away goals than home goals.** That is the home-advantage decline
+showing up as a rate error: the fit carries too much of the league's scoring on the home side, so it
+under-predicts the away rate by three times as much. It is the same secular drift the walk already
+reports as home advantage falling +0.2711 -> +0.1774 across the decade, seen from the other side.
+
+By season, the bias is not a constant at all:
+
+```
+2016-17 +6.9%   2017-18 +0.8%   2018-19 +2.2%   2019-20 -0.5%   2020-21 -0.6%
+2021-22 +1.9%   2022-23 +1.0%   2023-24 +16.7%  2024-25  0.0%   2025-26 -3.5%
+```
+
+**2023-24 is a regime the model could not see**: 3.279 goals per match actual against 2.809
+predicted. Whatever changed that season — the added-time crackdown is the obvious candidate — the
+league's scoring level moved faster than a 730-day half-life can follow, and the model spent a
+season a sixth of a goal short on every match.
+
+### What this points at, and it is not a new feature
+
+One decay rate governs everything: team attack, team defence, the intercept and home advantage all
+share `decay_half_life_days = 730`. That half-life was tuned on the tuning span against RPS, which
+is to say it was tuned on the quantity least sensitive to the error above. **A league-level scoring
+rate plausibly needs a much shorter memory than a team's strength does**, and home advantage
+evidently needs a shorter one still.
+
+The research report names exactly this as under-tried at Premier League density: *"per-parameter
+time-decay (different xi for attack/defence/HA) — the dynamic models imply it, nobody has cleanly
+published it"*. It is one of the few places where this project's own measurement and the survey's
+list of open questions land on the same square.
+
+Recorded as a measurement, not an arm. What it licenses is a pre-registration, and the honest
+prediction is that it will barely move RPS — because if it moved RPS, the half-life grid would
+already have found it.
