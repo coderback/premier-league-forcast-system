@@ -5148,3 +5148,120 @@ today both change when the window is corrected. That is a broader re-selection j
 arm, and it is not attempted here.
 
 620 unit tests pass.
+
+---
+
+## 2026-08-25 — RE-SELECTION: production's one tuned value, on the repaired instrument
+
+Production has exactly one tuned hyperparameter — `model.decay_half_life_days` — and it was chosen
+on the walk we now know scored 1,303 of the 3,800 matches it named. Fixing the instrument and then
+continuing to use the old reading is not a fix, so the grid was re-run on the repaired walk: same 12
+points, same span, same arm, 1,018 barriers instead of 342.
+
+Everything else the project has tuned belongs to an *arm* — the GBM settings, the context windows,
+the elo half-life, the `dc-gas` recursion. Production's baseline rests on this one number, and it is
+the number every future arm is measured against, which is why it goes first.
+
+### The grid winner moved
+
+```
+   30  0.24269      365  0.20399   <- winner
+   60  0.22006      548  0.20426
+   90  0.21895      730  0.20434   <- incumbent
+  120  0.20717     1095  0.20460
+  180  0.20515     1460  0.20498
+  240  0.20435     1825  0.20525
+```
+
+**365, not 730**, interior to the grid, by 0.000275. The original selection's winner does not
+survive its own window being scored in full — which is a third instance of the truncated walk
+changing an answer, after the `dc-gas` retune and all three decay axes.
+
+### And the rule refuses the move
+
+```
+365 vs incumbent 730    delta -0.000355   95% CI [-0.001220, +0.000557]   UNRESOLVED
+```
+
+**730 stands.** Not because it won — it did not — but because the search cannot separate the two.
+
+This is the case Rule 1 was built for, arriving four commits after it was written and pointing the
+opposite way to the one I expected. Without it, an honest re-selection would have moved production's
+only tuned value onto a margin of 0.000275, and every arm ever scored against the old baseline would
+have needed re-running to compare against the new one. The rule's whole claim is that it catches a
+bad move *at selection time, where it is still free*. It just did.
+
+### The plateau is now bracketed instead of asserted
+
+Every grid point against the incumbent, clustered by season:
+
+```
+    30  +0.038346  [+0.025060, +0.052532]   resolvably worse
+    60  +0.015713  [+0.009921, +0.022451]   resolvably worse
+    90  +0.014602  [+0.007075, +0.023242]   resolvably worse
+   120  +0.002825  [+0.001392, +0.004273]   resolvably worse
+   180  +0.000810  [-0.000480, +0.002144]   inseparable
+   240  +0.000002  [-0.001062, +0.001090]   inseparable
+   365  -0.000355  [-0.001220, +0.000557]   inseparable
+   548  -0.000079  [-0.000582, +0.000476]   inseparable
+  1095  +0.000260  [-0.000059, +0.000576]   inseparable
+  1460  +0.000633  [+0.000072, +0.001163]   resolvably worse
+  1825  +0.000911  [+0.000282, +0.001506]   resolvably worse
+```
+
+The config has always said to read this value as *"somewhere in 240-1095, not a precise optimum"*.
+That was an honest hedge offered without evidence; it now has evidence, and it was very slightly too
+narrow. **The plateau is 180-1095, with resolvable walls on both sides.** Five values are
+inseparable from 730 and every value outside that band is resolvably worse, in both directions.
+
+A note on reading that table: `selection_is_resolved` is deliberately one-sided — it asks whether a
+challenger *beats* the incumbent, so a point that is resolvably worse still returns `resolved=False`.
+The rule guards moves, and a move to a worse value is refused for the more obvious reason. The
+column above is labelled by the sign of the interval, not by the function's flag, because the flag
+alone would read as "nothing here is resolved", which is the opposite of what this grid shows.
+
+### Rule 2 passes it, and the contrast is the point
+
+The half-life governs how fast *team ratings* are forgotten, so the parameter whose movement the
+stationarity rule asks about is team strength itself — not home advantage, which is what the
+decay-seam diagnostic measured. Movement is the spread of each club's own attack and defence across
+refits, over clubs with at least ten refits:
+
+```
+                    sd (tuning)   sd (test)   ratio
+team ratings             0.0465      0.0500    0.93   TUNABLE
+home advantage           0.0189      0.0404    0.47   UNTUNABLE
+league level             0.0128      0.0401    0.32   UNTUNABLE
+```
+
+**0.93 against a bar of 0.5.** Club strength turns over on 1996-2006 at very nearly the rate it does
+on 2016-2026, which is exactly what one would hope and had never been checked. So Rule 2 is not a
+rule that refuses everything: it refuses the two axes where the tuning window is genuinely blind and
+passes the one where it is not. A check that only ever says no would be worthless, and this is the
+first evidence that this one discriminates.
+
+It also settles the status of the number itself. `decay_half_life_days` carries "SELECTED by the
+grid", and that label is now earned rather than assumed — the window it was selected on is one the
+parameter is entitled to be selected on.
+
+### Outcome
+
+**Nothing ships differently. `decay_half_life_days` stays 730**, and it stays there for a better
+reason than it had this morning: not "the grid picked it" — the grid no longer does — but "no value
+on the grid is distinguishable from it, and the window is entitled to the question."
+
+The baseline every arm has been measured against is unchanged, so no past comparison needs re-running
+on this account. That is the reassurance (a) was run to get, and it was not the guaranteed outcome:
+had the move been resolved, every arm in the ledger would have needed re-scoring.
+
+Config's comment is rewritten with the corrected grid, the bracketing intervals, and the
+stationarity ratio. The sensitivity-window figures in it are untouched and remain valid — evaluation
+walks use `backtest.min_train_matches`, which the repair did not change.
+
+**Still outstanding:** the arm-level tuned values (GBM, context windows, elo half-life, the `dc-gas`
+recursion) were all selected on the undersized window too. None of them is in production, so none is
+load-bearing today, and re-running them is a per-arm cost to pay when an arm is next touched rather
+than a sweep to do now. The `dc-gas` recursion in particular stays where it is, for the reason
+recorded two entries above: I know where re-running it lands.
+
+620 unit tests pass.

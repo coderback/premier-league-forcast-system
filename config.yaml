@@ -148,13 +148,32 @@ model:
   # WC2026 project's 1825 days was fitted to international football, where squads turn over far
   # more slowly than club squads do.
   #
-  # Read this value as "somewhere in 240-1095", not as a precise optimum. The curve is almost flat
-  # across that range on BOTH the tuning window (0.20048 at 730 vs 0.20061 at 548 — a margin of
-  # 0.00013) and the independent sensitivity window (0.19651 at 548 vs 0.19671 at 730). 730 is the
-  # tuning window's winner and is taken for that reason alone; the sensitivity window confirms the
-  # region without being consulted for the choice. Short half-lives are genuinely bad — 30 days
-  # scores 0.2237 and 0.2411 — so the flatness is a real plateau, not an absence of signal.
-  # See NOTES.md for both full grids.
+  # RE-SELECTED 2026-08-25 on the corrected tuning instrument. The original choice ran on a walk
+  # that scored 1,303 of the 3,800 matches it named (see backtest.tuning_min_train_matches), so the
+  # whole grid was re-run on the repaired walk. Two things came out of it:
+  #
+  #   the grid winner MOVED, 730 -> 365 (0.20434 -> 0.20399, margin 0.000275)
+  #   the move is UNRESOLVED: -0.000355, 95% CI [-0.001220, +0.000557], clustered by season
+  #
+  # So 730 stands as the incumbent under the resolution rule, NOT as the grid's answer. This is the
+  # case that rule exists for: a search naming a new winner it cannot separate from the old one.
+  # Without it an honest re-selection would have shipped 365 on a margin of 0.000275.
+  #
+  # Read this value as "somewhere in 180-1095", not as a precise optimum -- and the corrected window
+  # now BRACKETS that plateau rather than asserting it. 180, 240, 365, 548 and 1095 are each
+  # inseparable from 730; 120 and below (+0.0028 and worse) and 1460 and above (+0.0006 and worse)
+  # have intervals excluding zero. Short half-lives are not merely unproven, they are resolvably
+  # bad: 30 days scores 0.2427. The flatness in the middle is a real plateau, not absent signal.
+  #
+  # The stationarity rule passes it, and this is the contrast worth reading: team strength moves
+  # nearly as much on the tuning window as on the test span (sd 0.0465 vs 0.0500, ratio 0.93 against
+  # a bar of 0.5), so unlike the per-parameter decay axes -- which fail at 0.47 and 0.32 -- this is a
+  # memory the tuning window is entitled to choose.
+  #
+  # The independent sensitivity window is unaffected by the repair (evaluation walks use
+  # backtest.min_train_matches, which did not change) and still confirms the region without having
+  # been consulted for the choice: 0.19651 at 548 vs 0.19671 at 730.
+  # See NOTES.md for the full grid.
   decay_half_life_days: 730
 
   # A team needs this share of the MEDIAN team's effective (decay-weighted) history before its own
