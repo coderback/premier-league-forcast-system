@@ -4431,3 +4431,283 @@ rolling fixtures feed currently reaches 27 August and carries no E0 rows yet, so
 `pl live` is the 27th or 28th, before Saturday's first kickoff.
 
 Nothing about the model moved. 583 unit tests pass, from 576.
+
+---
+
+## 2026-08-25 — PRE-REGISTRATION, per-parameter decay: three memories, and a protocol that cannot tune one of them
+
+*Written before any comparison was run on either evaluation span. Everything below is either a
+descriptive measurement or hyperparameter selection on the tuning span (1996-97..2005-06). No arm
+result existed.*
+
+### Hypothesis
+
+Giving team strength, the league scoring level and home advantage their own decay half-lives lowers
+pooled RPS — and, more to the point, closes the goal-rate bias that one shared memory produces.
+
+### Why it is not a config change
+
+`_objective` uses **one** weight vector for both the objective value and every gradient block. Give
+each block its own and `-total` stops being the antiderivative of `-grad`: L-BFGS-B is handed an
+inconsistent pair and converges to the optimum of nothing, with no error and a plausible answer.
+
+So the estimator is **block coordinate descent** — team, then level (with rho), then home advantage
+(with its structural design columns) — each a genuine weighted MLE under its own half-life, cycled
+until nothing moves. The production likelihood is reused unchanged, with out-of-block parameters
+pinned by equal bounds; there is no second copy of the model to drift.
+
+Two checks license it. At equal half-lives the cycle scores **0.20048 on the tuning span — the
+production baseline exactly**. And with a tightened inner solve it reaches a *lower* weighted
+negative log-likelihood than the joint fit does (3138.526839 against 3138.526890), so the blocks
+solve the right problem and the residual is the joint fit's own tolerance rather than an error.
+
+The stopping rule was set against a measured floor, not chosen for tidiness: movement falls from
+6e-1 to 4e-5 by cycle 20 and then stops improving, wandering between 1e-5 and 7e-4 while the
+likelihood moves in the ninth decimal. Asking for 1e-6 would hit the cap on every fit. At 1e-4 with
+25 cycles, every fit converges.
+
+### The family, and the threshold, pre-committed
+
+```
+baseline       dixon-coles     states off, single decay
+dc-decay                       states off, per-parameter decay
+dc-gas                         states on,  single decay        (already measured)
+dc-gas-decay                   states on,  per-parameter decay
+```
+
+A 2x2 factorial, decomposed up front rather than after the fact. BH's family size within one run is
+**m = 3, so α/3 = 0.0167**. But this ledger already pre-commits that `dc-gas`'s serial re-scorings
+across configurations count as one family, and `dc-gas-decay` is a fourth. **Take the stricter:
+`dc-gas-decay` faces α/4 = 0.0125.** Recorded now, before any number is seen.
+
+### The tuning result, and the finding that matters more
+
+Coordinate cycles to convergence on the tuning span, every axis interior after two cycles:
+
+```
+TUNED   team 730   level 365   home_advantage 1460      RPS 0.20043  (single memory: 0.20048)
+```
+
+A gain of **0.00005**, which is the size this ledger predicted before the search ran.
+
+**Home advantage was tuned to a LONGER memory than production, not a shorter one.** That inverts the
+arm's whole motivation, and the reason is measurable:
+
+| span | HA first → last | drift | sd across span |
+|---|---|---|---|
+| tuning 1996-97..2005-06 | +0.3215 → +0.3217 | **+0.0002** | 0.0117 |
+| sensitivity 2006-07..2015-16 | +0.3240 → +0.2592 | −0.0648 | 0.0269 |
+| test 2016-17..2025-26 | +0.2711 → +0.1774 | −0.0936 | 0.0403 |
+
+**Home advantage is flat on the tuning span** — two ten-thousandths across seven years — and then
+falls at an accelerating rate while its variability triples. Where a parameter does not move, a
+longer memory is free variance reduction, so the tuner was right on the window it was given.
+
+The staleness itself is not news: the `dc-gas` half-life entry (2026-08-21) already recorded that
+*"home advantage barely moved in 1996-2006; on the test decade it fell +0.2711 -> +0.1774 and the
+same configuration will do far worse."* What is new is the direction. That entry expected the
+tuning span to be *uninformative* about home advantage. It is worse than uninformative: it points
+the wrong way, confidently, with an interior optimum and a clean two-cycle convergence.
+
+**The generalisable finding: this project's tuning protocol is structurally blind to era-specific
+parameters.** Tuning on a third window is what protects the acceptance instrument, and it can only
+select values for phenomena that exist in that window. Nothing measured on 1996-2006 can choose a
+half-life for a parameter that only starts drifting in 2006. That is a property of the design, not
+a mistake in the search, and it applies to every future arm whose target is non-stationary.
+
+### Predictions, recorded to be scored later
+
+| arm | prediction | P(clears all four gates) |
+|---|---|---|
+| `dc-decay` | **+0.0000 to +0.0004** (worse) | 10% |
+| `dc-gas` | **−0.0010 to −0.0016**, reproducing the recorded −0.0013 | — |
+| `dc-gas-decay` | **−0.0015 to −0.0030** (better than `dc-gas`) | 40% |
+
+The asymmetry is the point, and it is a real prediction rather than hedging. For the **static** arm
+the tuned split is close to useless: the level moves 730 → 365, which should help a little across a
+decade whose scoring rate jumped in 2023-24, and home advantage moves 730 → 1460, which should hurt
+across a decade in which it falls 0.094. Those roughly cancel.
+
+For the **dynamic** arm the same numbers are a large improvement. `dc-gas` today fits its level at
+**7300 days**, so its home advantage is far staler than production's. Replacing 7300 with 1460 is a
+fivefold freshening of exactly the parameter this ledger already named as the arm's outstanding
+defect. `dc-gas-decay` should therefore beat `dc-gas`, and that interaction — *does the score-driven
+arm only pay off once home advantage stops being dragged along by it?* — is what the factorial was
+built to read.
+
+**Parameter prediction**, the kind Arm 9 established as more disciplined than an RPS delta: on the
+test span, `dc-gas-decay`'s **home/away split gap is at least halved** against `dc-gas`.
+
+### Sub-analysis, pre-registered
+
+Goal-rate calibration per arm: predicted against actual total, home and away goals, and the
+home/away split gap, by season. This is the quantity the arm is actually aimed at — RPS depends on
+the *difference* between the two rates and is nearly invariant to a common error in their level.
+
+**The 2023-24 row is the sharpest single test.** The production model ran +16.7% short there,
+3.279 goals actual against 2.809 predicted. If a 365-day level memory is doing what it claims, that
+bias must fall materially. If it does not, the level split is not working either and the arm is a
+null on both axes rather than one.
+
+### One inconsistency, recorded rather than fixed here
+
+`config.yaml` carries `dynamics.half_life_days: 7300`, the tuning-span grid winner. The 2026-08-21
+entry adopted **2555** for that parameter on a tuning-span tie-break, and the config was never
+moved. `dc-gas-decay` inherits the config value, so both dynamic arms here run at 7300.
+
+Left alone deliberately: changing it would alter the `dc-gas` arm everywhere and orphan every
+recorded number for it, which is a separate change with its own consequences. When `dc-gas` is
+wired at 2555, this arm's team axis should follow it.
+
+---
+
+## 2026-08-25 — RESULT, per-parameter decay: the best arm this project has measured, rejected by its own family
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+dixon-coles        0.2005    0.9718   16.1%   0.00202    +0.0082   (baseline)
+dc-decay           0.2008    0.9732   16.0%   0.00227    +0.0085   +0.0003 [-0.0002, +0.0008] P=0.095
+dc-gas             0.1991    0.9683   16.7%   0.00188    +0.0068   -0.0013 [-0.0026, -0.0000] P=0.976
+dc-gas-decay       0.1989    0.9679   16.8%   0.00180    +0.0063   -0.0016 [-0.0028, -0.0003] P=0.994
+```
+
+**Sensitivity span, 2006-07..2015-16, 995 barriers, 3,800 matches:**
+
+```
+dc-decay           0.1969   +0.0002 [-0.0002, +0.0006]  P=0.157
+dc-gas             0.1963   -0.0004 [-0.0015, +0.0007]  P=0.757
+dc-gas-decay       0.1962   -0.0005 [-0.0016, +0.0006]  P=0.806
+```
+
+**All three reject.** `dc-decay` fails all four gates. The two dynamic arms pass gates 1, 2 and 4 and
+fail on **gate 3**.
+
+```
+                   g1    g2    g3    g4     DM p    BH-adjusted (m=3)
+dc-decay         FAIL  FAIL  FAIL  FAIL   0.2233         0.223
+dc-gas           pass  pass  FAIL  pass   0.0653         0.098
+dc-gas-decay     pass  pass  FAIL  pass   0.0207         0.062
+```
+
+### `dc-gas-decay` is the best configuration this project has ever measured
+
+RPS **0.1989**, skill **16.8%**, and a market gap of **+0.0063** against the production model's
++0.0082 — the narrowest gap to the closing price any arm has produced. It beats `dc-gas`, which was
+the only arm in nine ever to pass, on every column.
+
+And it is rejected, because **its raw DM p of 0.0207 becomes 0.062 once corrected across the family
+of three it was run in.** Alone, at m=1, gate 3 is `p <= 0.05` and it would have passed.
+
+That is not a technicality to argue around. It is the correction doing precisely what it was added
+for — five days ago, because `dc-copula` passed a two-gate rule it should not have. Two further
+points make the rejection the right call rather than bad luck:
+
+* **The pre-commitment is stricter still.** This ledger already bound `dc-gas`'s serial re-scorings
+  into one family, and the pre-registration recorded α/4 = 0.0125 for this arm before any number was
+  seen. 0.0207 fails that too.
+* **The family size was my own choice.** Running the 2x2 factorial is what made m = 3. Running
+  `dc-gas-decay` alone would have bought acceptance by testing less.
+
+### The tension this exposes, which is new and generalisable
+
+Two lessons this project learned the hard way now pull against each other.
+
+Arm 3 taught **decompose up front**: it was accepted, then had to be decomposed after the fact at
+the cost of a second full walk, and its regime prediction was wrong because nobody had separated the
+axes first. Arm 9 taught **control multiplicity**: `dc-copula` cleared both gates on a family of
+three and the correction was computed, printed and ignored.
+
+Obey both and you get this. An honest factorial is a larger family, a larger family is a higher bar,
+and **the arm is penalised for the rigour of its own design.** A less careful version of this exact
+work — one arm, no decomposition — would be in production tonight.
+
+I do not think the rule is wrong. The factorial is what shows `dc-gas-decay` beats `dc-gas` rather
+than merely beating the baseline, and that is the claim worth having. But the cost is real and it is
+now on the record: **decomposition and multiplicity control are not free of each other**, and an arm
+family should be sized deliberately, before the numbers exist, with that trade understood.
+
+### The sub-analysis is where the arm actually delivered
+
+Goal-rate calibration, monthly refits across the test decade, the cadence the original bias
+measurement used:
+
+```
+arm               total err  home err  away err  split gap
+dixon-coles         -2.35%    -1.19%    -3.77%      2.59%
+dc-decay            -1.10%    -1.97%    -0.05%      1.92%
+dc-gas               1.52%     5.67%    -3.52%      9.20%
+dc-gas-decay         1.32%     2.09%     0.39%      1.69%
+```
+
+**`dc-gas` carries a 9.20% home/away split gap** — by far the worst of the four, and exactly the
+defect the 2026-08-21 entry named when it adopted 2555 and wrote *"home advantage is still stale…
+per-parameter decay remains the fix, and remains queued."*
+
+**Per-parameter decay cuts it from 9.20% to 1.69%.** The pre-registered prediction was that the gap
+would be *at least halved*; it fell by 82%, and `dc-gas-decay` ends better calibrated on this axis
+than the production model itself. The queued fix worked, and it worked on the parameter it was
+queued for.
+
+`dc-decay` alone halves the production model's total goal-rate bias (−2.35% → −1.10%) **while being
+worse on RPS**. That is the pre-registered thesis demonstrated in one line: per-parameter decay is
+aimed at a quantity the acceptance rule does not score.
+
+**The one place the prediction missed.** 2023-24 was named as the sharpest single test — the season
+the production model ran 14.2% short. A 365-day level memory moved it to 12.0%, a 15% reduction,
+against a prediction that it "must fall materially". It did not. So the level axis is close to a
+null and the whole calibration gain here belongs to the home-advantage axis.
+
+### The protocol finding, which may outlast the arm
+
+The tuner, given the window the protocol requires, chose a **longer** home-advantage memory than
+production — 1460 against 730 — because home advantage is flat on the tuning span (+0.3215 →
++0.3217 across seven years) and only starts falling afterwards (−0.0648, then −0.0936).
+
+That the tuning span is uninformative here was already on record. What is new is that it is worse
+than uninformative: **it points the wrong way, confidently, with an interior optimum and clean
+two-cycle convergence.** Nothing measured on 1996-2006 can select a half-life for a parameter that
+begins drifting in 2006.
+
+**This project's tuning protocol is structurally blind to era-specific parameters.** Tuning on a
+third window is what protects the acceptance instrument, and the price is that it can only choose
+values for phenomena that exist in that window. It applies to every future arm whose target is
+non-stationary — and the fact that `dc-gas-decay` still came out best *despite* a home-advantage
+half-life chosen against the wrong era is the strongest thing that can be said for the mechanism.
+
+### Scoring the predictions
+
+| prediction | outcome |
+|---|---|
+| `dc-decay` +0.0000 to +0.0004 | **right** — +0.0003 |
+| `dc-gas` −0.0010 to −0.0016 | **right** — −0.0013 |
+| `dc-gas-decay` −0.0015 to −0.0030 | **right** — −0.0016 |
+| `dc-gas-decay` beats `dc-gas` | **right** — −0.0016 against −0.0013, on every column |
+| split gap at least halved | **right, and then some** — 9.20% → 1.69% |
+| 2023-24 bias falls materially | **wrong** — 14.2% → 12.0% |
+| P(all four gates): 10% / 40% | none passed; both failed on gate 3 |
+
+**Three RPS bands out of three, plus both directional calls and the parameter prediction.** The
+first time this project has predicted three effect sizes and had all three land inside their stated
+intervals. Eight arms scored: four magnitude misses and two direction misses early, then three
+consecutive arms where the calibration held.
+
+The one miss is the informative one. I predicted the level axis would fix 2023-24 and it did not,
+which says the +16.7% season is not a memory-length problem at all — a shorter memory still cannot
+see a shift until after it has happened. Tracking a level *jump* wants a different instrument from
+tracking a level *drift*, and this arm only carries the second.
+
+### Production status
+
+Unchanged. `model.seams.decay.enabled` stays `false`.
+
+Three things this leaves in a better place than it found them:
+
+* **`dc-gas`'s outstanding defect is fixed and measured.** Whenever it is wired, the home-advantage
+  staleness that entry recorded has a remedy with a number on it.
+* **The seam exists and is inert**, so re-running any of this costs a config change.
+* **A single-arm re-run is available and is NOT recommended.** `dc-gas-decay` alone would clear all
+  four gates on m=1. Doing that after seeing this result would be choosing the family size to
+  obtain an acceptance, which is the precise failure the pre-commitment was written to prevent. If
+  it is ever re-scored, the family must be fixed before the run and the α/4 pre-commitment honoured.

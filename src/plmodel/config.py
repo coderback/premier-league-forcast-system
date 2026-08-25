@@ -17,6 +17,7 @@ from typing import Any
 import yaml
 
 from plmodel.model.counts import CountSpec
+from plmodel.model.decay import DecaySpec
 from plmodel.model.covariates import CovariateSpec
 
 # Repo root = three levels up from this file (src/plmodel/config.py -> repo root).
@@ -97,7 +98,28 @@ class ModelConfig:
             and (s.get("home_advantage") or {}).get("mode", "global") == "global"
             and list(s.get("tiers", ["E0"])) == ["E0"]
             and self._scoreline_spec().is_inert
+            and not (s.get("decay") or {}).get("enabled", False)
         )
+
+    def decay_spec(self, *, enabled: bool | None = None) -> DecaySpec | None:
+        """The configured per-parameter decay, or None when the seam is off.
+
+        None rather than an inert spec, for the same reason the scoreline family returns None:
+        switching the seam off should take the block-cycling code out of the call graph entirely
+        rather than route the production fit through it and trust the answer to come back the same.
+
+        ``enabled`` lets a comparison arm ask for the seam without rewriting the config, exactly as
+        ``covariate_spec``'s ``terms`` does. The tuned half-lives still come from here, so the arm
+        and production can never disagree about what the values are -- only about whether they are
+        switched on. The same split the dynamics seam uses: `enabled` says whether, the values
+        beside it say what.
+        """
+        seam = self.seams.get("decay") or {}
+        live = seam.get("enabled", False) if enabled is None else enabled
+        if not live:
+            return None
+        spec = DecaySpec.from_seam(seam, fallback_half_life=self.decay_half_life_days)
+        return None if spec.is_inert else spec
 
     def covariate_spec(
         self, *, terms: tuple[str, ...] | None = None, mode: str | None = None

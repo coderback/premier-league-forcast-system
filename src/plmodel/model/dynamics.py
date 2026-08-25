@@ -353,6 +353,21 @@ class DynamicFit:
         return self.fit.half_life_days
 
     @property
+    def decay(self):
+        """The level's per-parameter decay, if it carries one.
+
+        Delegated explicitly, like everything else here. Without it the reporting block probes
+        `getattr(fit, "decay", None)`, gets None, and silently omits the whole decay section for
+        the one arm that combines states with a split memory -- a report that looks complete and
+        is not.
+        """
+        return self.fit.decay
+
+    @property
+    def decay_diagnostics(self) -> dict[str, float]:
+        return self.fit.decay_diagnostics
+
+    @property
     def home_advantage(self) -> float:
         return self.fit.home_advantage
 

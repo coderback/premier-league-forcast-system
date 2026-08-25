@@ -31,7 +31,7 @@ from plmodel.eval.backtest import walk_forward
 from plmodel.eval.compare import ArmSpec, run_arm
 
 SEAM_NAMES = ("covariates", "dynamics", "observation", "ensemble", "home_advantage",
-              "tiers", "scoreline")
+              "tiers", "scoreline", "decay")
 
 # Every seam, explicitly off. Written out here rather than read from config.yaml on purpose.
 #
@@ -52,6 +52,9 @@ ALL_OFF: dict[str, object] = {
     # n_series_terms has no default — CountSpec makes it mandatory so a family can never run on a
     # silently-chosen truncation — so an "off" scoreline still has to carry one.
     "scoreline": {"marginal": "poisson", "dependence": "tau", "n_series_terms": 60},
+    # Like dynamics, `enabled` is the switch and the tuned values live beside it, so an off decay
+    # seam still has to carry a stopping rule.
+    "decay": {"enabled": False, "max_cycles": 25, "tolerance": 1.0e-4},
 }
 
 
@@ -102,6 +105,7 @@ def test_seam_is_recognised_as_on_when_flipped(cfg, seam: str) -> None:
         "home_advantage": {**ALL_OFF["home_advantage"], "mode": "trend"},
         "tiers": ["E0", "E1"],
         "scoreline": {**ALL_OFF["scoreline"], "marginal": "weibull", "dependence": "frank"},
+        "decay": {**ALL_OFF["decay"], "enabled": True},
     }[seam]
     flipped = dataclasses.replace(cfg.model, seams={**ALL_OFF, seam: on})
     assert not flipped.seams_are_inert(), f"flipping {seam} was not detected"
@@ -130,6 +134,7 @@ def test_each_seam_off_explicitly_is_byte_identical(cfg, corpus, seam: str) -> N
         "tiers": ["E0"],
         "scoreline": {**cfg.model.seams["scoreline"], "marginal": "poisson",
                       "dependence": "tau"},
+        "decay": {**cfg.model.seams["decay"], "enabled": False},
     }[seam]
     baseline = _run(cfg, corpus)
     explicit = _run(cfg, corpus, seams={**cfg.model.seams, seam: off})
@@ -185,6 +190,7 @@ def test_the_baseline_arm_stays_plain_dixon_coles_whatever_the_seams_say(cfg, co
         "home_advantage": {**cfg.model.seams["home_advantage"], "mode": "trend"},
         "tiers": ["E0", "E1"],
         "scoreline": {**cfg.model.seams["scoreline"], "marginal": "weibull"},
+        "decay": {**cfg.model.seams["decay"], "enabled": True},
     }
     assert not dataclasses.replace(cfg.model, seams=all_on).seams_are_inert()
     assert _digest(_run(cfg, corpus)) == _digest(_run(cfg, corpus, seams=all_on))

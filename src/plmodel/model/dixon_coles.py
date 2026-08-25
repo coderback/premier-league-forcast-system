@@ -50,6 +50,7 @@ from __future__ import annotations
 import dataclasses
 import math
 from dataclasses import dataclass, field
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -68,6 +69,7 @@ from plmodel.model.counts import (
 )
 from plmodel.model.covariates import CovariateSpec
 from plmodel.model.covariates import design as cov_design_matrix
+from plmodel.model.decay import BlockLayout, DecaySpec, block_weights, fit_blockwise
 from plmodel.model.home_advantage import MODE_GLOBAL as HA_GLOBAL
 from plmodel.model.home_advantage import design as ha_design_matrix
 from plmodel.model.home_advantage import prediction_design
@@ -92,6 +94,11 @@ _INVALID_NLL = 1e12
 # at the usual cube-root-of-epsilon scale for a central difference, and checked against
 # approx_fprime in the test suite rather than trusted.
 _FD_STEP = 1e-5
+
+# Where the weight vector sits in `_objective`'s argument tuple, after (x, y, home_i, away_i).
+# Named because the block fitter splices each block's own vector into that slot, and a silent
+# off-by-one there would weight the likelihood by a goal count.
+_WEIGHTS_ARGUMENT_POSITION = 4
 
 # Relative back-off from the tau validity boundary when clamping rho at prediction time, so
 # the correction stays strictly positive rather than landing exactly on zero.
@@ -134,6 +141,12 @@ class DixonColesFit:
     cov_params: tuple[float, ...] = ()
     cov_division: str = ""
     cov_undefined: dict[str, int] = field(default_factory=dict)
+    # Per-parameter decay (model.seams.decay). None IS the production single-half-life fit, and
+    # when it is None nothing in decay.py participates. `half_life_days` above then carries the
+    # TEAM half-life, because that is the memory governing the strength parameters every
+    # downstream reader of that field cares about.
+    decay: DecaySpec | None = None
+    decay_diagnostics: dict[str, float] = field(default_factory=dict)
     # Mutable on purpose: prediction-time observations that the fit itself cannot know, such
     # as how often rho had to be clamped for an extreme matchup. Surfaced in the report.
     diagnostics: dict[str, int] = field(default_factory=dict)
@@ -666,6 +679,7 @@ def fit_dixon_coles(
     family: CountSpec | None = None,
     covariates: CovariateSpec | None = None,
     cov_division: str = "",
+    decay: DecaySpec | None = None,
 ) -> DixonColesFit:
     """Fit the model on a training frame, weighted toward ``ref_date``.
 
@@ -684,7 +698,13 @@ def fit_dixon_coles(
     if missing:
         raise ValueError(f"history missing columns: {sorted(missing)}")
 
-    weights = decay_weights(history["date"], ref_date, half_life_days)
+    # Under per-parameter decay the TEAM half-life is what governs this vector. It is used for
+    # cold-start detection, for `effective_n`, and to seed the optimiser -- all three of which are
+    # questions about team strength, so the team memory is the semantically right one. The block
+    # solves below immediately re-fit the level and home advantage under their own weights, so the
+    # seed does not bias where they land.
+    strength_half_life = float(half_life_days if decay is None else decay.team)
+    weights = decay_weights(history["date"], ref_date, strength_half_life)
     teams_all = sorted(set(history["home_team"]) | set(history["away_team"]))
 
     # Effective, not raw, sample size per team: under a short half-life a club returning after
@@ -738,6 +758,14 @@ def fit_dixon_coles(
     if cov.n_params:
         kept = keep.to_numpy()
         cov = dataclasses.replace(cov, lam=cov.lam[kept], mu=cov.mu[kept])
+    if decay is not None and (cov.n_params or family is not None):
+        # The block layout covers the intercept, rho, home advantage and the team strengths. A
+        # covariate or family parameter would belong to no block and be pinned for the whole
+        # cycle, which is a silently wrong fit rather than a refused one.
+        raise ValueError(
+            "per-parameter decay cannot run with the covariate or scoreline-family seams: its "
+            "block layout has nowhere to put their parameters"
+        )
     if cov.n_params and family is not None:
         # Not a limitation worth working around silently: every arm in this project moves ONE
         # axis, so a run that asked for both would be a two-axis test wearing a one-axis name.
@@ -775,7 +803,32 @@ def fit_dixon_coles(
     ] + [tuple(param_bounds[name]) for name in family_names]
     theta0 = np.clip(theta0, [b[0] for b in bounds], [b[1] for b in bounds])
 
-    if family is None:
+    decay_diagnostics: dict[str, float] = {}
+    if decay is not None:
+        # Block coordinate descent: each block is a proper weighted MLE under its own half-life,
+        # using this same `_objective`. Nothing about the likelihood is reimplemented.
+        cycle = fit_blockwise(
+            theta0,
+            bounds,
+            decay,
+            block_weights(fit_rows["date"], ref_date, decay),
+            BlockLayout(n_teams=n_teams, n_ha=len(ha_names), total=len(theta0)),
+            objective=_objective,
+            args_without_weights=(x, y, home_i, away_i, lgamma_x, lgamma_y, n_teams,
+                                  ha_design, cov.lam, cov.mu),
+            weights_position=_WEIGHTS_ARGUMENT_POSITION,
+            max_iter=max_iter,
+        )
+        result = SimpleNamespace(
+            x=cycle["theta"], fun=cycle["value"],
+            success=cycle["converged"], nit=cycle["n_iterations"],
+        )
+        decay_diagnostics = {
+            "cycles": float(cycle["cycles"]),
+            "final_movement": cycle["movement"],
+            "hit_cycle_cap": float(cycle["hit_cycle_cap"]),
+        }
+    elif family is None:
         result = minimize(
             _objective,
             theta0,
@@ -828,7 +881,7 @@ def fit_dixon_coles(
         intercept=float(c),
         home_advantage=float(h),
         rho=float(rho),
-        half_life_days=float(half_life_days),
+        half_life_days=strength_half_life,
         ref_date=pd.Timestamp(ref_date),
         max_goals=max_goals,
         n_obs=int(len(fit_rows)),
@@ -849,6 +902,8 @@ def fit_dixon_coles(
         cov_params=tuple(float(v) for v in cov_params),
         cov_division=cov_division,
         cov_undefined=dict(cov.undefined),
+        decay=decay,
+        decay_diagnostics=decay_diagnostics,
         diagnostics=family_diagnostics,
     )
 

@@ -327,6 +327,60 @@ model:
       empty_start: "2020-06-17"    # Project Restart: first match back behind closed doors
       empty_end: "2021-05-23"      # final day of 2020-21
     tiers: [E0]                         # divisions in the joint fit
+    # Per-parameter time decay: a separate memory for team strength, the league level and home
+    # advantage. All three equal IS the production specification, so that is the inert setting --
+    # and off means the fit takes its ordinary single-weight path, not a longer route to the same
+    # number. See model/decay.py for why this cannot be a weights change inside one likelihood.
+    #
+    #   team             attack and defence         -- expected long, team strength is stable
+    #   level            intercept and rho          -- expected short, 2023-24 moved the league
+    #                                                  scoring rate faster than 730 days can follow
+    #   home_advantage   home advantage and its
+    #                    structural design columns  -- expected short, it fell +0.2711 -> +0.1774
+    #                                                  across the test decade alone
+    #
+    # The blocks are cycled to convergence rather than fitted jointly, because separate weights
+    # per block make the objective value and its gradient inconsistent -- see the module docstring.
+    decay:
+      enabled: false
+      # SELECTED by coordinate cycles run to convergence on backtest.tuning_span
+      # (1996-97..2005-06), scored on walk-forward RPS. Converged after two cycles with every axis
+      # interior. Tuning RPS 0.20043 against the single-memory 0.20048 -- a gain of 0.00005, which
+      # is the size the ledger predicted before the search ran.
+      #
+      # READ THE HOME-ADVANTAGE VALUE WITH THE WARNING THAT FOLLOWS. The tuner asked for a LONGER
+      # memory than production, not a shorter one, and it was right to on the window it was given:
+      # home advantage is FLAT across the tuning span, drifting +0.3215 -> +0.3217 in seven years.
+      # Where a parameter does not move, a longer memory is pure variance reduction.
+      #
+      # It moves later. Home advantage falls -0.0648 across the sensitivity decade and -0.0936
+      # across the test decade, and its variability triples (sd 0.0117 -> 0.0269 -> 0.0403). So
+      # this value is selected against a window in which the phenomenon it exists to track is
+      # absent. That is a property of the tuning protocol, not a mistake in the search, and it is
+      # recorded in NOTES.md as the finding it is.
+      team: 730
+      level: 365
+      home_advantage: 1460
+      # Stopping rule for the cycle. No defensible default, so both are required rather than
+      # inherited: a fit that stopped because it ran out of cycles is a different object from one
+      # that stopped because it converged, and both counts are reported.
+      #
+      # The tolerance is the largest absolute parameter move across a whole cycle, in log-goal
+      # units, and 1e-4 is chosen against a MEASURED floor rather than picked for tidiness. The
+      # cycle cannot converge below the inner L-BFGS-B solve's own precision, which was traced on
+      # a real barrier: movement falls from 6e-1 to 4e-5 by cycle 20 and then stops improving,
+      # wandering between 1e-5 and 7e-4 for another twenty cycles while the likelihood moves in the
+      # ninth decimal. Asking for 1e-6 therefore guarantees hitting the cap on every single fit.
+      #
+      # 1e-4 is where the likelihood has visibly stopped improving, and exp(1e-4) is a
+      # ten-thousandth of a goal -- far below anything that moves a forecast.
+      #
+      # Sanity on the whole scheme: with a tightened inner solve the cycle reaches a LOWER weighted
+      # negative log-likelihood than the joint fit does (3138.526839 against 3138.526890), so the
+      # blocks are solving the right problem and the residual is the joint fit's own tolerance
+      # rather than an error in the cycle.
+      max_cycles: 25
+      tolerance: 1.0e-4
     # The scoreline family: which count law the goals follow and which device couples the two
     # sides. `poisson` + `tau` IS the Dixon-Coles specification, so that pair is the inert setting
     # and it does not merely approximate the production path -- it bypasses the family code

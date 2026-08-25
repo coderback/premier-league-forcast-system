@@ -28,6 +28,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Sequence
 
+import dataclasses
+
 import numpy as np
 import pandas as pd
 
@@ -394,6 +396,90 @@ def _ens_gbm_half(ctx: ArmContext) -> np.ndarray:
     """The blend at the fixed even split the WC2026 project shipped."""
     seam = ctx.cfg.model.seams.get("ensemble") or {}
     return _blend_arm(ctx, fixed_weight=float(seam["even_split_weight"]))
+
+
+def _decay_arm(ctx: "ArmContext", *, dynamics: bool) -> np.ndarray:
+    """Shared body for the per-parameter-decay arms.
+
+    One half-life governs every parameter in the production fit. Three measurements say that is one
+    number doing two jobs: home advantage falls +0.2711 -> +0.1774 across the test decade, the
+    goal-rate bias is three times worse on away goals than home, and 2023-24 moved the league's
+    scoring level faster than a 730-day memory can follow. Meanwhile the score-driven arm wants the
+    opposite -- a long memory, because its states are what make old data usable -- and today it can
+    only buy that by also buying a stale home advantage.
+
+    The half-lives come from the seam even though the seam ships off, exactly as the dynamics arm
+    reads its tuned recursion from a seam whose ``enabled`` is false. ``enabled=True`` here says
+    "switch it on for this arm" and nothing else; the values themselves stay in one place, so an
+    arm and production can never disagree about what they are.
+
+    **The team half-life for the dynamic arm is the dynamics seam's, not this one's.** The decay
+    grid was searched against the STATIC model, where team strength wants a short memory; the
+    score-driven arm has already had its own team memory tuned to convergence and wants a much
+    longer one. Composing each value where it was tuned is the honest assembly. It is still an
+    approximation -- the level and home-advantage optima could differ between a static and a
+    dynamic model -- and if this arm is accepted, the acceptance rule's mandated retune is where
+    its own axes get to move.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+    from plmodel.model.dynamics import DynamicFit, GasSpec, filter_states
+
+    model = ctx.cfg.model
+    decay = ctx.state.get("decay")
+    if decay is None:
+        decay = model.decay_spec(enabled=True)
+        if decay is None:
+            raise ValueError(
+                "the decay seam's three half-lives are all equal, so this arm would be the "
+                "baseline; tune them on the tuning span before running it"
+            )
+        if dynamics:
+            gas = GasSpec.from_seam(
+                model.seams.get("dynamics") or {},
+                state_bound=model.param_bounds["gas_state"][1],
+                fallback_half_life=model.decay_half_life_days,
+            )
+            decay = dataclasses.replace(decay, team=gas.half_life_days)
+            ctx.state["spec"] = gas
+        ctx.state["decay"] = decay
+
+    level = ctx.state.get("level")
+    if level is None or ctx.split.is_refit:
+        level = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("level"),
+            max_iter=model.max_iter,
+            decay=decay,
+        )
+        ctx.state["level"] = level
+
+    if not dynamics:
+        ctx.state.setdefault("fits", []).append(level)
+        return level.predict_proba(ctx.test)
+
+    # The filter always re-runs, exactly as it does for dc-gas: a state refreshed only on refit
+    # barriers would be a stale rating pretending to be a dynamic one.
+    gas = ctx.state["spec"]
+    dynamic = DynamicFit(level, filter_states(ctx.train, level, gas), gas)
+    ctx.state.setdefault("fits", []).append(dynamic)
+    return dynamic.predict_proba(ctx.test)
+
+
+@register("dc-decay")
+def _dc_decay(ctx: ArmContext) -> np.ndarray:
+    """Per-parameter decay alone: the memory split, with no dynamic states."""
+    return _decay_arm(ctx, dynamics=False)
+
+
+@register("dc-gas-decay")
+def _dc_gas_decay(ctx: ArmContext) -> np.ndarray:
+    """Both: score-driven states on a level whose parameters each carry their own memory."""
+    return _decay_arm(ctx, dynamics=True)
 
 
 def _family_arm(ctx: "ArmContext", *, marginal: str, dependence: str) -> np.ndarray:
@@ -1025,6 +1111,7 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
         **_dynamics_block(fits),
         **_family_block(fits),
         **_context_block(fits),
+        **_decay_block(fits),
         **_blend_block(state),
     }
 
@@ -1051,6 +1138,43 @@ def _dynamics_block(fits: Sequence[object]) -> dict[str, object]:
             },
             "n_state_clipped": int(sum(s.n_state_clipped for s in states if s is not None)),
             "n_tau_invalid": int(sum(s.n_tau_invalid for s in states if s is not None)),
+        }
+    }
+
+
+def _decay_block(fits: Sequence[object]) -> dict[str, object]:
+    """The per-parameter half-lives, and whether the block cycle actually finished.
+
+    Empty for every arm on the single-memory fit, so a baseline report is unchanged by this seam
+    existing. For the arms that carry it, the cycle counts are the part worth reading: a fit that
+    stopped because it ran out of cycles is a different object from one that stopped because it
+    converged, and reporting only the half-lives would hide the difference.
+    """
+    specs = [getattr(f, "decay", None) for f in fits]
+    if not any(spec is not None for spec in specs):
+        return {}
+    spec = next(spec for spec in specs if spec is not None)
+    cycles = np.array([
+        getattr(f, "decay_diagnostics", {}).get("cycles", 0.0) for f in fits
+    ], dtype=float)
+    capped = sum(
+        int(getattr(f, "decay_diagnostics", {}).get("hit_cycle_cap", 0.0)) for f in fits
+    )
+    movement = np.array([
+        getattr(f, "decay_diagnostics", {}).get("final_movement", 0.0) for f in fits
+    ], dtype=float)
+    return {
+        "decay": {
+            **spec.as_dict(),
+            "cycles": {
+                "mean": float(cycles.mean()), "min": float(cycles.min()),
+                "max": float(cycles.max()),
+            },
+            "worst_final_movement": float(movement.max()),
+            # Non-zero means at least one fit stopped early. A handful is a slow barrier; a large
+            # share means the tolerance or the cap is wrong and the arm is being scored on fits
+            # that never settled.
+            "n_hit_cycle_cap": int(capped),
         }
     }
 
