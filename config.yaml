@@ -449,9 +449,25 @@ model:
       # club's effective sample size, so a data-rich club barely moves and a thin one moves a lot.
       # That is the wanted behaviour at the cost of one knob rather than two.
       #
-      # WEAK-EVIDENCE: placeholder, NOT yet tuned. To be selected on backtest.tuning_span and to
-      # face the resolution rule against shrinkage = 0, which is what the seam being off means.
-      shrinkage: 1.0
+      # SELECTED by the grid on backtest.tuning_span and then NOT ADOPTED. The seam is off, so this
+      # value is inert; it is recorded because it was measured, not because anything uses it.
+      #
+      # The grid is a clean interior optimum, bracketed on both sides after the first pass ran into
+      # its own edge and the grid-edge rule sent it wider:
+      #
+      #     0  0.20430   |    16  0.20375  <- winner      baseline (seam off) 0.20434
+      #     1  0.20416   |    64  0.20391
+      #     4  0.20394   |   256  0.20417
+      #     8  0.20382   |  4096  0.20432
+      #
+      # Read the two ends. At 4096 every promoted club is held exactly at the prior, and that scores
+      # the baseline -- so "do not fit promoted clubs at all" is FALSE, and the mechanism is genuine
+      # partial shrinkage rather than a disguised pin.
+      #
+      # It is not adopted because the resolution rule refuses it: against the seam being off,
+      # -0.000591 with a 95% CI of [-0.001296, +0.000064], clustered by season. UNRESOLVED. The
+      # interval misses by 6e-5, which is exactly the seduction that rule exists to resist.
+      shrinkage: 16.0
       # Promoted clubs the training window must hold before a prior is estimated at all. Early in a
       # walk there is genuinely nothing to learn from, and a prior built from one club is worse
       # than no prior -- below this the fit behaves exactly as the baseline does.

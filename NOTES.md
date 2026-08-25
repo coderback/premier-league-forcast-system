@@ -5265,3 +5265,128 @@ than a sweep to do now. The `dc-gas` recursion in particular stays where it is, 
 recorded two entries above: I know where re-running it lands.
 
 620 unit tests pass.
+
+---
+
+## 2026-08-25 — RESULT, Arm 11: the promotion prior STOPS BEFORE THE GATE, and the rule that stopped it worked
+
+The arm never reached an evaluation span. The resolution rule adopted this morning was run as a
+pre-flight, said the tuning window cannot separate this from switching the seam off, and the arm
+stopped there. **This is the first time a rule in this project has prevented a walk rather than
+explained one afterwards**, and it is worth more than the arm was.
+
+Cost: about forty-five minutes of tuning walks. Cost avoided: two evaluation spans, three hours, and
+a permanent slot in the multiplicity family that every future re-scoring would have been corrected
+against.
+
+### What was built
+
+One prior — the promoted-club level in log-goal units, estimated per barrier from training rows —
+applied at two sites. **Site A, the pin:** clubs the fit could not identify are scored at the prior
+instead of at league average, which is the only mechanism that can reach the twelve of thirty
+promoted clubs that are not parameters at all. **Site B, the shrink:** a ridge penalty pulling
+fitted promoted clubs toward the same prior.
+
+From E0 alone. Arm 8 went after these clubs with real Championship results and failed backwards,
+because a pooled fit learns the divisions' gap from clubs that have played in both and those are the
+parachute-payment sides. Nothing here reads E1.
+
+### 1. Stationarity: TUNABLE, and the means say why the estimator was built this way
+
+```
+                 mean (tuning)   mean (test)   sd tuning   sd test   ratio
+prior attack        -0.1649        -0.3210       0.0269     0.0299    0.90   TUNABLE
+prior defence       -0.1806        -0.1951       0.0388     0.0440    0.88   TUNABLE
+home advantage           --             --       0.0189     0.0404    0.47   UNTUNABLE
+league level             --             --       0.0128     0.0401    0.32   UNTUNABLE
+```
+
+0.90 and 0.88 against a bar of 0.5. **This is the first parameter measured that the tuning window is
+clearly entitled to inform**, and it matters for reading everything below: this arm did not fail
+because the window is blind to it.
+
+Now read the *means* rather than the ratios. The promoted-club attack gap is **−0.165 on 1996-2006
+and −0.321 on 2016-2026 — it has almost exactly doubled.** That is the drift the multi-tier entry
+recorded (−0.219 → −0.352) arriving independently, from a different estimator.
+
+The variation transfers; the level does not. That is precisely the case the design anticipated, and
+the reason the prior is estimated at each barrier rather than frozen from the ledger's own
+measurements. Hardcoding the −0.30/−0.27 figures was the obvious shortcut, and it would have
+calibrated the arm to the wrong era by a factor of two on the window it was tuned on.
+
+### 2. The grid: a real mechanism with a real optimum
+
+The first pass ran monotonically into its own edge and `sweep_verdict` fired the grid-edge rule
+automatically — *"the search never bracketed the optimum, so this is a lead to widen the grid on,
+not a value to adopt"*. Widened:
+
+```
+shrinkage       RPS            shrinkage      RPS
+        0   0.20430                   32   0.20379
+     0.25   0.20426                   64   0.20391
+      0.5   0.20422                  128   0.20405
+        1   0.20416                  256   0.20417
+        2   0.20406                  512   0.20424
+        4   0.20394                 4096   0.20432
+        8   0.20382         seam off      0.20434
+       16   0.20375  <- winner, interior
+```
+
+A clean U, interior optimum at 16, bracketed on both sides. **The two ends are the informative
+part.** At 4096 every promoted club is held exactly at the prior, and that scores the baseline — so
+*"do not fit promoted clubs at all, use the group mean"* is **false**. The mechanism is genuine
+partial shrinkage, not a disguised pin, and the monotone first pass was a bounded grid's view of a
+minimum sitting just outside it.
+
+### 3. Rule 1: unresolved, by 6e-5
+
+```
+best (shrinkage 16) vs seam OFF    -0.000591   95% CI [-0.001296, +0.000064]   UNRESOLVED
+pin only (shrinkage 0) vs seam OFF -0.000043   95% CI [-0.000578, +0.000489]   UNRESOLVED
+```
+
+**The interval misses by six parts in a hundred thousand.** That is the whole test of whether a rule
+like this is worth having, because a threshold only costs something when it is close, and every
+instinct here says "widen the grid once more, it is almost there". The pre-commitment written before
+the widened grid ran said otherwise, and it binds: *the grid brackets an interior optimum and rule 1
+cannot separate it from the seam being off, so the arm stops.*
+
+**Site A is inert.** The pin moves RPS by 4e-5 — the twelve pinned clubs do not appear often enough
+in the scored pool to matter. Whatever this arm is, it is the penalty. That decomposition came free
+from scoring `shrinkage = 0` as its own grid point, and it is the answer the two-arm split would
+have bought at the price of halving the significance budget.
+
+### Why this is a stop and not a pause
+
+The evaluation spans are 3,800 matches, the same size as the tuning pool that just failed to resolve
+−0.00059. Gate 1 asks a different question of different data, but it asks it at the same noise
+floor, so a pre-flight that cannot resolve the effect is predicting a gate that cannot either. **That
+is what a pre-flight is for** — the rule's own justification was that a gate can only reject an arm,
+never correct a selection, and by the time it runs the family has already grown.
+
+The honest summary is not "the promotion prior does not work". The mechanism does exactly what it
+was built to do: it moves promoted clubs toward a prior that is measurably better than league
+average, it has a clean interior optimum, and it improves the tuning window by −0.00059. **The
+finding is that −0.00059 is smaller than this corpus can resolve**, and no amount of further search
+changes the size of the effect.
+
+That is a different failure from the decay axes, which were refused because the tuning window could
+not see the parameter at all. This one the window sees clearly. There is simply not enough of it.
+
+### Status
+
+`model.seams.promotion.enabled` stays **false**. `shrinkage: 16.0` is recorded in config because it
+was measured, marked NOT ADOPTED, and inert while the seam is off — the same treatment the decay
+seam's tuned half-lives got.
+
+No evaluation walk was run, so **the multiplicity family is unchanged** and no arm number is spent
+in the sense that matters. Eleven arms attempted, one accepted under a rule since tightened, nothing
+in production but the model that was there at the start.
+
+**What would change this.** The effect is real and roughly a third of the size gate 1 can currently
+detect. It becomes resolvable with either materially more data or a version of the mechanism with a
+larger effect — and the obvious candidate is the one deliberately left out of scope here: general
+hierarchical shrinkage, which Arms 1 and 6 both pointed at and which touches 100% of fixtures rather
+than 28%. The promoted-club prior is the special case; the general case is untested.
+
+640 unit tests pass, from 620.
