@@ -83,7 +83,10 @@ def sweep_half_life(
         first_season=span.first_season,
         last_season=span.last_season,
         refit_every=refit_every if refit_every is not None else cfg.backtest.refit_every,
-        min_train_matches=cfg.backtest.min_train_matches,
+        # The tuning instrument's own threshold, not the evaluation spans'. The two were the
+        # same number for most of this project, which silently ran every search on a third of the
+        # window it named. See config.yaml.
+        min_train_matches=cfg.backtest.tuning_min_train_matches,
     )
     rows_pool = pd.concat([s.test(matches) for s in splits], ignore_index=True)
     outcomes = outcomes_of(rows_pool)

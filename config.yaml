@@ -613,6 +613,23 @@ backtest:
   # is measured rather than assumed — see NOTES.md.
   min_train_matches: 3800
 
+  # The same threshold for the TUNING span, where it is loosened deliberately.
+  #
+  # 1,304 is not a round number chosen for taste: it is the count of E0 matches through the end of
+  # 1995-96, so it makes the tuning walk open at the start of 1996-97 with three seasons behind it
+  # -- which is exactly what this file always claimed the tuning span did, and never did.
+  #
+  # The effect is not marginal. At 3,800 the tuning walk is 342 barriers over 1,303 matches; at
+  # 1,304 it is the full ten seasons the span names, and the scored pool is 3,800 matches -- the
+  # SAME size as either evaluation span. The instrument that chooses hyperparameters was a third
+  # the size of the instrument that judges them, by accident, for the whole project.
+  #
+  # Safe by construction: the span is unchanged and still disjoint from both evaluation windows.
+  # The only thing that changes is how much of it is scored. The earliest barriers fit on three
+  # seasons rather than ten, which is thinner -- whether that trade is worth taking was measured
+  # rather than assumed, and the measurement is in NOTES.md.
+  tuning_min_train_matches: 1304
+
   # Paired-bootstrap resamples for model-vs-model and model-vs-market RPS deltas. 10,000 matches
   # the WC2026 value so the two projects' CIs are computed the same way.
   n_boot: 10000

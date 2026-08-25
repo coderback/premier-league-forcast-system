@@ -5049,3 +5049,102 @@ said the opposite, so the question was moot; the discipline was worth keeping an
 decided before the answer was known.
 
 620 unit tests pass, from 610.
+
+---
+
+## 2026-08-25 — CORRECTION: the tuning instrument was a third of its documented size, and fixing it reverses both findings above
+
+`backtest.tuning_min_train_matches: 1304` is added, and the tuning walk goes from **342 barriers
+over 1,303 matches** to **1,018 barriers over 3,800 matches**, opening on 1996-08-17 instead of
+2003-01-11.
+
+1,304 is not a number chosen for taste. It is the count of E0 matches through the end of 1995-96, so
+it makes the tuning walk open at the start of 1996-97 with three seasons behind it — **which is
+exactly what `config.yaml` always claimed the tuning span did.** The scored pool is now 3,800
+matches, the same size as either evaluation span.
+
+The instrument that chooses hyperparameters was a third the size of the instrument that judges them,
+by accident, for the entire project. Nothing about the span changed: it is the same window, still
+disjoint from both evaluation spans. Only how much of it gets scored.
+
+### Every finding from the entry above changes
+
+Both checks re-run on the corrected window, against the identical configurations:
+
+```
+                              narrow (1,303)                       corrected (3,800)
+dc-gas retune       -0.000250 [-0.000544, -0.000041]   -0.000076 [-0.000250, +0.000120]
+                              RESOLVED                            unresolved
+level 730 -> 365    -0.000051 [-0.000164, +0.000030]   +0.000072 [-0.000037, +0.000187]
+home adv 730 -> 1460 -0.000021 [-0.000065, +0.000013]  +0.000043 [-0.000055, +0.000143]
+shipped split       -0.000059 [-0.000191, +0.000035]   +0.000150 [-0.000067, +0.000386]
+```
+
+**The `dc-gas` retune is not resolved on the corrected window.** Its confidence interval straddles
+zero, and the point estimate falls to a third of what the truncated window reported.
+
+**Every per-parameter decay axis changes sign.** On the corrected window all three are *worse* than
+the single memory, not better. The entire split the tuner selected — level 365, home advantage 1460
+— was an artefact of scoring only 2003-2006.
+
+### The correction I owe the entry above
+
+That entry concluded, from the narrow window, that the retune *"was not a selection made on noise.
+It was a correct selection that does not transfer"*, and used that to declare era-transfer failure
+an open problem the amendment could not solve.
+
+**That is wrong.** The retune was a selection made on a third of the available window, and on the
+whole of it there is no selection to make. Rule 1 does catch the `dc-gas` failure after all — it
+simply could not do so through a broken instrument. What looked like a deep problem about era
+transfer was a truncated walk.
+
+Three self-corrections in one day, and this is the one that matters: I diagnosed a hard, possibly
+irreducible limitation from a measurement made with an instrument I had *already discovered was
+undersized in the same session*, and did not think to re-run the measurement before drawing the
+conclusion. The finding about `min_train_matches` and the conclusion about era transfer were
+written into the same entry, and the second should have been blocked by the first.
+
+### What still holds
+
+**Rule 2 is unchanged in verdict, and better supported.** Both decay axes remain untunable on this
+window, though home advantage is less flat over the full ten seasons than over the last three:
+
+```
+                 narrow sd    corrected sd    test sd   ratio (corrected)
+home advantage      0.0117          0.0189     0.0404      0.47   UNTUNABLE
+league level        0.0118          0.0128     0.0401      0.32   UNTUNABLE
+```
+
+Home advantage climbs from 0.29 to 0.47 against a bar of 0.5 — closer, and still short. So the
+structural-blindness finding survives the fix: even given its full window, the tuning span sees less
+than half the movement in home advantage that the span judging it does.
+
+### What this does NOT do, and the decision it creates
+
+**No shipped value moves and no verdict changes here.** `dc-gas` stays rejected, the decay seam
+keeps its tuned values and stays off, and every hyperparameter selected before today stays where it
+is.
+
+That is not obviously right, and the reason for caution is the same one recorded before any of this
+was measured. This is a *bug fix to the instrument*, not a new rule — the tuning span was always
+documented as ten seasons and the code scored three and a half — and a measurement taken with a
+broken instrument has a weak claim to standing. The argument for re-selecting is genuinely strong.
+
+But it leads somewhere I already know the answer to. If the recursion selection is re-run on the
+corrected instrument, the retune is unresolved, the incumbent stands, and the incumbent is the
+configuration that scores −0.0019 at DM p=0.011 — which clears all four gates. **I know that before
+proposing the re-run**, which is exactly the situation the disclosure norms in this ledger exist to
+flag.
+
+So the route is recorded rather than taken, and it is a legitimate one: **re-run the `dc-gas`
+recursion selection on the corrected tuning instrument as a fresh, prospective selection, and
+re-gate whatever it returns.** What makes that legitimate is that the selection would be made by a
+fixed protocol under a rule adopted before its outcome was known, not by anyone choosing. What makes
+it worth pausing over is that I can see where it lands. It is the user's call, not mine, and the
+family size will have grown again by the time it is taken.
+
+**Every tuned value in this project was selected on the undersized window**, and the two measured
+today both change when the window is corrected. That is a broader re-selection job than any single
+arm, and it is not attempted here.
+
+620 unit tests pass.
