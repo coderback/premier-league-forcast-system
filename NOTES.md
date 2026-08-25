@@ -4345,3 +4345,89 @@ fixing it changes `pl fit`'s JSON output and this entry's claim is that nothing 
   predictor that silently dropped the structural home-advantage terms, the covariate context and
   the log-rate clip.
 * 576 unit tests pass, from 541.
+
+---
+
+## 2026-08-25 — LIVE LEDGER: matchweek 1 was missed, and the ledger had no witness anyway
+
+The 2026/27 season opened on **2026-08-21** and the first matchweek — ten matches across four
+barrier dates, 21 to 24 August — was played with **no forecast frozen for any of them**. The corpus
+had not been re-ingested since 2026-05-24, `output/live/` was empty, and the only artefact in
+`output/` was a two-fixture `pl predict` smoke test dated `as_of: 2026-05-25`.
+
+The season is now ingested: 34 seasons, 66,990 matches, running to 2026-08-24. Coventry, Hull and
+Ipswich canonicalised without touching the alias map, all ten fixtures carry `avg_closing` prices,
+and the cached walks survived — the new rows append after the test span, so the gate is still 1,153
+barriers over 3,800 matches and `dixon-coles` still loads from cache. Had that broken, the next
+gating run would have silently re-walked every arm, which is the failure that cost an hour during
+Arm 9.
+
+### Matchweek 1 is recorded as missed, not reconstructed
+
+A reconstruction was available and was rejected. The argument for it is stronger than usual here:
+HEAD (`6bbb43a`, 2026-08-21 12:14 BST) predates the first kickoff by hours, the training cutoff is
+deterministic, and the model is seeded — so a forecast built today would be *numerically identical*
+to one frozen on the day.
+
+It was still refused, because numerically identical is not the same claim. Proving the **code** was
+fixed before kickoff does not prove a **forecast** was committed. Nothing would stop someone
+choosing which arms to freeze, or whether to freeze at all, after seeing the results, and "I could
+have and didn't" is precisely the assertion a frozen file exists to make unnecessary. `pl live`
+defaults to `dixon-coles,home-rate,uniform`, so the lead arm is fitted, and the module's own
+docstring already draws the line:
+
+> The discipline becomes load-bearing the moment a *fitted* model is added, because then the frozen
+> file is the only evidence of what the model believed before it saw the result.
+
+Backfilling only the two model-free arms — where a rebuilt ledger genuinely is identical, as that
+same docstring says — was also rejected. It would produce a ledger whose provenance differs by arm
+*within a single file*, and a mixed-provenance artefact whose label has to be carried correctly
+through every downstream read is exactly what went wrong in Arm 9.
+
+Ten matches of 380. Cheap to forgo, expensive to muddy. **The live record for 2026/27 starts at
+matchweek 2.**
+
+### The larger problem the miss exposed: nothing witnessed the ledger
+
+`output/` was gitignored in its entirety, so every frozen file was untracked. That makes the
+ledger's central claim unsupportable *even when it runs on time*: the filename is chosen by whoever
+writes it, so any file could be created at any moment with any date in its name, and nothing
+distinguishes a forecast frozen on Friday from one written on Monday.
+
+Every other guarantee in this project is enforced rather than trusted — `LeakageError` fires on
+every split, seams prove inertness by digest, the cache refuses a fingerprint mismatch and would
+rather recompute than serve a mismatched entry. The live ledger was the one place where the
+guarantee was good intentions.
+
+**Freezing now commits.** `.gitignore` becomes `/output/*` plus `!/output/live/`, so the ledger is
+the single tracked output — it is evidence rather than a report — and `pl live` commits each frozen
+file as it writes it.
+
+Three properties, all tested rather than asserted:
+
+* **Scoped to the one file.** `git commit -- <path>` commits that path regardless of what is
+  staged, so somebody mid-refactor who freezes a matchday does not find their work-in-progress
+  swept into a commit about forecasts. Two tests cover it, one with a dirty tree and one with a
+  dirty index.
+* **Never fatal.** The freeze is on disk before the commit is attempted. No git binary, no
+  repository, a rejecting hook — all return a reason and leave the forecast alone, because losing a
+  frozen forecast to a git problem is far worse than an uncommitted one plus an honest message.
+* **Honest about what it buys.** A local commit is *not* a trusted timestamp: `GIT_COMMITTER_DATE`
+  sets a commit's date to anything you like. What a commit buys is a hash chain, so altering the
+  file afterwards means rewriting history instead of editing a file. What *completes* the guarantee
+  is pushing, at which point a third party has recorded when it first saw the object. So the
+  command reports how many commits are unpushed, and says plainly that pushing is the step that
+  matters. It deliberately does not push on its own: that is an outward-facing act and belongs to
+  whoever is running it.
+
+The CLI path is tested end to end rather than by inspection, because this project has already been
+bitten once by an unexercised CLI branch — `pl backtest` would have skipped its entire readout in
+silence if the production arm were ever renamed.
+
+### Status
+
+`output/live/` is empty and tracked. Next freeze is matchweek 2, the weekend of 29-31 August; the
+rolling fixtures feed currently reaches 27 August and carries no E0 rows yet, so the window to run
+`pl live` is the 27th or 28th, before Saturday's first kickoff.
+
+Nothing about the model moved. 583 unit tests pass, from 576.

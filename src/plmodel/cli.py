@@ -476,7 +476,9 @@ def cmd_live(args: argparse.Namespace) -> int:
 
     from plmodel.data.football_data import upcoming_fixtures
     from plmodel.data.teams import TeamNameError
-    from plmodel.eval.live import freeze_matchday, next_barrier, score_ledger
+    from plmodel.eval.live import (
+        commit_frozen, freeze_matchday, next_barrier, score_ledger,
+    )
 
     cfg = load_config(args.config)
     corpus, played = _load_corpus(cfg)
@@ -516,6 +518,7 @@ def cmd_live(args: argparse.Namespace) -> int:
             print(f"  {row.home_team} v {row.away_team}")
         target = ledger_dir / f"{pd.Timestamp(barrier).date()}.json"
         print(f"\nwould write  : {target}")
+        print("would commit : yes, that file alone")
         if target.exists():
             print("  ! that file already exists and would NOT be overwritten")
         print("nothing was written (--dry-run).")
@@ -536,6 +539,26 @@ def cmd_live(args: argparse.Namespace) -> int:
         )
         print(f"  {row['home_team']} v {row['away_team']}   {probs}")
     print(f"\nledger    : {path}")
+
+    # Committing is part of freezing rather than an afterthought: an untracked file in a
+    # gitignored directory cannot support the claim that it existed before the result did.
+    receipt = commit_frozen(path)
+    if not receipt["committed"]:
+        print(f"NOT COMMITTED: {receipt['reason']}", file=sys.stderr)
+        print("  the forecast is on disk and still usable, but nothing yet records WHEN it was "
+              "written.", file=sys.stderr)
+        print("  commit it by hand before kickoff if the ledger is to mean what it claims.",
+              file=sys.stderr)
+        return 0
+
+    print(f"committed : {receipt['commit']}  {receipt['message']}")
+    unpushed = receipt["unpushed_commits"]
+    if unpushed is None:
+        print("  no upstream branch, so nothing off this machine has witnessed it; "
+              "`git push` is what completes the guarantee.")
+    elif unpushed:
+        print(f"  {unpushed} commit(s) unpushed. A local commit date can be set to anything, so "
+              "pushing is what records when a third party first saw this.")
     return 0
 
 

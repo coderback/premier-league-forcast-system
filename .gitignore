@@ -14,4 +14,11 @@ __pycache__/
 # Generated: downloaded source CSVs + parquet cache, and every run's reports.
 # data/static/ IS committed — the team alias map is an input, not an output.
 /data/cache/
-/output/
+/output/*
+
+# ...except the live ledger, which is the one output that is EVIDENCE rather than a report.
+# Its whole claim is "this forecast existed before the result did", and an untracked file cannot
+# support that claim: the filename is chosen by the writer, so any file could be created at any
+# time with any date in its name. Committing each frozen file puts it in a hash chain, which is
+# what turns the claim into something checkable. See eval/live.py:commit_frozen.
+!/output/live/

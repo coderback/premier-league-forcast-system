@@ -18,6 +18,7 @@ from data strictly before it.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import numpy as np
@@ -26,6 +27,11 @@ import pandas as pd
 from plmodel.config import Config
 
 LEDGER_SUFFIX = ".json"
+
+# Seconds allowed for each git call. A freeze happens with a match about to kick off, so the
+# commit must never be the thing that hangs; failing loudly and leaving the file on disk is
+# strictly better than blocking.
+_GIT_TIMEOUT = 30
 
 
 def next_barrier(fixtures: pd.DataFrame) -> pd.Timestamp | None:
@@ -114,6 +120,69 @@ def freeze_matchday(
         )
     path.write_text(json.dumps(block, indent=2), encoding="utf-8")
     return path, block
+
+
+def commit_frozen(path: Path) -> dict[str, object]:
+    """Commit one frozen ledger file, and nothing else.
+
+    **What this buys, stated precisely.** A file sitting in a gitignored directory supports no
+    claim at all about when it was written: the filename is chosen by whoever wrote it, so any
+    file could be created at any moment with any date in its name. Committing puts the file in a
+    hash chain, so altering it afterwards means rewriting history rather than editing a file.
+
+    **What it does not buy.** A local commit is not a trusted timestamp — ``GIT_COMMITTER_DATE``
+    will set a commit's date to anything you like. What completes the guarantee is *pushing*, at
+    which point a third party has recorded when it received the object. This function therefore
+    reports whether the branch is ahead of its upstream, and the caller says so; it deliberately
+    does not push, because that is an outward-facing act and belongs to whoever is running it.
+
+    **Scoped to the one file, on purpose.** ``git commit -- <path>`` commits that path regardless
+    of what else is staged, so someone mid-refactor who freezes a matchday does not get their
+    work-in-progress swept into the commit.
+
+    Never raises. The freeze is already on disk by the time this runs, and losing it to a failed
+    commit -- no git binary, no repository, a rejecting hook -- would be a far worse outcome than
+    an uncommitted file plus an honest message.
+    """
+    path = Path(path)
+
+    def git(*args: str) -> subprocess.CompletedProcess | None:
+        try:
+            return subprocess.run(
+                ["git", *args], cwd=path.parent, capture_output=True, text=True,
+                timeout=_GIT_TIMEOUT, check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+
+    root = git("rev-parse", "--show-toplevel")
+    if root is None or root.returncode != 0:
+        return {"committed": False, "reason": "not a git repository (or git is unavailable)"}
+
+    added = git("add", "--", str(path))
+    if added is None or added.returncode != 0:
+        detail = (added.stderr or "").strip() if added else "git add could not be run"
+        return {"committed": False, "reason": f"git add failed: {detail}"}
+
+    message = f"chore: freeze live forecasts for {path.stem}"
+    done = git("commit", "-m", message, "--", str(path))
+    if done is None or done.returncode != 0:
+        detail = (done.stdout or done.stderr or "").strip() if done else "git commit not run"
+        return {"committed": False, "reason": f"git commit failed: {detail.splitlines()[0] if detail else 'unknown'}"}
+
+    sha = git("rev-parse", "--short", "HEAD")
+    ahead = git("rev-list", "--count", "@{upstream}..HEAD")
+    unpushed = None
+    if ahead is not None and ahead.returncode == 0 and ahead.stdout.strip().isdigit():
+        unpushed = int(ahead.stdout.strip())
+    return {
+        "committed": True,
+        "commit": (sha.stdout.strip() if sha and sha.returncode == 0 else None),
+        "message": message,
+        # None means there is no upstream to compare against, which is itself worth reporting:
+        # a ledger on a branch nobody has ever pushed has no external witness.
+        "unpushed_commits": unpushed,
+    }
 
 
 def load_ledger(ledger_dir: Path) -> list[dict]:
