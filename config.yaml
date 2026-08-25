@@ -497,9 +497,31 @@ model:
       # barely moves and a thin one moves a long way -- the hierarchical behaviour wanted, at one
       # knob instead of two.
       #
-      # WEAK-EVIDENCE: placeholder, NOT yet tuned. To be selected on backtest.tuning_span and to
-      # face the resolution rule against strength = 0, which here IS the seam being off.
-      strength: 1.0
+      # SELECTED by the grid on backtest.tuning_span and then NOT ADOPTED. The seam is off, so this
+      # value is inert; recorded because it was measured.
+      #
+      # A clean interior optimum, bracketed hard on the upper side:
+      #
+      #     0  0.20434 (baseline, exactly)      8  0.20411
+      #     1  0.20420                         16  0.20463
+      #     2  0.20411                         32  0.20607
+      #     4  0.20404  <- winner             128  0.21248
+      #
+      # Two independent reasons it is not adopted, either of which is sufficient.
+      #
+      # The resolution rule refuses it: -0.000303 against strength 0, 95% CI [-0.000722,
+      # +0.000086], clustered by season. UNRESOLVED.
+      #
+      # And the pre-registered falsifier fires. The gain is ENTIRELY in promoted fixtures and the
+      # arm is fractionally worse on everything else:
+      #
+      #     involves_promoted  n=1080  -0.001207
+      #     established_only   n=2720  +0.000056
+      #
+      # Those reconstruct the pooled figure exactly (0.284 * -0.001207 + 0.716 * +0.000056 =
+      # -0.000303), so the decomposition is not a reading of noise. General shrinkage on this
+      # corpus IS the promoted-club effect, which arm 11 already measured and could not resolve.
+      strength: 4.0
 
     scoreline:
       marginal: poisson

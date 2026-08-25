@@ -5390,3 +5390,119 @@ hierarchical shrinkage, which Arms 1 and 6 both pointed at and which touches 100
 than 28%. The promoted-club prior is the special case; the general case is untested.
 
 640 unit tests pass, from 620.
+
+---
+
+## 2026-08-26 — RESULT, Arm 12: general shrinkage stops too, and the falsifier says why the whole line is closed
+
+The arm stopped before the gate, as arm 11 did, and for two independent reasons either of which
+would have been enough. The second one is the finding: **there is no general shrinkage effect on
+this corpus. There is a promoted-club effect, and general shrinkage reaches it by accident.**
+
+### The grid
+
+```
+strength      RPS                 strength      RPS
+       0   0.20434  <- baseline          8   0.20411
+    0.25   0.20430                      16   0.20463
+     0.5   0.20426                      32   0.20607
+       1   0.20420                      64   0.20878
+       2   0.20411                     128   0.21248
+       4   0.20404  <- winner
+```
+
+Interior optimum at 4, no grid-edge warning, and bracketed hard on the upper side — by 128 the
+model is 0.008 worse, which is a league flattened into a single team. The mechanism behaves exactly
+as designed: on a single real barrier the spread of fitted attack falls monotonically from 0.2966 to
+0.1436 across this grid, and `strength = 0` recovers the baseline bit for bit.
+
+### Rule 1: unresolved
+
+```
+strength 4 vs 0   delta -0.000303   95% CI [-0.000722, +0.000086]   UNRESOLVED
+```
+
+The pre-commitment written into the plan before any number existed — *if the grid brackets an
+interior optimum and rule 1 cannot separate it from the baseline, the arm stops* — binds, as it did
+for arm 11.
+
+Worth noting the effect is **smaller than arm 11's**, −0.00030 against −0.00059, despite touching
+every fixture rather than 28% of them. That inversion is the clue the falsifier then confirms.
+
+### The falsifier fires, and it fires cleanly
+
+Pre-registered before the run: *the gain must not concentrate in `involves_promoted`, because
+general shrinkage moves thin-data clubs most and the thin-data clubs are the promoted ones — so this
+arm could be arm 11 wearing a different label.*
+
+```
+involves_promoted   n=1080   -0.001207
+established_only    n=2720   +0.000056
+```
+
+**The entire gain is in promoted fixtures. On everything else the arm is fractionally worse.**
+
+These are not a reading of noise: they reconstruct the pooled figure exactly —
+`0.284 × (−0.001207) + 0.716 × (+0.000056) = −0.000303`. The decomposition is arithmetic, not
+inference.
+
+So the arm is rejected on its own pre-registered terms regardless of the pooled number, and this is
+the mirror image of arm 8, which had to prove its gain *was* in the promoted slice and could not.
+This one had to prove it was not, and could not either.
+
+### What this closes
+
+Four arms pointed at shrinkage: arm 1's over-parameterisation reading (67 parameters against Elo's
+4, equal accuracy), arm 6's European flag moving strength out of the big six, arm 8's overrated
+promoted clubs, and the simulator's promoted-club relegation bias. Arms 11 and 12 have now tested
+both the special and the general case directly.
+
+**The general case does not exist as a separate effect.** Arm 1's diagnosis — that per-team
+parameters are over-parameterised relative to the information available — is *true for the promoted
+clubs and false for everyone else*. An established Premier League club at a 730-day memory carries
+about 103 effective matches, and its attack and defence are not over-parameterised at all: shrinking
+them costs +0.000056. The 67-against-4 comparison was averaging a real problem in a quarter of the
+league with no problem at all in the rest.
+
+Arm 6's reading needs amending too, and it is the more interesting correction. Its European flag
+genuinely was moving strength out of the six flagged clubs, and that genuinely did help on
+2006-2016. But a penalty that shrinks those same clubs directly, tuned to its own optimum, does not
+reproduce the gain on 1996-2006. Whatever `rest-euro` was doing on its span, **"shrink the big six"
+is not a general recipe** — it worked once, on a decade when the big four were a stable and
+over-rated group, which is what that entry said and which this arm now confirms by failing to
+generalise it.
+
+### The honest arithmetic on what is left
+
+The promoted-club effect is real, has been measured three ways now, and is consistently about a
+thousandth of an RPS point on the fixtures it touches:
+
+```
+arm 11, promoted prior, tuned         pooled -0.00059    (promoted-only penalty, correct centre)
+arm 12, general shrinkage, tuned      pooled -0.00030    (promoted slice -0.00121)
+```
+
+Arm 11 did it better, which is what one would expect: it pulled promoted clubs toward an estimated
+promoted level, while this arm drags them toward zero, which is the wrong centre for them but still
+better than free-fitting a club with 27 effective matches. **Neither is resolvable on 3,800
+matches**, and the evaluation spans are the same size, so neither would clear gate 1.
+
+The remaining route to this effect is not another penalty. It is more data or a larger effect, and
+the honest reading is that the effect is roughly a third of what this corpus can detect.
+
+### Status
+
+`model.seams.shrinkage.enabled` stays **false**. `strength: 4.0` is recorded in config as measured
+and marked NOT ADOPTED, the same treatment arm 11's `shrinkage: 16.0` and the decay seam's tuned
+half-lives got.
+
+No evaluation walk was run, so **the multiplicity family is unchanged**. Twelve arms attempted, one
+accepted under a rule since tightened, nothing in production but the model that was there at the
+start.
+
+Two arms have now been stopped by the resolution rule before reaching a gate, at a cost of about an
+hour each against three hours and a permanent family slot. That is the rule paying for itself twice
+in two days, and both times against a mechanism that demonstrably works and simply is not big
+enough.
+
+654 unit tests pass, from 640.
