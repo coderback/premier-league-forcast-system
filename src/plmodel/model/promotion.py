@@ -76,6 +76,8 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from plmodel.model.shrinkage import ridge_penalty
+
 
 class PromotionError(ValueError):
     """Raised when a promotion-prior configuration cannot be honoured."""
@@ -268,15 +270,13 @@ def penalty_and_gradient(
     prior: PromotionPrior,
     shrinkage: float,
 ) -> tuple[float, np.ndarray, np.ndarray]:
-    """Ridge penalty toward the prior, and its gradient w.r.t. the FULL attack/defence vectors.
+    """Ridge penalty toward the promoted-club prior, and its gradient.
 
-    Returned against the full vectors, not the free ones. The caller pushes them through the
-    sum-to-zero reparameterisation, because that is where the subtlety lives and it belongs next to
-    the packing code that creates it rather than hidden in here.
+    A thin adapter over :func:`plmodel.model.shrinkage.ridge_penalty`, which is the same quadratic
+    with a different centre. Kept as a named function because "pull promoted clubs toward the
+    promoted level" is what this seam means, and because the general seam and this one must not grow
+    two copies of one derivative.
     """
-    if shrinkage <= 0.0 or not promoted_mask.any():
-        return 0.0, np.zeros_like(attack), np.zeros_like(defence)
-    da = np.where(promoted_mask, attack - prior.attack, 0.0)
-    dd = np.where(promoted_mask, defence - prior.defence, 0.0)
-    value = shrinkage * float(da @ da + dd @ dd)
-    return value, 2.0 * shrinkage * da, 2.0 * shrinkage * dd
+    return ridge_penalty(
+        attack, defence, promoted_mask, prior.attack, prior.defence, shrinkage
+    )

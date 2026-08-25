@@ -19,6 +19,7 @@ import yaml
 from plmodel.model.counts import CountSpec
 from plmodel.model.decay import DecaySpec
 from plmodel.model.promotion import PromotionSpec
+from plmodel.model.shrinkage import ShrinkageSpec
 from plmodel.model.covariates import CovariateSpec
 
 # Repo root = three levels up from this file (src/plmodel/config.py -> repo root).
@@ -107,6 +108,7 @@ class ModelConfig:
             and self._scoreline_spec().is_inert
             and not (s.get("decay") or {}).get("enabled", False)
             and not (s.get("promotion") or {}).get("enabled", False)
+            and not (s.get("shrinkage") or {}).get("enabled", False)
         )
 
     def decay_spec(self, *, enabled: bool | None = None) -> DecaySpec | None:
@@ -149,6 +151,21 @@ class ModelConfig:
             shrinkage=float(seam["shrinkage"]),
             min_prior_clubs=int(seam["min_prior_clubs"]),
         )
+
+    def shrinkage_spec(self, *, enabled: bool | None = None) -> ShrinkageSpec | None:
+        """The configured general shrinkage, or None when the seam is off.
+
+        Unlike the promotion seam, a zero-strength spec here IS the baseline -- one site, nothing
+        else to switch -- so returning None and returning ``ShrinkageSpec(0.0)`` describe the same
+        model. None is still what an off seam returns, so the penalty stays out of the call graph
+        rather than being built and then multiplied by zero.
+        """
+        seam = self.seams.get("shrinkage") or {}
+        live = seam.get("enabled", False) if enabled is None else enabled
+        if not live:
+            return None
+        spec = ShrinkageSpec(strength=float(seam["strength"]))
+        return None if spec.is_inert else spec
 
     def covariate_spec(
         self, *, terms: tuple[str, ...] | None = None, mode: str | None = None

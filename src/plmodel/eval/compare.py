@@ -470,6 +470,52 @@ def _decay_arm(ctx: "ArmContext", *, dynamics: bool) -> np.ndarray:
     return dynamic.predict_proba(ctx.test)
 
 
+@register("dc-shrink")
+def _dc_shrink(ctx: ArmContext) -> np.ndarray:
+    """General hierarchical shrinkage: every club's attack and defence pulled toward the league.
+
+    Arm 1 fought this model to a draw with four parameters against sixty-seven and named the
+    diagnosis -- per-team strengths are over-parameterised relative to the information available.
+    Arm 6 is the evidence of a gain: its European flag turned out to be moving strength out of the
+    six flagged clubs, attack and defence together by 0.024 log-goals each, and helping most where
+    its own covariate contributed nothing. This arm makes that move directly instead of paying for
+    it with a spurious calendar term.
+
+    Arm 11 is the special case and it stopped: the promoted-club prior reached 28% of fixtures and
+    improved the tuning window by -0.00059, below what this corpus can resolve. This is the general
+    case, on 100% of fixtures.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    shrinkage = ctx.state.get("shrinkage")
+    if shrinkage is None:
+        shrinkage = model.shrinkage_spec(enabled=True)
+        if shrinkage is None:
+            raise ValueError(
+                "dc-shrink needs a non-zero model.seams.shrinkage.strength; at zero the seam is "
+                "the baseline and the arm would not differ from it"
+            )
+        ctx.state["shrinkage"] = shrinkage
+
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+            shrinkage=shrinkage,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
+
+
 @register("dc-promo")
 def _dc_promo(ctx: ArmContext) -> np.ndarray:
     """The promotion prior: a promoted club scored against promoted clubs, not the league average.

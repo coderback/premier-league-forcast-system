@@ -70,13 +70,8 @@ from plmodel.model.counts import (
 from plmodel.model.covariates import CovariateSpec
 from plmodel.model.covariates import design as cov_design_matrix
 from plmodel.model.decay import BlockLayout, DecaySpec, block_weights, fit_blockwise
-from plmodel.model.promotion import (
-    PromotionPrior,
-    PromotionSpec,
-    estimate_prior,
-    penalty_and_gradient,
-    promoted_at_barrier,
-)
+from plmodel.model.promotion import PromotionPrior, PromotionSpec, estimate_prior
+from plmodel.model.shrinkage import ShrinkageSpec, ridge_penalty
 from plmodel.model.home_advantage import MODE_GLOBAL as HA_GLOBAL
 from plmodel.model.home_advantage import design as ha_design_matrix
 from plmodel.model.home_advantage import prediction_design
@@ -424,14 +419,18 @@ def _objective(
     ha_design: np.ndarray,
     cov_lam_design: np.ndarray,
     cov_mu_design: np.ndarray,
-    penalty: tuple[np.ndarray, "PromotionPrior", float] | None = None,
+    penalty: tuple[np.ndarray, float, float, float] | None = None,
 ) -> tuple[float, np.ndarray]:
     """Weighted negative log-likelihood and its analytic gradient.
 
-    ``penalty`` is the promotion seam's ridge term, or None. Last in the signature and defaulting
-    to None so that every existing caller -- the production solve, the decay seam's block cycles,
-    and the gradient tests -- is untouched, and so that with the seam off the only difference is one
-    identity check against None.
+    ``penalty`` is a ridge term ``(mask, centre_attack, centre_defence, strength)``, or None.
+    Two seams build it -- the promotion prior toward the promoted-club level, general shrinkage
+    toward the league average -- and the likelihood does not need to know which, which is why the
+    centre arrives as two floats rather than as either seam's own type.
+
+    Last in the signature and defaulting to None so that every existing caller -- the production
+    solve, the decay seam's block cycles, and the gradient tests -- is untouched, and so that with
+    both seams off the only difference is one identity check against None.
     """
     n_ha = ha_design.shape[1]
     n_cov = cov_lam_design.shape[1]
@@ -492,9 +491,9 @@ def _objective(
 
     value, out = -total, -grad
     if penalty is not None:
-        promoted_mask, prior, shrinkage = penalty
-        pen, d_pen_attack, d_pen_defence = penalty_and_gradient(
-            attack, defence, promoted_mask, prior, shrinkage
+        mask, centre_attack, centre_defence, strength = penalty
+        pen, d_pen_attack, d_pen_defence = ridge_penalty(
+            attack, defence, mask, centre_attack, centre_defence, strength
         )
         if pen:
             # The penalty ADDS to the negative log-likelihood, so its gradient adds too -- no sign
@@ -738,6 +737,7 @@ def fit_dixon_coles(
     cov_division: str = "",
     decay: DecaySpec | None = None,
     promotion: PromotionSpec | None = None,
+    shrinkage: ShrinkageSpec | None = None,
 ) -> DixonColesFit:
     """Fit the model on a training frame, weighted toward ``ref_date``.
 
@@ -794,6 +794,13 @@ def fit_dixon_coles(
     # without a second half-life to tune.
     prior = None
     penalty = None
+    if promotion is not None and shrinkage is not None:
+        # Both seams build a penalty, and an arm carrying both would be a two-axis test wearing a
+        # one-axis name -- the same refusal this function already makes for decay with covariates.
+        raise ValueError(
+            "the promotion prior and general shrinkage cannot run together: both are ridge terms "
+            "on the same parameters, so an arm carrying both moves two axes"
+        )
     if promotion is not None:
         if family is not None:
             raise ValueError(
@@ -805,7 +812,18 @@ def fit_dixon_coles(
         # Site A, the pin, is carried by `prior` itself and applied in `DixonColesFit._pinned`.
         # Site B, the shrink. Only clubs that ARE parameters can be penalised.
         promoted_mask = np.array([t in set(prior.teams) for t in teams], dtype=bool)
-        penalty = (promoted_mask, prior, promotion.shrinkage)
+        penalty = (promoted_mask, prior.attack, prior.defence, promotion.shrinkage)
+
+    if shrinkage is not None and not shrinkage.is_inert:
+        # General hierarchical shrinkage: every identified club, toward the league average. Cold-start
+        # clubs are already at exactly 0 and are not parameters, so this moves the fitted clubs
+        # toward where the dropped ones have always sat.
+        if family is not None:
+            raise ValueError(
+                "general shrinkage and an alternative scoreline family are not implemented "
+                "together; _objective_family carries no penalty term"
+            )
+        penalty = (np.ones(len(teams), dtype=bool), 0.0, 0.0, shrinkage.strength)
 
     # Cold-start teams keep the league-average strength of 0 and are dropped from the fit sample,
     # so they neither absorb nor distort the parameters of the teams that are identified.

@@ -177,7 +177,7 @@ def test_penalty_gradient_matches_finite_differences(promoted_index: int) -> Non
     mask = np.zeros(n_teams, dtype=bool)
     mask[promoted_index] = True
     prior = PromotionPrior(attack=-0.30, defence=-0.27, n_clubs=9, effective_n=100.0, teams=())
-    args = _gradient_args(rng, n_teams, n, (mask, prior, 2.5))
+    args = _gradient_args(rng, n_teams, n, (mask, prior.attack, prior.defence, 2.5))
 
     theta = np.concatenate([
         [rng.uniform(-0.3, 0.5)], [rng.uniform(0.0, 0.4)], [rng.uniform(-0.12, 0.12)],
@@ -202,7 +202,8 @@ def test_the_last_slot_penalty_reaches_every_free_parameter() -> None:
     free = n_teams - 1
     off = _objective(theta, *_gradient_args(rng, n_teams, n, None))[1]
     rng = np.random.default_rng(11)  # same draw, so only the penalty differs
-    on = _objective(theta, *_gradient_args(rng, n_teams, n, (mask, prior, 2.5)))[1]
+    on = _objective(theta, *_gradient_args(rng, n_teams, n,
+                                          (mask, prior.attack, prior.defence, 2.5)))[1]
     moved = np.abs(on - off)[_N_GLOBAL: _N_GLOBAL + 2 * free]
     assert np.all(moved > 0.0), "every free parameter must feel a penalty on the constrained team"
 
@@ -216,7 +217,8 @@ def test_zero_shrinkage_leaves_the_likelihood_untouched() -> None:
     theta = np.concatenate([[0.1], [0.25], [-0.05], rng.uniform(-0.4, 0.4, 2 * (n_teams - 1))])
 
     rng = np.random.default_rng(5)
-    zero = _objective(theta, *_gradient_args(rng, n_teams, n, (mask, prior, 0.0)))
+    zero = _objective(theta, *_gradient_args(rng, n_teams, n,
+                                            (mask, prior.attack, prior.defence, 0.0)))
     rng = np.random.default_rng(5)
     absent = _objective(theta, *_gradient_args(rng, n_teams, n, None))
     assert zero[0] == absent[0]

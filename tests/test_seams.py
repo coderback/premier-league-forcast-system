@@ -31,7 +31,7 @@ from plmodel.eval.backtest import walk_forward
 from plmodel.eval.compare import ArmSpec, run_arm
 
 SEAM_NAMES = ("covariates", "dynamics", "observation", "ensemble", "home_advantage",
-              "tiers", "scoreline", "decay", "promotion")
+              "tiers", "scoreline", "decay", "promotion", "shrinkage")
 
 # Every seam, explicitly off. Written out here rather than read from config.yaml on purpose.
 #
@@ -58,6 +58,7 @@ ALL_OFF: dict[str, object] = {
     # Same shape again: the switch is the off state, and the values that say what "on" would mean
     # sit beside it rather than being invented at the call site.
     "promotion": {"enabled": False, "shrinkage": 1.0, "min_prior_clubs": 3},
+    "shrinkage": {"enabled": False, "strength": 1.0},
 }
 
 
@@ -110,6 +111,7 @@ def test_seam_is_recognised_as_on_when_flipped(cfg, seam: str) -> None:
         "scoreline": {**ALL_OFF["scoreline"], "marginal": "weibull", "dependence": "frank"},
         "decay": {**ALL_OFF["decay"], "enabled": True},
         "promotion": {**ALL_OFF["promotion"], "enabled": True},
+        "shrinkage": {**ALL_OFF["shrinkage"], "enabled": True},
     }[seam]
     flipped = dataclasses.replace(cfg.model, seams={**ALL_OFF, seam: on})
     assert not flipped.seams_are_inert(), f"flipping {seam} was not detected"

@@ -476,6 +476,31 @@ model:
       # is a sample of promoted clubs rather than a description of one club.
       min_prior_clubs: 3
 
+    # General hierarchical shrinkage (model/shrinkage.py): pull EVERY club's attack and defence
+    # toward the league average. Off means no penalty is built and the fit takes today's path.
+    #
+    # Not the same thing as model.seams.promotion.shrinkage above, and the near-collision is worth
+    # reading twice: that coefficient pulls promoted clubs toward the promoted-club prior, this one
+    # pulls all clubs toward zero. Same quadratic, different centre, different arm. They share one
+    # implementation (shrinkage.ridge_penalty) and cannot run together.
+    #
+    # Two arms pointed here. Arm 1 drew the production model against elo-dc with 67 parameters
+    # against 4 and concluded the per-team fit is over-parameterised, with the Elo scalar acting as
+    # a regulariser. Arm 6 is the direct evidence and it is evidence of a GAIN: its European flag
+    # was moving strength out of the six flagged clubs, attack and defence together by 0.024
+    # log-goals each, and helping most where the flag differential was zero. The fit found that
+    # trade worth making even paying for it with a spurious calendar term.
+    shrinkage:
+      enabled: false
+      # Ridge coefficient toward the league average. Unweighted per club on purpose: the
+      # likelihood's own curvature already scales with effective sample size, so a data-rich club
+      # barely moves and a thin one moves a long way -- the hierarchical behaviour wanted, at one
+      # knob instead of two.
+      #
+      # WEAK-EVIDENCE: placeholder, NOT yet tuned. To be selected on backtest.tuning_span and to
+      # face the resolution rule against strength = 0, which here IS the seam being off.
+      strength: 1.0
+
     scoreline:
       marginal: poisson
       dependence: tau
