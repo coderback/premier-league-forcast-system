@@ -72,6 +72,9 @@ class BacktestConfig:
     min_train_matches: int
     n_boot: int
     fdr_alpha: float
+    # Minimum variation ratio before a decay half-life may be tuned for a parameter. See
+    # eval/tuning.py:parameter_is_tunable and the config comment beside the value.
+    tuning_stationarity_ratio: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -332,6 +335,7 @@ def load_config(path: Path | str | None = None) -> Config:
     backtest_keys = (
         "prediction_division", "test_span", "sensitivity_span", "tuning_span",
         "half_life_grid_days", "refit_every", "min_train_matches", "n_boot", "fdr_alpha",
+        "tuning_stationarity_ratio",
     )
     missing_backtest = [k for k in backtest_keys if k not in b]
     if missing_backtest:
@@ -400,6 +404,7 @@ def load_config(path: Path | str | None = None) -> Config:
             min_train_matches=int(b["min_train_matches"]),
             n_boot=int(b["n_boot"]),
             fdr_alpha=float(b["fdr_alpha"]),
+            tuning_stationarity_ratio=float(b["tuning_stationarity_ratio"]),
         ),
         audit=AuditConfig(
             calibration_bins=int(a["calibration_bins"]),

@@ -4914,3 +4914,138 @@ that entry stands — and it remains unwired.
 Ten arms, one acceptance under a rule that has since been tightened, and nothing in production but
 the model that was there at the start. That is not a comfortable sentence to write, and it is the
 one the evidence supports.
+
+---
+
+## 2026-08-25 — AMENDMENT: the tuning protocol gains two checks, and one of them does not do what it was built for
+
+The protocol chose against the test span twice in two days, by two different mechanisms, and could
+not tell either time. Two checks are added. Applied back to the record, **they catch one of the two
+failures and miss the other entirely** — and the miss is the more interesting half.
+
+### The checks
+
+**Rule 1, resolution.** A selection that *moves a shipped value* must beat the value it replaces by
+more than this window's own sampling noise, or the incumbent stands. Instrument:
+`metrics.paired_delta_clustered` on the tuning-span forecasts of the two configurations, clustered
+by season — a half-life change perturbs a whole season coherently, so treating matches as
+independent reports an interval several times too narrow, which is the direction that manufactures
+resolution.
+
+This does not overturn the point-estimate policy. That policy says attaching CIs to *every grid
+point* invites reading significance into a search, and it is right. Rule 1 attaches a CI to nothing;
+it makes one comparison — winner against incumbent — and asks a different question: *did this search
+resolve anything at all?*
+
+The policy's own answer to selection noise is that "the chosen value earns a full paired comparison
+afterwards". That comparison is the gate, and **a gate can only reject an arm, never correct a
+selection**: by the time it runs, the value is baked into the arm being judged, the arm is spent,
+and its scorings have enlarged the family every future re-scoring must be corrected against.
+
+**Rule 2, stationarity.** A decay half-life may only be selected for a parameter that actually varies
+on the tuning window, at a ratio configured in `backtest.tuning_stationarity_ratio`. Not a new idea
+— the protocol's own docstring has always said a half-life tuned on 1996-2006 "is only useful for
+2016-2026 if the answer does not move". It was simply never asked out loud.
+
+### What the record says when the checks are applied to it
+
+Diagnostic only. No verdict changed and no shipped value moved.
+
+**Per-parameter decay — caught, twice over.** Every axis move the search made is inside the noise:
+
+```
+                                  delta        95% CI                        verdict
+level 730 -> 365              -0.000051   [-0.000164, +0.000030]        unresolved
+home advantage 730 -> 1460    -0.000021   [-0.000065, +0.000013]        unresolved
+the shipped split             -0.000059   [-0.000191, +0.000035]        unresolved
+```
+
+And Rule 2 refuses both axes independently, before any of that:
+
+```
+                 sd (tuning)   sd (test)   ratio
+home advantage        0.0117      0.0404    0.29   UNTUNABLE
+league level          0.0118      0.0401    0.29   UNTUNABLE
+```
+
+**The honest tuned configuration for that arm was no split at all.** Either rule would have said so
+before three hours of walks were spent, and the arm would have been recorded as a null on the
+evidence rather than on the outcome. Note Rule 2 flags the *level* axis too, which the original
+entry did not — the league scoring rate is as flat on this window as home advantage is.
+
+**The `dc-gas` retune — not caught, and not because the check is weak.**
+
+```
+original recursion  0.19806      retuned  0.19781
+retuned vs original    delta -0.000250   CI [-0.000544, -0.000041]   RESOLVED
+```
+
+The retune's margin is **not** inside the noise. It is a genuine, resolvable improvement on the
+tuning span. Rule 1 would have waved it through, exactly as the protocol did.
+
+### The finding that matters more than the amendment
+
+I built Rule 1 expecting it to catch the retune. It does not, and that is a real result rather than
+a disappointing one.
+
+**The retune was not a selection made on noise. It was a correct selection that does not transfer.**
+The retuned recursion genuinely is better on 1996-2006, resolvably so, and genuinely is worse on
+2016-2026, by more than twice as much (+0.0006 against −0.00025). Both windows are right about
+their own era. No amount of statistical rigour applied to the tuning span can fix a configuration
+that is better there and worse where it is judged.
+
+That reframes what happened on 2026-08-19 and what was written about it. The retune entry
+diagnosed a flat plateau being over-fitted — *"a more thorough search over a surface that flat is
+not extracting more signal, it is being given more opportunity to fit the tuning window's own
+noise"* — and concluded *"the defence is not to search less, it is to read a plateau as a plateau."*
+That diagnosis is now measurably wrong for the recursion axes. The surface was not flat there and
+the search was not fitting noise; it found something real that does not hold twenty years later.
+
+The half-life axis is a different story and the entry was right about *that*: 2555/5475/7300 tie
+inside 0.00001, and Rule 1 would refuse to move between them.
+
+### What would catch it, and why nothing here does
+
+An era-transfer failure is only visible from more than one era. The candidates:
+
+* **Require stability across sub-windows of the tuning span.** With 1,303 matches, halving gives
+  650 a side — an interval so wide that nothing would ever be resolved. Not usable on this corpus.
+* **Check the selection on a second window.** The only other windows are the acceptance instruments,
+  and consulting them is the one thing the protocol forbids outright.
+* **Prefer era-robust configurations over window-optimal ones.** Coherent, and unimplementable for
+  the same reason: robustness across eras cannot be measured without a second era.
+
+So it is recorded as an open problem rather than patched. **With this corpus, a hyperparameter that
+is genuinely better on 1996-2006 and genuinely worse on 2016-2026 is not detectable before the gate
+runs.** That is a property of having one usable tuning window, not of the search.
+
+### A correction to config, found while measuring
+
+Two comments were factually wrong and are fixed. `backtest.tuning_span` claimed to open in 1996-97
+"to leave three seasons of training history behind the first barrier"; and `min_train_matches`
+claimed it "only bites if someone points the splitter at the start of the corpus".
+
+**Both are false.** `min_train_matches: 3800` applies to every span, 3,800 E0 matches are not
+reached until partway through 2002-03, and the tuning walk's first barrier is **2003-01-11 with ten
+seasons behind it**. The nominal ten-season window is a scored walk of **342 barriers over 1,303
+matches** — a third of either evaluation span, and the reason its noise floor is where it is.
+
+Loosening `min_train_matches` for the tuning span alone would roughly triple the selection sample
+without touching any acceptance instrument. It is not done here, because it is a separate change
+that would invalidate every value ever selected on the current window, and because today's
+measurements show it would not have saved either failure: one was resolvable already, and the other
+is refused by Rule 2 regardless of sample size.
+
+### Status
+
+Prospective, from the next selection onward. **No shipped value moves and no past verdict changes.**
+`dc-gas` stays rejected at 2555; the decay seam keeps its tuned values and stays off.
+
+That last point costs something and the reasoning is on the record from before the run: the
+resolution check *might* have said the retune was noise, which would have meant the incumbent stood
+— and the incumbent is the configuration that clears all four gates. Adopting a rule that restores
+the arm I already know passes is what disclosure norms exist to catch. As it turned out the check
+said the opposite, so the question was moot; the discipline was worth keeping anyway, because it was
+decided before the answer was known.
+
+620 unit tests pass, from 610.

@@ -14,6 +14,39 @@ does not move.
 
 A winner at an edge of the grid means the search never bracketed the optimum. That is reported as
 a red flag rather than adopted.
+
+AMENDED 2026-08-25, after the protocol chose against the test span twice in two days
+------------------------------------------------------------------------------------
+Both failures looked like clean convergence at the time, and neither was detectable by anything
+the protocol measured.
+
+**Selection noise.** The mandated `dc-gas` retune won this window by 0.19806 -> 0.19780 — 0.00027
+on 1,303 matches — with every axis interior after coordinate cycles run to convergence. On the test
+span it turned -0.0019 at DM p=0.011, which clears all four gates, into -0.0013 at p=0.0513, which
+clears three. Ten of this project's shipped values were selected on margins *smaller* than that
+0.00027, four of them on 0.00001 or less.
+
+**Structural blindness.** The per-parameter decay search chose a home-advantage memory of 1460
+against production's 730 — the wrong direction — because home advantage is flat across this window
+(+0.3215 -> +0.3217 in seven years) and only starts falling afterwards. A longer memory is free
+variance reduction for a parameter that does not move.
+
+So two checks, and neither of them contradicts the point-estimate policy below:
+
+**1. Resolution.** A selection that MOVES a shipped value must beat the value it replaces by more
+than this window's own sampling noise, or the incumbent stands. See :func:`selection_is_resolved`.
+The existing policy's answer to selection noise is "the chosen value earns a full paired comparison
+afterwards" — but a *gate* can only reject an arm, never correct a selection. By the time that
+comparison runs the value is baked into the arm being judged, the arm is spent, and its scorings
+have enlarged the family every future re-scoring must be corrected against. This catches the same
+failure while it is still free.
+
+**2. Stationarity.** A decay half-life may only be selected for a parameter that actually varies on
+this window. See :func:`parameter_is_tunable`. This is not a new idea — the paragraph above already
+says a half-life tuned on 1996-2006 "is only useful for 2016-2026 if the answer does not move". It
+was simply never asked out loud.
+
+Both report rather than raise. A protocol that refuses to run is a protocol people work around.
 """
 from __future__ import annotations
 
@@ -95,6 +128,95 @@ def sweep_half_life(
             }
         )
     return pd.DataFrame(records)
+
+
+def selection_is_resolved(
+    winner: np.ndarray,
+    incumbent: np.ndarray,
+    outcomes: np.ndarray,
+    *,
+    groups: np.ndarray | None = None,
+    n_boot: int,
+    seed: int,
+) -> dict[str, object]:
+    """Did the search actually distinguish these two configurations, or is the gap its own noise?
+
+    One comparison, not a confidence interval on every grid point: the winner against the value it
+    would replace. The question is not "is this grid point significantly better than that one" but
+    "did this search resolve anything at all", and the honest answer on a flat surface is no.
+
+    ``groups`` should be the season of each match. A half-life change perturbs a whole season
+    coherently -- every fit in it shifts the same way -- so treating matches as independent reports
+    an interval several times too narrow. The clustered figure is the verdict; the unclustered one
+    is reported beside it so the difference between the two is visible rather than asserted.
+
+    Sign convention follows the rest of the project: negative favours the winner.
+    """
+    from plmodel.eval import metrics
+
+    loss_winner = metrics.rps(winner, outcomes)
+    loss_incumbent = metrics.rps(incumbent, outcomes)
+    naive = metrics.paired_delta_losses(
+        loss_winner, loss_incumbent, n_boot=n_boot, seed=seed
+    )
+    clustered = None
+    if groups is not None:
+        clustered = metrics.paired_delta_clustered(
+            loss_winner, loss_incumbent, np.asarray(groups), n_boot=n_boot, seed=seed
+        )
+    verdict = clustered if clustered is not None else naive
+    # Resolved when the winner's advantage does not straddle zero. Straddling means the search
+    # cannot tell the two apart, and moving a shipped value on that is churn dressed as progress.
+    resolved = bool(verdict["ci_high"] < 0.0)
+    return {
+        "resolved": resolved,
+        "delta": float(verdict["delta"]),
+        "ci_low": float(verdict["ci_low"]),
+        "ci_high": float(verdict["ci_high"]),
+        "p_winner_better": float(verdict["p_a_better"]),
+        "clustered": clustered is not None,
+        "n_groups": int(verdict.get("n_groups", 0)) or None,
+        "unclustered_ci": (float(naive["ci_low"]), float(naive["ci_high"])),
+        "verdict": (
+            "resolved: the winner beats the incumbent by more than this window's noise"
+            if resolved else
+            "UNRESOLVED: the difference is inside this window's own noise, so the incumbent "
+            "stands and the search has not earned a move"
+        ),
+    }
+
+
+def parameter_is_tunable(
+    tuning_values: np.ndarray, reference_values: np.ndarray, *, min_ratio: float
+) -> dict[str, object]:
+    """Does the parameter vary enough on the tuning window for a memory to be selectable there?
+
+    A decay half-life is a statement about how fast something moves. Choose one on a window where
+    the parameter is flat and the search will ask for a longer memory, correctly for that window
+    and uselessly for any other -- which is exactly what happened to home advantage.
+
+    ``tuning_values`` and ``reference_values`` are the parameter's fitted trajectory across the
+    tuning window and across a reference window. Variation is compared as a standard-deviation
+    ratio, reported rather than reduced to a flag, because the number belongs in the ledger next to
+    whatever decision it drives.
+    """
+    tuning_sd = float(np.std(np.asarray(tuning_values, dtype=float)))
+    reference_sd = float(np.std(np.asarray(reference_values, dtype=float)))
+    ratio = tuning_sd / reference_sd if reference_sd > 0 else float("inf")
+    tunable = bool(ratio >= min_ratio)
+    return {
+        "tunable": tunable,
+        "ratio": ratio,
+        "tuning_sd": tuning_sd,
+        "reference_sd": reference_sd,
+        "min_ratio": float(min_ratio),
+        "verdict": (
+            "tunable: the parameter varies on this window comparably to the reference"
+            if tunable else
+            "UNTUNABLE ON THIS WINDOW: the parameter is materially flatter here than where it "
+            "will be judged, so a memory selected here is selected for a different problem"
+        ),
+    }
 
 
 def sweep_verdict(sweep: pd.DataFrame) -> dict[str, object]:

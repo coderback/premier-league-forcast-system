@@ -576,8 +576,17 @@ backtest:
   # Hyperparameter searches run HERE and nowhere else. A third, older window so that neither the
   # test span nor the sensitivity span is ever optimised against — the WC2026 project's standing
   # lesson was "never tune against your acceptance instrument", and a sensitivity check that has
-  # been tuned on is not a sensitivity check either. Opens in 1996-97 to leave three seasons of
-  # training history behind the first barrier.
+  # been tuned on is not a sensitivity check either.
+  #
+  # CORRECTION, 2026-08-25. This block used to claim the span "opens in 1996-97 to leave three
+  # seasons of training history behind the first barrier". It does not. `min_train_matches: 3800`
+  # below applies to every span, and 3,800 E0 matches are not reached until partway through
+  # 2002-03 — so the first barrier is **2003-01-11 with ten seasons behind it**, and the scored
+  # walk is 342 barriers over 1,303 matches rather than ten seasons' worth.
+  #
+  # That matters because it is a third of either evaluation span's 3,800, and it is the root of
+  # both tuning failures recorded on 2026-08-25. See eval/tuning.py for the two checks that now
+  # make a selection say when it cannot resolve what it is choosing between.
   tuning_span:
     first_season: "1996-97"
     last_season: "2005-06"
@@ -595,13 +604,29 @@ backtest:
   refit_every: 1
 
   # A barrier with less history than this is skipped rather than fitted on almost nothing.
-  # 3,800 is ten full seasons; the test span opens with 23 seasons behind it, so this only bites
-  # if someone points the splitter at the start of the corpus.
+  # 3,800 is ten full seasons.
+  #
+  # CORRECTION, 2026-08-25. This used to say it "only bites if someone points the splitter at the
+  # start of the corpus". It bites on the TUNING span every single time, and it is the largest
+  # single determinant of how much data a hyperparameter is selected on: it discards roughly the
+  # first six and a half of that span's ten nominal seasons. Whether to loosen it for tuning alone
+  # is measured rather than assumed — see NOTES.md.
   min_train_matches: 3800
 
   # Paired-bootstrap resamples for model-vs-model and model-vs-market RPS deltas. 10,000 matches
   # the WC2026 value so the two projects' CIs are computed the same way.
   n_boot: 10000
+
+  # Minimum ratio of a parameter's variation on the tuning span to its variation on the span it
+  # will be judged against, before a decay half-life may be selected for it. Below this the axis is
+  # declared untunable on this window rather than fitted.
+  #
+  # A judgement call, and marked as one — but the measured cases are nowhere near it, which is what
+  # makes the rule usable rather than arbitrary. Home advantage sits at 0.29 (sd 0.0117 against
+  # 0.0403) and the league level at 0.28 (0.0115 against 0.0405): both are more than three times
+  # more variable on the span that judges them than on the one that chooses them. No plausible
+  # threshold puts either on the right side, so the verdict does not turn on where the line sits.
+  tuning_stationarity_ratio: 0.5
 
   # Benjamini-Hochberg false-discovery rate across the family of arms tested. Required by the
   # metrics helper rather than defaulted, because the rate the project tolerates is a decision.
