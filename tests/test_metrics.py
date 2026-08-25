@@ -301,3 +301,60 @@ def test_clustered_bootstrap_validation() -> None:
         metrics.paired_delta_clustered(np.zeros(4), np.zeros(5), groups, n_boot=10, seed=0)
     with pytest.raises(ValueError, match="empty sample"):
         metrics.paired_delta_clustered(np.zeros(0), np.zeros(0), np.zeros(0), n_boot=10, seed=0)
+
+
+# --- a declared family larger than the tests supplied ---------------------------------------------
+
+def test_a_declared_family_leaves_the_default_path_untouched() -> None:
+    """The load-bearing one: passing family_size=None must change nothing.
+
+    Every FDR number in the ledger was computed on the default path. If that moved, none of them
+    would be reproducible, and the correction would be silently different from the one recorded.
+    """
+    p = [0.005, 0.011, 0.02, 0.04, 0.13]
+    assert metrics.benjamini_hochberg(p, alpha=0.05) == metrics.benjamini_hochberg(
+        p, alpha=0.05, family_size=None
+    )
+    assert metrics.benjamini_hochberg(p, alpha=0.05) == metrics.benjamini_hochberg(
+        p, alpha=0.05, family_size=len(p)
+    )
+
+
+def test_a_larger_declared_family_raises_the_bar() -> None:
+    """One arm scored alone, but pre-registered as one of three serial re-scorings.
+
+    At m=1 the threshold is alpha; declaring a family of three makes it alpha/3, which is the
+    number NOTES.md pre-committed for dc-gas before any of it was measured.
+    """
+    alone = metrics.benjamini_hochberg({"dc-gas": 0.03}, alpha=0.05)
+    assert alone["rejected"]["dc-gas"] is True, "0.03 clears an uncorrected 0.05"
+
+    declared = metrics.benjamini_hochberg({"dc-gas": 0.03}, alpha=0.05, family_size=3)
+    assert declared["rejected"]["dc-gas"] is False, "0.03 does not clear 0.05/3"
+    assert declared["p_adjusted"]["dc-gas"] == pytest.approx(0.09)
+    assert declared["family_size"] == 3
+    # n_tests still counts what was actually scored; the family is the wider claim.
+    assert declared["n_tests"] == 1
+
+
+def test_the_declared_family_only_ever_tightens() -> None:
+    """A family smaller than the tests run would loosen the correction.
+
+    Refused outright rather than clamped: a knob that can loosen a multiplicity correction is a
+    knob for buying an acceptance, which is what the pre-commitments exist to prevent.
+    """
+    with pytest.raises(ValueError, match="smaller than"):
+        metrics.benjamini_hochberg([0.01, 0.02, 0.03], alpha=0.05, family_size=2)
+
+
+def test_the_declared_family_shifts_the_boundary_exactly() -> None:
+    """alpha/N is the threshold for the smallest p-value, checked either side of it."""
+    for family, boundary in ((1, 0.05), (3, 0.05 / 3), (4, 0.05 / 4)):
+        just_under = metrics.benjamini_hochberg(
+            {"a": boundary * 0.99}, alpha=0.05, family_size=family
+        )
+        just_over = metrics.benjamini_hochberg(
+            {"a": boundary * 1.01}, alpha=0.05, family_size=family
+        )
+        assert just_under["rejected"]["a"] is True, f"family {family}"
+        assert just_over["rejected"]["a"] is False, f"family {family}"

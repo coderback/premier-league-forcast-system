@@ -948,6 +948,7 @@ def run_compare(
     big_six: tuple[str, ...],
     cache_dir: "Path | None" = None,
     tiers: pd.DataFrame | None = None,
+    family_size: int | None = None,
 ) -> CompareReport:
     """Run every arm over the walk and pair-compare them. The first arm is the baseline.
 
@@ -1022,7 +1023,7 @@ def run_compare(
         )
 
     market_block = _market_block(results, market_probs, covered, outcomes, cfg)
-    fdr = _fdr_block(results, cfg)
+    fdr = _fdr_block(results, cfg, family_size=family_size)
 
     return CompareReport(
         acceptance_rule=cfg.acceptance_rule,
@@ -1330,7 +1331,9 @@ def _market_block(
     return block
 
 
-def _fdr_block(results: Sequence[ArmResult], cfg: Config) -> dict[str, object] | None:
+def _fdr_block(
+    results: Sequence[ArmResult], cfg: Config, *, family_size: int | None = None
+) -> dict[str, object] | None:
     """Benjamini-Hochberg across the family of arms tested in this run.
 
     Uses the DM p-value, which is a genuine two-sided p-value; the bootstrap's ``p_a_better`` is a
@@ -1343,7 +1346,9 @@ def _fdr_block(results: Sequence[ArmResult], cfg: Config) -> dict[str, object] |
     }
     if not p_values:
         return None
-    return metrics.benjamini_hochberg(p_values, alpha=cfg.backtest.fdr_alpha)
+    return metrics.benjamini_hochberg(
+        p_values, alpha=cfg.backtest.fdr_alpha, family_size=family_size
+    )
 
 
 def gate_verdicts(
@@ -1400,9 +1405,15 @@ def gate_verdicts(
             "gate3_family_wise": gate3,
             "gate3_reason": (
                 None if gate3 is None else
-                f"BH-adjusted p = {(report.fdr or {}).get('p_adjusted', {}).get(arm.name, float('nan')):.3f} "
-                f"at alpha {(report.fdr or {}).get('alpha', float('nan')):.2f} "
-                f"across {(report.fdr or {}).get('n_tests', 0)} arm(s)"
+                f"BH-adjusted p = {(report.fdr or {}).get('p_adjusted', {}).get(arm.name, float('nan')):.4f} "
+                f"at alpha {(report.fdr or {}).get('alpha', float('nan')):.4f} "
+                f"across a declared family of "
+                f"{(report.fdr or {}).get('family_size', (report.fdr or {}).get('n_tests', 0))}"
+                + (
+                    f" ({(report.fdr or {}).get('n_tests', 0)} scored here)"
+                    if (report.fdr or {}).get("family_size", 0)
+                    > (report.fdr or {}).get("n_tests", 0) else ""
+                )
             ),
             "gate4_sensitivity": gate4,
             "gate4_reason": (

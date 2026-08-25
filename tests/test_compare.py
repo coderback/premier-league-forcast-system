@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from plmodel.config import load_config
+from plmodel.eval import metrics
 from plmodel.eval.backtest import walk_forward
 from plmodel.eval.compare import (
     ArmResult, ArmSpec, assert_aligned, assert_arms_differ, gate_verdicts, register,
@@ -394,3 +395,39 @@ def test_promoted_teams_are_a_meaningful_share(cfg, real) -> None:
     counts = report.matches["slice_promoted"].value_counts()
     share = counts["involves_promoted"] / counts.sum()
     assert 0.25 <= share <= 0.32
+
+
+def test_a_declared_family_can_flip_gate_three(cfg) -> None:
+    """The pre-commitment has to be enforceable by the machinery, not applied afterwards in prose.
+
+    An arm scored alone clears an uncorrected gate 3. Declared as one of three serial re-scorings —
+    which is what NOTES.md pre-committed for dc-gas — the same p-value fails. If this could only be
+    done by hand, the report would print ACCEPT beside a ledger entry recording reject, which is the
+    "computed, printed, and then ignored" failure the four-gate amendment exists to prevent.
+    """
+    report, sens = _passing(cfg)
+    report.fdr = metrics.benjamini_hochberg({"home-rate": 0.03}, alpha=0.05)
+    assert gate_verdicts(report, sensitivity=sens)["home-rate"]["accepted"] is True
+
+    report.fdr = metrics.benjamini_hochberg({"home-rate": 0.03}, alpha=0.05, family_size=3)
+    verdict = gate_verdicts(report, sensitivity=sens)["home-rate"]
+    assert verdict["gate3_family_wise"] is False
+    assert verdict["accepted"] is False
+    assert "declared family of 3" in verdict["gate3_reason"]
+
+
+def test_the_gate_three_reason_does_not_round_away_its_own_threshold(cfg) -> None:
+    """alpha/3 formatted to two places prints as 0.02, understating how strict the run was."""
+    report, sens = _passing(cfg)
+    report.fdr = metrics.benjamini_hochberg({"home-rate": 0.9}, alpha=0.05, family_size=3)
+    reason = gate_verdicts(report, sensitivity=sens)["home-rate"]["gate3_reason"]
+    assert "0.0500" in reason and "0.02" not in reason
+
+
+def test_a_hand_built_fdr_block_without_a_family_size_still_reports(cfg) -> None:
+    """Reports written before the flag existed must still render their gate-3 reason."""
+    report, sens = _passing(cfg)
+    report.fdr = {"alpha": 0.05, "n_tests": 1, "n_rejected": 0, "threshold": 0.05,
+                  "p_adjusted": {"home-rate": 0.09}, "rejected": {"home-rate": False}}
+    reason = gate_verdicts(report, sensitivity=sens)["home-rate"]["gate3_reason"]
+    assert "declared family of 1" in reason

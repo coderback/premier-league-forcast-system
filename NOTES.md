@@ -4711,3 +4711,206 @@ Three things this leaves in a better place than it found them:
   four gates on m=1. Doing that after seeing this result would be choosing the family size to
   obtain an acceptance, which is the precise failure the pre-commitment was written to prevent. If
   it is ever re-scored, the family must be fixed before the run and the α/4 pre-commitment honoured.
+
+---
+
+## 2026-08-25 — PRE-REGISTRATION: gating `dc-gas` at 2555, the configuration nobody has scored
+
+*Written before either run. Nothing below is a new measurement; it is the record of what has already
+been scored, what has not, and the threshold that binds before a number exists.*
+
+### What is being gated, and why it is not the thing already accepted
+
+`dc-gas` is the only arm in ten to have been accepted, and it is still unwired. The configuration
+the project decided to adopt has **never been scored on the test span**:
+
+| scoring | recursion | half-life | test-span delta | DM p |
+|---|---|---|---|---|
+| original | K=0.03, B=0.99, e=1.0 | 2555 | −0.0019 [−0.0032, −0.0005] | **0.011** |
+| retuned | K=0.025, B=0.995, e=1.5 | 7300 | −0.0013 [−0.0026, −0.0000] | **0.065** |
+| **retuned** | **K=0.025, B=0.995, e=1.5** | **2555** | **never run** | — |
+
+The two scored rows differ in **both** the recursion and the half-life, so the untested cell is
+genuinely unconstrained rather than an interpolation between them.
+
+`config.yaml` has been moved to 2555 to match the adoption decision of 2026-08-21, and stays there
+whatever the verdict: a rejected gate means it does not get *wired*, not that 7300 returns. Two
+consequences, recorded rather than discovered — it also moves `dc-gas-decay`'s team memory, so
+yesterday's factorial numbers for that arm were measured at 7300 and are not reproducible without
+this note; and it invalidates the walk cache, so both spans re-walk from scratch.
+
+### The threshold, and the machinery that now enforces it
+
+The pre-commitment of 2026-08-21 binds: `dc-gas`'s three test-span scorings count as **one family
+of three, so gate 3's threshold is α/3 = 0.0167**.
+
+That number could not previously be reached by the harness — gate 3 corrects across the arms in one
+run, and a single candidate gives m = 1 and α = 0.05. The report would have printed `gate3 pass`
+beside a ledger entry recording reject: a multiplicity correction computed, printed and then
+overridden in prose, which is the exact failure the four-gate amendment exists to prevent.
+
+`benjamini_hochberg` now takes a `family_size`, `pl compare` takes `--family-size`, and the declared
+family lands in the report next to the verdict it produced. **It can only ever tighten** — a family
+smaller than the tests supplied raises rather than clamping, because a knob that could loosen a
+correction is a knob for buying an acceptance.
+
+This is not a rule change. The rule already says *"survives Benjamini-Hochberg across its own
+pre-registered family of arms"*; a serial family is still that family, and the amendment entry named
+the missing machinery as a known hole the same day it was written.
+
+### The disclosure that travels with this run
+
+The tie-break that chose 2555 was **not blind**, and said so at the time:
+
+> I knew the test-span ordering before proposing this tie-break, so it is not blind and the ledger
+> should say so. […] The criterion was not chosen to favour 2555; it was already in hand, and 2555
+> is where it points.
+
+The defence is reasonable — the goal-rate criterion was measured on the *production* model for an
+unrelated reason and was already in hand. But it remains true that 2555 was selected knowing the
+original recursion had scored better there than the retuned one did at 7300. **A pass here deserves
+less credit than a blind one would**, and it is half the reason the α/3 pre-commitment exists.
+
+### Prediction, recorded to be scored later
+
+**DM p between 0.011 and 0.065, and I put ~35% on it clearing 0.0167.**
+
+The tie-break found 2555 and 7300 RPS-identical *on the tuning span* — but that is the window where
+home advantage is flat (+0.3215 → +0.3217 across seven years). On the test decade it falls 0.094, so
+a shorter level memory should be worth more there than the tuning span could possibly have shown.
+That is the mechanism for it to land on the good side, and it is why the run is worth its compute
+rather than a formality.
+
+Against it: the retune degraded the test span once already (−0.0019 → −0.0013), and only part of
+that is attributable to the half-life. If the recursion change is what cost the margin, 2555 will
+not recover it.
+
+**Point estimate −0.0016, and the honest note that a delta of −0.0016 is roughly where DM p lands at
+0.02 — just the wrong side of the threshold.** That is the single most likely outcome.
+
+### What a pass does and does not license
+
+Not wiring, today. The 2026-08-21 entry records a prerequisite a passing gate does not clear:
+
+> **The season simulator is untested under `dc-gas`.** It refuses a non-production fit today. Home
+> advantage enters all 380 fixtures, so it must be measured there before the simulator ships on it.
+
+Wiring also moves the baseline every future arm is measured against and needs `ADOPTED_SEAMS` and
+the seam tests changed in the same commit. A pass ends the *question*; the wiring is its own task.
+
+### Protocol
+
+Sensitivity span first, then the test span with `--against-span` pointing at it — gate 4 is `None`
+without it and a run that cannot evaluate it accepts nothing.
+
+```
+pl compare --arms dixon-coles,dc-gas --family-size 3 --sensitivity --out gas2555_sens.json
+pl compare --arms dixon-coles,dc-gas --family-size 3 --against-span output/gas2555_sens.json \
+           --out gas2555_test.json
+```
+
+---
+
+## 2026-08-25 — RESULT: `dc-gas` at 2555 is REJECTED, and the pre-commitment never had to bite
+
+**Test span (the gate), 2016-17..2025-26, 3,800 matches over 1,153 barriers:**
+
+```
+arm                   RPS  log loss   skill  draw res  vs market   vs baseline
+dixon-coles        0.2005    0.9718   16.1%   0.00202    +0.0082   (baseline)
+dc-gas             0.1992    0.9682   16.7%   0.00195    +0.0067   -0.0013 [-0.0026, -0.0001] P=0.981
+```
+
+**Sensitivity span:** `dc-gas 0.1961  −0.0006 [−0.0016, +0.0005]  P=0.849`.
+
+```
+gate1 pass   95% CI excludes 0
+gate2 pass   market gap +0.0082 -> +0.0067
+gate3 FAIL   DM p 0.0513, BH-adjusted 0.1538 across a declared family of 3 (1 scored here)
+gate4 pass   sensitivity P(better) = 0.849
+```
+
+**Three of four, and it fails on the multiplicity correction — but not because of it.** The raw DM
+p-value is **0.0513**, which is above 0.05 on its own. The pre-committed α/3 = 0.0167 would have
+rejected it; it never had to. **`dc-gas` at 2555 fails gate 3 at any family size**, so no argument
+about how the family was drawn can rescue it, and none is needed.
+
+That is worth the relief it deserves. The whole apparatus built this morning — `family_size` on the
+BH correction, `--family-size` on the CLI — turned out not to decide the verdict. Machinery whose
+first live use is to confirm a conclusion reached without it is machinery you can trust the next
+time it *is* load-bearing.
+
+### The half-life was never the problem. The retune was.
+
+All three configurations of this arm are now scored on the test span:
+
+| recursion | half-life | delta | DM p | sensitivity P | market gap |
+|---|---|---|---|---|---|
+| original K=0.03, B=0.99, e=1.0 | 2555 | **−0.0019** | **0.011** | 0.927 | +0.0061 |
+| retuned K=0.025, B=0.995, e=1.5 | 7300 | −0.0013 | 0.065 | 0.757 | +0.0068 |
+| retuned K=0.025, B=0.995, e=1.5 | **2555** | −0.0013 | 0.0513 | 0.849 | +0.0067 |
+
+Read the bottom two rows against each other: moving the half-life 7300 → 2555 improved the DM
+p-value (0.065 → 0.0513), the sensitivity lean (0.757 → 0.849) and the market gap, and left the
+point estimate **exactly where it was**. The tie-break was worth making and it bought real
+robustness — it just could not buy significance.
+
+Now read the top two rows. **Same half-life, different recursion: −0.0019 at p=0.011 becomes
+−0.0013 at p=0.0513.** The entire loss of margin is the recursion retune. Not the memory, which two
+entries and a tie-break went looking at, and not the era.
+
+### The dilemma this leaves, stated rather than resolved
+
+The original recursion at 2555 would clear **all four gates** — gate 1 on a CI excluding zero, gate 2
+on a market gap of +0.0061, gate 3 at p = 0.011 against the pre-committed 0.0167, gate 4 at P=0.927.
+
+It cannot be chosen. The retune entry said why before any of this was measured:
+
+> Choosing between them on test-span evidence would be selecting a hyperparameter against the
+> acceptance instrument, which is the one thing this project forbids outright.
+
+The retuned recursion won the tuning span (0.19806 → 0.19780) by coordinate cycles run to
+convergence, with every axis interior. That is the protocol working exactly as designed, and it
+selected the configuration that loses on the instrument. **A tuning window can be honest and still
+be wrong**, and there is no legitimate move from here that recovers the better arm — reverting to
+the original recursion now would be selecting on the test span, and knowing that it would pass is
+precisely what makes reverting forbidden rather than merely inadvisable.
+
+This is the second time in two days the tuning span has chosen against the test span: per-parameter
+decay's home-advantage axis moved the wrong way because the phenomenon is absent from 1996-2006,
+and here the recursion retune improved the tuning window and cost the gate. Different mechanisms,
+same shape. The tuning span is 1,303 matches; the test span is 3,800. **A selection made on a third
+of the data will sometimes point the wrong way, and the protocol has no way to notice.**
+
+### Scoring the predictions
+
+| prediction | outcome |
+|---|---|
+| DM p between 0.011 and 0.065 | **right** — 0.0513 |
+| ~35% on clearing 0.0167 | it did not; leaning against was correct |
+| point estimate −0.0016 | **wrong** — −0.0013, unchanged from 7300 |
+| "most likely outcome is a delta near −0.0016 landing just the wrong side" | right in shape, wrong in size |
+
+The miss is instructive. I predicted the half-life move would improve the point estimate and it did
+not move it at all — every gain went into the *variance* of the comparison (DM p, sensitivity lean)
+rather than its centre. That is what a better-calibrated level memory should do, and I had the
+mechanism right while attributing it to the wrong statistic.
+
+### Production status, and the question this closes
+
+Unchanged. `model.seams.dynamics.enabled` stays `false`.
+
+`config.yaml` now carries **2555**, matching the adoption decision of 2026-08-21 and ending the
+inconsistency where config and ledger disagreed. It stays there: a rejected gate means the
+configuration does not get wired, not that 7300 returns. Note this also moves `dc-gas-decay`'s team
+memory, so yesterday's factorial numbers for that arm were measured at 7300 and are not reproducible
+without this entry.
+
+**The wiring question is closed.** It has been open since 2026-08-21 and the answer is no: no
+configuration of `dc-gas` that this project is permitted to choose passes the four-gate rule. The
+arm remains accepted under the two-gate rule in force when it was run — rules are prospective and
+that entry stands — and it remains unwired.
+
+Ten arms, one acceptance under a rule that has since been tightened, and nothing in production but
+the model that was there at the start. That is not a comfortable sentence to write, and it is the
+one the evidence supports.

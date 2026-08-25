@@ -272,14 +272,27 @@ model:
       # variation, so inheriting model.decay_half_life_days would make the comparison a test of
       # whose hyperparameter happened to suit whom, exactly as it would have for elo-dc.
       #
-      # Read this as "long, and barely identified above 2555" rather than as 7300 exactly: the
-      # tuning curve reads 0.19781 at 2555, 0.19780 at 5475, 0.19780 at 7300 and 0.19801 at no
-      # decay at all. 7300 is the grid winner and is taken for that reason alone. Interior.
+      # The tuning curve is flat above 2555 — 0.19781 at 2555, 0.19780 at 5475, 0.19780 at 7300 —
+      # so RPS alone could not choose, and 7300 shipped for a while as the bare grid winner.
       #
-      # The contrast that makes this more than a number: at 7300 days the STATIC model scores
+      # BROKEN ON A SECOND TUNING-SPAN CRITERION, 2026-08-21. With only the level's memory varied,
+      # 2555 and 7300 are RPS-identical to five decimal places and 2555's home/away calibration is
+      # 43% better:
+      #
+      #   half-life      RPS   total err   home err   away err   split gap
+      #         730  0.20373      -1.51%     -1.47%     -1.57%      0.11%
+      #        2555  0.20338      -1.49%     -1.36%     -1.68%      0.33%
+      #        7300  0.20338      -1.47%     -1.23%     -1.81%      0.58%
+      #
+      # The split gap is monotone in the memory, which is what a level half-life inheriting a
+      # drifting home advantage looks like. A tie needs a tie-break and any criterion measured on
+      # the tuning span is protocol-legal. 730 is not a candidate: it costs 0.00035 of RPS,
+      # comparable to the whole arm's effect.
+      #
+      # The contrast that makes this more than a number: at a long memory the STATIC model scores
       # 0.20264 against its own 0.20048 at 730 — a longer memory HURTS it, and by more the longer
       # it gets. The same memory helps the dynamic one. The states are what make old data usable.
-      half_life_days: 7300
+      half_life_days: 2555
     # Second observation channel, log-pooled with goals. `channels: [goals]` is off.
     observation:
       channels: [goals]

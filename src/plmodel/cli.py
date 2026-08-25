@@ -161,12 +161,24 @@ def cmd_compare(args: argparse.Namespace) -> int:
 
         span = SeasonSpan(args.first_season or span.first_season,
                           args.last_season or span.last_season)
+    # A declared family can only be larger than the arms actually run. Refused rather than
+    # clamped: asking for a smaller one means somebody has misunderstood which tests are being
+    # corrected across, and quietly widening the bar would be the one direction this flag must
+    # never move.
+    candidates = len(arm_names) - 1
+    if args.family_size is not None and args.family_size < candidates:
+        print(f"--family-size {args.family_size} is smaller than the {candidates} candidate "
+              f"arm(s) in this run; a declared family cannot be smaller than the tests it "
+              f"corrects across", file=sys.stderr)
+        return 2
+
     splits = _build_splits(cfg, matches, span=span)
     report = run_compare(
         matches, splits, cfg, arm_names,
         history=corpus[corpus["division"] == cfg.backtest.prediction_division],
         n_bins=cfg.audit.calibration_bins,
         big_six=cfg.audit.big_six,
+        family_size=args.family_size,
     )
 
     sensitivity = _sensitivity_deltas(args.against_span)
@@ -961,6 +973,9 @@ def build_parser() -> argparse.ArgumentParser:
     pcmp.add_argument("--against-span", default=None,
                       help="a report from the other span, supplying the rule's fourth gate")
     pcmp.add_argument("--out", default=None, help="report filename within the output directory")
+    pcmp.add_argument("--family-size", type=int, default=None,
+                      help="declare a pre-registered family LARGER than this run's arms, for an "
+                           "arm re-scored serially across configurations; tightens gate 3 only")
     pcmp.set_defaults(func=cmd_compare)
 
     pf = sub.add_parser("fit", help="fit the production model and dump its parameters")

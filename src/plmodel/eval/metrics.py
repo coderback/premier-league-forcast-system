@@ -286,11 +286,27 @@ def paired_delta_losses(
     }
 
 
-def benjamini_hochberg(p_values: dict[str, float] | np.ndarray, *, alpha: float) -> dict:
+def benjamini_hochberg(
+    p_values: dict[str, float] | np.ndarray, *, alpha: float, family_size: int | None = None
+) -> dict:
     """Benjamini-Hochberg FDR control across a family of arms.
 
     ``alpha`` is required, not defaulted: the false-discovery rate the project is willing to
     tolerate is a decision that belongs in config.yaml, not in a function signature.
+
+    ``family_size`` declares a family LARGER than the p-values supplied, for the case where one
+    arm is re-scored serially across configurations rather than compared against siblings in a
+    single run. The rule already speaks of "its own pre-registered family of arms"; a serial family
+    is still that family, and without this the correction can only see one run at a time.
+
+    It enters the step-up denominator and the adjusted p-values, never the array shapes: the ranks
+    remain those of the p-values actually supplied, because the absent members of the family are
+    not being tested here -- they only inflate the denominator. Defaults to the number supplied, so
+    every existing caller is unchanged.
+
+    **It can only ever make the bar stricter.** A declared family smaller than the tests supplied
+    raises, because a knob that could loosen the correction would be a knob for buying an
+    acceptance, which is the exact failure the pre-commitments in NOTES.md exist to prevent.
 
     Testing many candidate features against one backtest without correction is the norm in this
     literature and is how a two-gate rule eventually passes a false positive by chance. With ~25
@@ -313,17 +329,23 @@ def benjamini_hochberg(p_values: dict[str, float] | np.ndarray, *, alpha: float)
         raise ValueError("p-values must lie in [0, 1]")
 
     m = raw.size
+    declared = m if family_size is None else int(family_size)
+    if declared < m:
+        raise ValueError(
+            f"family_size {declared} is smaller than the {m} p-value(s) supplied; a declared "
+            "family cannot be smaller than the tests actually run"
+        )
     order = np.argsort(raw, kind="stable")
     ranked = raw[order]
     ranks = np.arange(1, m + 1, dtype=float)
 
-    # Step-up: the largest k with p_(k) <= k/m * alpha; everything up to it is rejected.
-    below = ranked <= ranks / m * alpha
+    # Step-up: the largest k with p_(k) <= k/declared * alpha; everything up to it is rejected.
+    below = ranked <= ranks / declared * alpha
     n_reject = int(np.max(np.nonzero(below)[0]) + 1) if below.any() else 0
     threshold = float(ranked[n_reject - 1]) if n_reject else 0.0
 
     # Adjusted p-values, enforced monotone non-decreasing from the largest rank downwards.
-    adjusted_sorted = np.minimum.accumulate((ranked * m / ranks)[::-1])[::-1]
+    adjusted_sorted = np.minimum.accumulate((ranked * declared / ranks)[::-1])[::-1]
     adjusted_sorted = np.clip(adjusted_sorted, 0.0, 1.0)
     adjusted = np.empty_like(adjusted_sorted)
     adjusted[order] = adjusted_sorted
@@ -334,6 +356,9 @@ def benjamini_hochberg(p_values: dict[str, float] | np.ndarray, *, alpha: float)
     out: dict[str, object] = {
         "alpha": float(alpha),
         "n_tests": int(m),
+        # The family the correction was applied across, which is `n_tests` unless a run declared a
+        # larger one. Reported so the declared family sits next to the verdict it produced.
+        "family_size": int(declared),
         "n_rejected": n_reject,
         "threshold": threshold,
     }
