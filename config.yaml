@@ -427,6 +427,39 @@ model:
     # The two axes are separate on purpose. The published model (Boshnakov, Kharrat & McHale 2017)
     # moves both at once, and this project has already paid once for reading a two-axis result as
     # if it were one -- see the score-driven arm, which had to be decomposed after the fact.
+    # A prior for newly promoted clubs (model/promotion.py). Off means no penalty is built and no
+    # pinned map exists, so the fit takes exactly today's path and the walk is byte-identical.
+    #
+    # The problem this addresses is measured, not suspected. Below model.min_effective_share a club
+    # is dropped from the fit and scored at attack = defence = 0 -- the league average -- and
+    # TWELVE OF THE THIRTY promoted clubs since 2016-17 land there. The other eighteen are fitted
+    # on a median of 26.7 effective matches against an established club's 102.7. Meanwhile a
+    # promoted club's first season actually returns 34.4 points against 52.6, 0.996 goals for
+    # against 1.348 and 1.763 against against 1.348. The model is not uninformed about these clubs,
+    # it systematically overrates them, on 28% of every season's fixtures.
+    #
+    # Four arms have pointed here: arm 1's Elo synthesis, arm 6's European flag (which turned out
+    # to be group shrinkage), arm 8's multi-tier fit (which made promoted clubs WORSE), and the
+    # season simulator, whose preseason relegation forecast for them is 0.446 against 0.533
+    # observed.
+    promotion:
+      enabled: false
+      # Ridge coefficient pulling a FITTED promoted club's attack and defence toward the estimated
+      # promoted level. Not weighted per team: the likelihood's own curvature already scales with a
+      # club's effective sample size, so a data-rich club barely moves and a thin one moves a lot.
+      # That is the wanted behaviour at the cost of one knob rather than two.
+      #
+      # WEAK-EVIDENCE: placeholder, NOT yet tuned. To be selected on backtest.tuning_span and to
+      # face the resolution rule against shrinkage = 0, which is what the seam being off means.
+      shrinkage: 1.0
+      # Promoted clubs the training window must hold before a prior is estimated at all. Early in a
+      # walk there is genuinely nothing to learn from, and a prior built from one club is worse
+      # than no prior -- below this the fit behaves exactly as the baseline does.
+      #
+      # WEAK-EVIDENCE: not tuned. Three clubs is one season's intake, the smallest quantity that
+      # is a sample of promoted clubs rather than a description of one club.
+      min_prior_clubs: 3
+
     scoreline:
       marginal: poisson
       dependence: tau

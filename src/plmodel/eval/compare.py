@@ -470,6 +470,52 @@ def _decay_arm(ctx: "ArmContext", *, dynamics: bool) -> np.ndarray:
     return dynamic.predict_proba(ctx.test)
 
 
+@register("dc-promo")
+def _dc_promo(ctx: ArmContext) -> np.ndarray:
+    """The promotion prior: a promoted club scored against promoted clubs, not the league average.
+
+    The baseline drops a club below ``min_effective_share`` from the fit and scores it at attack =
+    defence = 0. Twelve of the thirty promoted clubs since 2016-17 land there, and the league
+    average is wrong for them by about -0.30 in log attack and -0.27 in log solidity, on 28% of
+    every season's fixtures. Four arms have pointed here; this is the first to aim at it directly.
+
+    **From E0 alone.** Arm 8 went after the same clubs with real Championship results and failed
+    backwards, because a pooled fit learns the divisions' gap from the clubs that have played in
+    both and those are the parachute-payment sides. The prior here is estimated from promoted
+    clubs' own top-flight records, per barrier, from training rows only.
+
+    The shrinkage comes from the seam even though the seam ships off, exactly as the decay and
+    dynamics arms read their tuned values from seams whose ``enabled`` is false. ``enabled=True``
+    says "switch it on for this arm" and nothing else.
+    """
+    from plmodel.model.dixon_coles import fit_dixon_coles
+
+    model = ctx.cfg.model
+    promotion = ctx.state.get("promotion")
+    if promotion is None:
+        promotion = model.promotion_spec(enabled=True)
+        if promotion is None:
+            raise ValueError("dc-promo needs model.seams.promotion; the seam block is missing")
+        ctx.state["promotion"] = promotion
+
+    previous = ctx.state.get("fit")
+    if previous is None or ctx.split.is_refit:
+        previous = fit_dixon_coles(
+            ctx.train,
+            half_life_days=model.decay_half_life_days,
+            ref_date=ctx.split.fit_barrier,
+            max_goals=model.max_goals,
+            param_bounds=model.param_bounds,
+            min_effective_share=model.min_effective_share,
+            warm_start=ctx.state.get("fit"),
+            max_iter=model.max_iter,
+            promotion=promotion,
+        )
+        ctx.state["fit"] = previous
+        ctx.state.setdefault("fits", []).append(previous)
+    return previous.predict_proba(ctx.test)
+
+
 @register("dc-decay")
 def _dc_decay(ctx: ArmContext) -> np.ndarray:
     """Per-parameter decay alone: the memory split, with no dynamic states."""

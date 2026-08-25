@@ -64,6 +64,31 @@ def promoted_teams(history: pd.DataFrame, division: str) -> dict[str, set[str]]:
     return out
 
 
+def _seen_before(history: pd.DataFrame, division: str) -> dict[str, set[str]]:
+    """Season -> every club that had appeared in ``division`` in any EARLIER season."""
+    div = history[history["division"] == division]
+    by_season = {
+        season: set(g["home_team"]) | set(g["away_team"])
+        for season, g in div.groupby("season", sort=True)
+    }
+    out: dict[str, set[str]] = {}
+    seen: set[str] = set()
+    for season in sorted(by_season):
+        out[season] = set(seen)
+        seen |= by_season[season]
+    return out
+
+
+def _promoted_kind(row, promoted: set[str], ever_before: set[str]) -> str:
+    sides = [t for t in (row.home_team, row.away_team) if t in promoted]
+    if not sides:
+        return "established_only"
+    # A newcomer on either side dominates: it is the fixture's weakest-known-quantity side.
+    if any(t not in ever_before for t in sides):
+        return "promoted_newcomer"
+    return "promoted_returning"
+
+
 def add_slice_columns(
     rows: pd.DataFrame,
     *,
@@ -82,6 +107,22 @@ def add_slice_columns(
         for r in rows.itertuples(index=False)
     ]
     out["slice_promoted"] = np.where(is_promoted, "involves_promoted", "established_only")
+
+    # A finer read of the same fixtures, for the promotion-prior arm. That seam applies at two
+    # sites -- a pin for clubs the fit could not identify at all, a ridge penalty for promoted
+    # clubs that ARE fitted -- and this says which site a delta came from without spending a second
+    # arm on the question.
+    #
+    # A PROXY, and named as one: which clubs a fit pinned depends on decay-weighted history at each
+    # barrier and is not knowable from the match frame. "Has this club ever appeared in this
+    # division before this season" is the observable that tracks it most closely -- a club arriving
+    # for the first time is certain to be pinned, a club returning from a previous spell usually is
+    # not. Read it as "which kind of promoted club", not as a readout of the fit's own decision.
+    ever_before = _seen_before(history, division)
+    out["slice_promoted_kind"] = [
+        _promoted_kind(r, promoted.get(r.season, set()), ever_before.get(r.season, set()))
+        for r in rows.itertuples(index=False)
+    ]
 
     six = set(big_six)
     n_big = rows["home_team"].isin(six).astype(int) + rows["away_team"].isin(six).astype(int)
@@ -116,7 +157,8 @@ def add_slice_columns(
 
 
 SLICE_COLUMNS: tuple[str, ...] = (
-    "season", "slice_promoted", "slice_big_six", "slice_favourite", "slice_staleness",
+    "season", "slice_promoted", "slice_promoted_kind", "slice_big_six", "slice_favourite",
+    "slice_staleness",
 )
 
 

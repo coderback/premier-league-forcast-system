@@ -70,6 +70,13 @@ from plmodel.model.counts import (
 from plmodel.model.covariates import CovariateSpec
 from plmodel.model.covariates import design as cov_design_matrix
 from plmodel.model.decay import BlockLayout, DecaySpec, block_weights, fit_blockwise
+from plmodel.model.promotion import (
+    PromotionPrior,
+    PromotionSpec,
+    estimate_prior,
+    penalty_and_gradient,
+    promoted_at_barrier,
+)
 from plmodel.model.home_advantage import MODE_GLOBAL as HA_GLOBAL
 from plmodel.model.home_advantage import design as ha_design_matrix
 from plmodel.model.home_advantage import prediction_design
@@ -147,12 +154,33 @@ class DixonColesFit:
     # downstream reader of that field cares about.
     decay: DecaySpec | None = None
     decay_diagnostics: dict[str, float] = field(default_factory=dict)
+    # Promotion prior (model.seams.promotion). None IS the production model, and when
+    # `promotion_prior` is None every club outside `teams` falls back to 0.0 -- the league average
+    # -- exactly as it always has.
+    promotion: PromotionSpec | None = None
+    promotion_prior: PromotionPrior | None = None
     # Mutable on purpose: prediction-time observations that the fit itself cannot know, such
     # as how often rho had to be clamped for an extreme matchup. Surfaced in the report.
     diagnostics: dict[str, int] = field(default_factory=dict)
 
     def _index(self) -> dict[str, int]:
         return {team: i for i, team in enumerate(self.teams)}
+
+    def _pinned(self, teams: pd.Series, slot: int) -> float:
+        """Fallback strength for clubs outside the fit: 0, or the promotion prior where there is one.
+
+        Returns the scalar 0.0 when the seam is off, so ``np.where`` broadcasts exactly the literal
+        it broadcast before this seam existed and the off path stays byte-identical.
+
+        One value for every unidentified club rather than a per-club lookup, and that is the design
+        rather than a shortcut: a club the fit could not identify has no evidence to tell it apart
+        from any other such club, so giving them different pins would be inventing information. It
+        also means a club arriving with zero top-flight rows -- absent from the fit's team list
+        entirely, never even reaching the cold-start test -- is covered by the same line.
+        """
+        if self.promotion_prior is None:
+            return 0.0
+        return (self.promotion_prior.attack, self.promotion_prior.defence)[slot]
 
     def _ha_adjustment(self, dates: pd.Series | None, n_rows: int) -> np.ndarray:
         """Structural home-advantage contribution for rows being predicted.
@@ -210,14 +238,19 @@ class DixonColesFit:
         self, home: pd.Series, away: pd.Series, dates: pd.Series | None = None,
         *, context: tuple[np.ndarray, np.ndarray] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
-        """Expected goals for each side. Unknown teams take the league average."""
+        """Expected goals for each side. Unknown teams take the league average, or the prior.
+
+        "Unknown" here means a club the fit dropped as cold-start. It takes 0 -- the league average
+        -- unless the promotion seam supplied a prior for it, which is the only way to reach the
+        twelve of thirty promoted clubs that are not parameters of the fit at all.
+        """
         idx = self._index()
         home_i = np.array([idx.get(t, -1) for t in home])
         away_i = np.array([idx.get(t, -1) for t in away])
-        a_home = np.where(home_i >= 0, self.attack[home_i], 0.0)
-        a_away = np.where(away_i >= 0, self.attack[away_i], 0.0)
-        d_home = np.where(home_i >= 0, self.defence[home_i], 0.0)
-        d_away = np.where(away_i >= 0, self.defence[away_i], 0.0)
+        a_home = np.where(home_i >= 0, self.attack[home_i], self._pinned(home, 0))
+        a_away = np.where(away_i >= 0, self.attack[away_i], self._pinned(away, 0))
+        d_home = np.where(home_i >= 0, self.defence[home_i], self._pinned(home, 1))
+        d_away = np.where(away_i >= 0, self.defence[away_i], self._pinned(away, 1))
         ha = self._ha_adjustment(dates, len(a_home))
         cov_lam, cov_mu = context if context is not None else (0.0, 0.0)
         log_lam = np.clip(self.intercept + self.home_advantage + ha + cov_lam + a_home - d_away,
@@ -391,8 +424,15 @@ def _objective(
     ha_design: np.ndarray,
     cov_lam_design: np.ndarray,
     cov_mu_design: np.ndarray,
+    penalty: tuple[np.ndarray, "PromotionPrior", float] | None = None,
 ) -> tuple[float, np.ndarray]:
-    """Weighted negative log-likelihood and its analytic gradient."""
+    """Weighted negative log-likelihood and its analytic gradient.
+
+    ``penalty`` is the promotion seam's ridge term, or None. Last in the signature and defaulting
+    to None so that every existing caller -- the production solve, the decay seam's block cycles,
+    and the gradient tests -- is untouched, and so that with the seam off the only difference is one
+    identity check against None.
+    """
     n_ha = ha_design.shape[1]
     n_cov = cov_lam_design.shape[1]
     c, h, rho, attack, defence, ha, cov = _unpack(theta, n_teams, n_ha, n_cov=n_cov)
@@ -450,7 +490,24 @@ def _objective(
         start = _N_GLOBAL + 2 * free + n_ha
         grad[start: start + n_cov] = cov_lam_design.T @ g_lam + cov_mu_design.T @ g_mu
 
-    return -total, -grad
+    value, out = -total, -grad
+    if penalty is not None:
+        promoted_mask, prior, shrinkage = penalty
+        pen, d_pen_attack, d_pen_defence = penalty_and_gradient(
+            attack, defence, promoted_mask, prior, shrinkage
+        )
+        if pen:
+            # The penalty ADDS to the negative log-likelihood, so its gradient adds too -- no sign
+            # flip here, unlike the likelihood block above which is negated on the way out.
+            value += pen
+            # Same sum-to-zero transform the likelihood gradient uses twenty lines up, and for the
+            # same reason: the last team's parameter is minus the sum of the free ones, so a
+            # penalty on the last team's strength is felt by every free parameter. Penalising a
+            # promoted club that happens to land in the last slot is not a special case, it is the
+            # case most likely to be got wrong, which is why the gradient test targets it.
+            out[_N_GLOBAL: _N_GLOBAL + free] += d_pen_attack[:free] - d_pen_attack[-1]
+            out[_N_GLOBAL + free: _N_GLOBAL + 2 * free] += d_pen_defence[:free] - d_pen_defence[-1]
+    return value, out
 
 
 def _family_globals(theta: np.ndarray, family: CountSpec, n_family: int) -> tuple[float, float]:
@@ -680,6 +737,7 @@ def fit_dixon_coles(
     covariates: CovariateSpec | None = None,
     cov_division: str = "",
     decay: DecaySpec | None = None,
+    promotion: PromotionSpec | None = None,
 ) -> DixonColesFit:
     """Fit the model on a training frame, weighted toward ``ref_date``.
 
@@ -694,6 +752,10 @@ def fit_dixon_coles(
         # The context terms count back through the calendar, so they need the columns that say
         # which calendar a row belongs to. Asked for explicitly rather than filled in.
         required |= {"season", "division", "played"}
+    if promotion is not None:
+        # The prior is estimated per season, so the seam needs to know which season a row is in.
+        # Asked for explicitly rather than filled in, exactly as the covariates are.
+        required |= {"season"}
     missing = required - set(history.columns)
     if missing:
         raise ValueError(f"history missing columns: {sorted(missing)}")
@@ -725,6 +787,25 @@ def fit_dixon_coles(
             f"only {len(teams)} team(s) clear {min_effective_share:.0%} of the median team's "
             f"effective history ({threshold:.2f}); the fit would be unidentified"
         )
+
+    # --- promotion prior (model.seams.promotion) ---------------------------------------------
+    # Estimated from the SAME decay weights the strength parameters use, so the prior carries the
+    # same memory as the thing it is applied to and tracks the drift in promoted clubs' standard
+    # without a second half-life to tune.
+    prior = None
+    penalty = None
+    if promotion is not None:
+        if family is not None:
+            raise ValueError(
+                "the promotion seam and an alternative scoreline family are not implemented "
+                "together; _objective_family carries no penalty term"
+            )
+        prior = estimate_prior(history, weights, min_prior_clubs=promotion.min_prior_clubs)
+    if prior is not None:
+        # Site A, the pin, is carried by `prior` itself and applied in `DixonColesFit._pinned`.
+        # Site B, the shrink. Only clubs that ARE parameters can be penalised.
+        promoted_mask = np.array([t in set(prior.teams) for t in teams], dtype=bool)
+        penalty = (promoted_mask, prior, promotion.shrinkage)
 
     # Cold-start teams keep the league-average strength of 0 and are dropped from the fit sample,
     # so they neither absorb nor distort the parameters of the teams that are identified.
@@ -815,7 +896,7 @@ def fit_dixon_coles(
             BlockLayout(n_teams=n_teams, n_ha=len(ha_names), total=len(theta0)),
             objective=_objective,
             args_without_weights=(x, y, home_i, away_i, lgamma_x, lgamma_y, n_teams,
-                                  ha_design, cov.lam, cov.mu),
+                                  ha_design, cov.lam, cov.mu, penalty),
             weights_position=_WEIGHTS_ARGUMENT_POSITION,
             max_iter=max_iter,
         )
@@ -833,7 +914,7 @@ def fit_dixon_coles(
             _objective,
             theta0,
             args=(x, y, home_i, away_i, weights, lgamma_x, lgamma_y, n_teams, ha_design,
-                  cov.lam, cov.mu),
+                  cov.lam, cov.mu, penalty),
             method="L-BFGS-B",
             jac=True,
             bounds=bounds,
@@ -890,6 +971,8 @@ def fit_dixon_coles(
         converged=bool(result.success),
         n_iterations=int(result.nit),
         cold_start_teams=cold,
+        promotion=promotion,
+        promotion_prior=prior,
         ha_names=tuple(ha_names),
         ha_params=tuple(float(v) for v in ha),
         ha_mode=ha_mode,

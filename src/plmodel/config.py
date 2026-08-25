@@ -18,6 +18,7 @@ import yaml
 
 from plmodel.model.counts import CountSpec
 from plmodel.model.decay import DecaySpec
+from plmodel.model.promotion import PromotionSpec
 from plmodel.model.covariates import CovariateSpec
 
 # Repo root = three levels up from this file (src/plmodel/config.py -> repo root).
@@ -105,6 +106,7 @@ class ModelConfig:
             and list(s.get("tiers", ["E0"])) == ["E0"]
             and self._scoreline_spec().is_inert
             and not (s.get("decay") or {}).get("enabled", False)
+            and not (s.get("promotion") or {}).get("enabled", False)
         )
 
     def decay_spec(self, *, enabled: bool | None = None) -> DecaySpec | None:
@@ -126,6 +128,27 @@ class ModelConfig:
             return None
         spec = DecaySpec.from_seam(seam, fallback_half_life=self.decay_half_life_days)
         return None if spec.is_inert else spec
+
+    def promotion_spec(self, *, enabled: bool | None = None) -> PromotionSpec | None:
+        """The configured promotion prior, or None when the seam is off.
+
+        None rather than a zero-shrinkage spec, and here that is load-bearing rather than stylistic:
+        the seam has two independent sites, and at ``shrinkage = 0`` the penalty vanishes while a
+        cold-start club is still scored at the prior instead of at league average. So "off" cannot
+        be expressed as a value, only as absence, and this is the one place that decides it.
+
+        ``enabled`` lets a comparison arm ask for the seam without rewriting the config, exactly as
+        ``decay_spec`` does -- the tuned shrinkage still comes from here, so the arm and production
+        can never disagree about what the value is, only about whether it is switched on.
+        """
+        seam = self.seams.get("promotion") or {}
+        live = seam.get("enabled", False) if enabled is None else enabled
+        if not live:
+            return None
+        return PromotionSpec(
+            shrinkage=float(seam["shrinkage"]),
+            min_prior_clubs=int(seam["min_prior_clubs"]),
+        )
 
     def covariate_spec(
         self, *, terms: tuple[str, ...] | None = None, mode: str | None = None
