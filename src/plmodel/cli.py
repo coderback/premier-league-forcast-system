@@ -524,10 +524,20 @@ def cmd_live(args: argparse.Namespace) -> int:
         print("nothing was written (--dry-run).")
         return 0
 
-    frozen = freeze_matchday(
-        fixtures, played, cfg, ledger_dir,
-        arm_names=[a.strip() for a in args.arms.split(",") if a.strip()],
-    )
+    try:
+        frozen = freeze_matchday(
+            fixtures, played, cfg, ledger_dir,
+            arm_names=[a.strip() for a in args.arms.split(",") if a.strip()],
+        )
+    except FileExistsError:
+        # Already frozen for this barrier. The refusal to overwrite is the whole guarantee and
+        # stays, but it is a normal outcome rather than a fault: this command is meant to be run
+        # on a daily cadence, and most days the next matchday is one somebody already froze.
+        print(f"already frozen for {pd.Timestamp(barrier).date()} - nothing to do.")
+        print(f"  {ledger_dir / f'{pd.Timestamp(barrier).date()}.json'}")
+        print("  a frozen forecast is never rewritten; delete it deliberately if it was wrong, "
+              "and record why.")
+        return 0
     if frozen is None:
         print("no unplayed fixtures in the corpus - nothing to freeze.")
         return 0

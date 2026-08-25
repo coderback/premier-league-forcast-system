@@ -184,3 +184,51 @@ def test_pl_live_freezes_and_commits_in_one_go(repo: Path, monkeypatch) -> None:
     ]
     # And the unrelated refactor from the fixture is still sitting there, uncommitted.
     assert "tracked.py" in git(repo, "status", "--porcelain")
+
+
+def test_a_second_run_on_the_same_barrier_is_a_no_op(repo: Path, monkeypatch) -> None:
+    """Running daily means most runs meet a barrier somebody already froze.
+
+    The refusal to overwrite is the guarantee and stays; surfacing it as a traceback would make a
+    daily cadence unusable, so it is reported and exits clean.
+    """
+    import argparse
+    import dataclasses
+
+    import pandas as pd
+
+    from plmodel import cli
+    from plmodel.config import load_config
+
+    cfg = dataclasses.replace(load_config(), output_dir=repo / "output")
+    history = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-08-01"]), "season": "2026-27", "division": "E0",
+            "home_team": ["Arsenal"], "away_team": ["Chelsea"],
+            "home_goals": [2.0], "away_goals": [1.0], "result": ["H"], "played": [True],
+        }
+    )
+    fixtures = pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2026-08-29"]), "season": "2026-27", "division": "E0",
+            "home_team": ["Everton"], "away_team": ["Arsenal"],
+            "home_goals": [pd.NA], "away_goals": [pd.NA], "result": [None], "played": [False],
+        }
+    )
+    monkeypatch.setattr(cli, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(cli, "_load_corpus", lambda c: (history, history))
+    monkeypatch.setattr(
+        "plmodel.data.football_data.upcoming_fixtures", lambda *a, **k: fixtures
+    )
+    args = argparse.Namespace(
+        config=None, arms="uniform", score=False, dry_run=False, no_feed=True
+    )
+
+    assert cli.cmd_live(args) == 0
+    first = (repo / "output" / "live" / "2026-08-29.json").read_text(encoding="utf-8")
+    head = git(repo, "rev-parse", "HEAD")
+
+    assert cli.cmd_live(args) == 0, "a repeat run must not be an error"
+
+    assert (repo / "output" / "live" / "2026-08-29.json").read_text(encoding="utf-8") == first
+    assert git(repo, "rev-parse", "HEAD") == head, "a repeat run must not add a commit"
