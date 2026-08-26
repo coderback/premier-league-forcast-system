@@ -540,18 +540,30 @@ model:
   # because this project asserts byte-identical output in several places and the WC2026 project was
   # bitten by a forest predicting in nondeterministic chunk order.
   gbm:
-    # SELECTED by coordinate descent cycled to convergence on the tuning span, scored on the
-    # gradient-boosted parent's own walk-forward RPS. Every axis is interior; two of them
-    # (num_leaves, min_data_in_leaf) first won at a grid edge and the grid was extended downward
-    # until they did not, which moved num_leaves from 7 to 5 and improved 0.20125 to 0.20101.
+    # RE-SELECTED 2026-08-26 by coordinate descent cycled to convergence on the CORRECTED tuning
+    # instrument -- 1,018 barriers over 3,800 matches, against the 342 over 1,303 the original
+    # selection saw (see backtest.tuning_min_train_matches). Every axis interior, two cycles, the
+    # second moving nothing.
     #
-    # Read the tuned model for what it is: **five leaves and two hundred small steps is a tree
-    # model asking to do as little as possible.** Capacity in either direction is punished hard --
-    # 31 leaves scores 0.20458 and 800 rounds 0.20206 against the optimum's 0.20101 -- which is
-    # what a model with nothing much to find looks like when it is honestly tuned.
-    n_estimators: 200
+    #   num_leaves        5 -> 3      2 0.20438 | 3 0.20428 | 5 0.20489 | 7 0.20511 | 15 0.20611
+    #   n_estimators    200 -> 400  100 0.20490 | 200 0.20441 | 400 0.20428 | 800 0.20450
+    #   learning_rate    0.05        0.02 0.20451 | 0.05 0.20428 | 0.1 0.20455
+    #   min_data_in_leaf   20        10 0.20450 | 20 0.20428 | 40 0.20436 | 80 0.20455
+    #
+    #   incumbent 0.20472 -> retuned 0.20428
+    #
+    # The original entry read the tuned model as "five leaves and two hundred small steps is a tree
+    # model asking to do as little as possible". The corrected instrument sharpens that rather than
+    # overturning it: FEWER leaves and MORE of them. Capacity per tree is punished harder than
+    # before -- 31 leaves now costs 0.0035 -- while the round count wants doubling.
+    #
+    # The direction was not assumed. The pre-registration recorded the opposite guess as the likely
+    # one and said why it might be wrong: the corrected walk opens in 1996 rather than 2003, so it
+    # does not merely add barriers, it adds barriers where the tree has far less history behind it.
+    # That is what happened, and it is why num_leaves fell.
+    n_estimators: 400
     learning_rate: 0.05
-    num_leaves: 5
+    num_leaves: 3
     min_data_in_leaf: 20
 
   # How each match-context covariate is MEASURED. The seam above says which terms are on; this
