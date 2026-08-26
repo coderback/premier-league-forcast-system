@@ -5613,3 +5613,133 @@ here licenses the prior **for the simulator**, which is a separate consumer with
 bar — and any such split has to be visible in config rather than implied, because a model that is
 one thing when forecasting a match and another when simulating a season is exactly the kind of
 quiet inconsistency this ledger exists to prevent.
+
+---
+
+## 2026-08-26 — RESULT: the promotion prior REJECTS at the simulator gate, and it fixes the calibration while making the forecast worse
+
+One of four declared conditions holds. The arm is rejected, and the reason is the most useful thing
+this project has learned about the promoted clubs: **their error is a mean-calibration error, fixing
+the mean is not fixing the forecast, and I gated on the wrong quantity.**
+
+### The test span, which is the gate
+
+```
+                         n     brier             delta      95% CI (clustered by season)
+promoted clubs         120   0.1580 -> 0.1695   +0.01153   [-0.01750, +0.03893]
+established clubs      680   0.0460 -> 0.0460   -0.00002   [-0.00253, +0.00244]
+
+calibration       mean forecast      actual
+  promoted        0.474 -> 0.523     0.533
+  established     0.093 -> 0.084     0.082
+```
+
+**The calibration target was hit and the Brier got worse.** The mean promoted forecast closes 83% of
+its gap to the observed rate — better than the two thirds predicted — and the promoted-club Brier
+moves the wrong way by +0.0115.
+
+### The four conditions, scored
+
+```
+1  promoted CI excludes zero on test    FAIL   +0.01153 [-0.01750, +0.03893]: wrong sign, includes zero
+2  established clubs not worse          pass   -0.00002
+3  sign holds on the sensitivity span   FAIL   sensitivity -0.00815, test +0.01153: they disagree
+4  calibration moves toward, no overshoot FAIL sensitivity 0.383 -> 0.434 past an actual of 0.400
+```
+
+Condition 4 is worth reading twice. On the sensitivity decade the baseline was *under* by 0.017
+(0.383 against 0.400) and the arm pushes it to 0.434 — **it overshoots into over-prediction**. The
+same fixed dose of shrinkage that was too small on one decade is too large on another, which is
+what a group-level constant does when the group's true level moves.
+
+### Why: the prior moves the wrong clubs
+
+This is the finding, and it took one line to see once the right question was asked:
+
+```
+                        n     mean relegation forecast
+promoted, RELEGATED    64        0.666 -> 0.688      (+0.022)
+promoted, SURVIVED     56        0.254 -> 0.335      (+0.081)
+```
+
+**The prior raises the survivors' relegation probability nearly four times as much as it raises the
+relegated clubs'.** That is precisely backwards for any proper score.
+
+The mechanism is not mysterious. The penalty pulls hardest on the clubs the likelihood constrains
+least, and it pulls every promoted club toward the *same* group mean — so it compresses the promoted
+group toward its centre. A promoted club that is genuinely decent sits furthest above that centre
+and therefore moves furthest. The clubs heading for relegation are already near the prior and barely
+move at all.
+
+Compressing a group toward its mean improves the group's average and destroys the ordering inside
+it. Brier rewards both, so it goes the wrong way.
+
+### What I got wrong, stated plainly
+
+The pre-registration's headline evidence was a **mean** gap — 0.446 forecast against 0.533 observed,
+Brier three to four times worse than everyone else's — and I built a mechanism that fixes means and
+then gated it on a score that also rewards discrimination. The two are different quantities and the
+entry that proposed this treated them as one.
+
+The prediction scoring makes the shape of the error exact:
+
+| prediction | outcome |
+|---|---|
+| promoted Brier −0.015 to −0.030 | **wrong in direction** — +0.0115 |
+| ~60% on the interval excluding zero | it did not; the hedge was right, the sign was not |
+| mean forecast closes ~two thirds of its gap | **right**, and it closed 83% |
+| established between −0.002 and 0.000 | **right** — −0.00002 |
+
+**Both calibration predictions were right and both accuracy predictions were wrong.** That is not a
+coincidence; it is the finding restated. The mechanism does exactly what I said it would do to the
+mean and the opposite of what I assumed would follow for the score.
+
+A note on the baseline number: the pre-registration quoted the ledger's preseason figure of 0.446,
+and the preseason baseline measured here under the `drift` spec is 0.399. The two are different
+slices of the same table and the comparison above uses the one actually measured in this run,
+scored preseason-only against the pre-registered quantity:
+
+```
+preseason only    n=30   brier 0.2853 -> 0.3389   +0.05352   [-0.02014, +0.12237]
+                         mean forecast 0.399 -> 0.474, actual 0.533
+```
+
+Preseason is where the effect should be largest and it is where the damage is largest too, for the
+same reason: the fewer matches played, the less the fit can tell the three promoted clubs apart, and
+the more a group-level constant flattens them onto each other.
+
+### The third era-transfer failure, and the pattern is now clear
+
+Tuning −0.032 with an interval excluding zero, sensitivity −0.008, test +0.012. The arm reverses
+across decades, which is what `dc-gas`'s retune and the per-parameter decay axes both did. Condition
+3 existed for exactly this and fired.
+
+### What is closed and what is not
+
+**The promoted-club problem is not a strength-estimation problem.** Three arms have now attacked it
+by adjusting what the model believes a promoted club is worth — arm 8 with Championship data, arm 11
+with an estimated prior, arm 12 with general shrinkage — and this entry adds the fourth attempt on a
+different instrument. The mean can be fixed. **The ordering cannot, by any of these mechanisms,
+because none of them carries information about which promoted club is the good one.**
+
+That information exists and this project does not have it: which promoted side spent money, kept its
+manager, kept its squad. It is the same missing input Arm 7 is blocked on, arriving from a different
+direction, and it is the honest end of this line.
+
+What remains true and unchanged: promoted clubs' relegation forecasts are badly calibrated in the
+mean, by about six points on the test decade. A consumer who needs the *group* rate right rather
+than the *ranking* right would be better off with the prior on. Nothing in this project needs that,
+so nothing ships.
+
+### Status
+
+`model.seams.promotion.enabled` stays **false**, and the simulator keeps the production fit. No
+config value moves. `run_span`'s `fit_factory` stays — it is the machinery for comparing two models
+on identical barriers, seeds and replicate streams, it is tested, and the next arm that wants a
+simulator gate should not have to build it again.
+
+The family is spent: this is the promotion prior's one evaluation-span scoring. Thirteen arms
+attempted, one accepted under a rule since tightened, nothing in production but the model that was
+there at the start.
+
+654 unit tests pass.
