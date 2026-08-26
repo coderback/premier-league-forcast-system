@@ -5743,3 +5743,95 @@ attempted, one accepted under a rule since tightened, nothing in production but 
 there at the start.
 
 654 unit tests pass.
+
+---
+
+## 2026-08-26 — PRE-REGISTRATION: retuning the GBM on the corrected instrument, and the hazard that comes with it
+
+*Written before any retuning walk was run. The only new number below is the incumbent
+configuration's score on the corrected tuning span, measured to size the job.*
+
+### The hazard, first, because it governs everything else
+
+`backtest.tuning_min_train_matches` repaired an instrument that had been **a third of its documented
+size for the entire project**. Every rejected arm was tuned on the broken one. That is a real reason
+to doubt some rejections — and re-running rejected arms until one passes is a garden of forking
+paths, with the additional problem that **I have already seen all of these results.**
+
+So the constraints are set before the first walk:
+
+* **One arm only.** `gbm` was named as the candidate before this was asked for, in the same message
+  that named the hazard, and that choice is not revisited now that tuning is under way.
+* **A pre-flight gate on the tuning span.** The retuned configuration must beat the incumbent by
+  more than the tuning window's own noise, under the resolution rule, clustered by season. **If it
+  does not, no evaluation span is touched and the family does not grow** — the same discipline that
+  stopped arms 11 and 12, and the reason this can be attempted at all.
+* **Declared family growth.** Arm 5 scored `gbm`, `ens-gbm` and `ens-gbm-half` on both evaluation
+  spans. A re-scoring does not erase those. If the pre-flight resolves, the gate runs at
+  **`--family-size 5`** — the original three plus the two arms a re-scoring would put back on the
+  table. That is a tighter bar than Arm 5 itself faced, which is correct: this is the second look.
+
+### Why `gbm` is the defensible candidate
+
+Not because it came closest. It did not — it lost by +0.00055 on the test span and +0.00068 on the
+sensitivity span, rejecting on both gates on both decades.
+
+**It is the candidate because its hyperparameters have a measured range six times larger than the
+margin it lost by.** The original tuning entry records the spread directly: 31 leaves scores
+0.20458 and 800 rounds 0.20206 against the tuned optimum's 0.20101. That is a **0.0036** range on a
+rejection of **0.00055**. For every other rejected arm the hyperparameters move the answer by less
+than the verdict; for this one a mis-selection is a wholly sufficient explanation of the result.
+
+And this is the arm whose selection the broken instrument would distort most. A half-life is one
+scalar with a flat plateau. A tree ensemble's capacity is exactly the quantity that should scale
+with how much data the search can see, and the search saw a third of what it named.
+
+### What is being tuned, and the direction that is NOT assumed
+
+Four axes, coordinate descent as before, scored on the `gbm` arm's own walk-forward RPS:
+
+```
+                      incumbent   grid
+n_estimators                200   50, 100, 200, 400, 800
+learning_rate              0.05   0.02, 0.05, 0.1
+num_leaves                    5   3, 5, 7, 15, 31
+min_data_in_leaf             20   10, 20, 40, 80
+```
+
+`num_leaves` and `min_data_in_leaf` first won at a grid edge last time and the grid was extended
+downward; both directions are open here.
+
+**The obvious guess is that a bigger scored window supports a bigger model, and that guess may well
+be wrong** — worth stating now rather than discovering later. The corrected walk opens at 1996-08-17
+instead of 2003-01-11, so it does not merely add barriers, it adds barriers where the tree has *far
+less training history behind it*. The instrument may therefore favour a **more** conservative model,
+not a less conservative one. Both readings are live and the grid brackets both.
+
+The incumbent configuration scores **0.20472** on the corrected tuning span. That is not comparable
+to the 0.20101 in the config comment, which was measured on the narrow window; it is the number the
+retune has to beat.
+
+### Prediction, recorded to be scored
+
+**At least one axis moves — 75%.** Selecting four hyperparameters on 342 barriers is a noisy
+business and the repaired instrument has already changed two answers elsewhere in this project (the
+production half-life's grid winner, and the `dc-gas` retune's verdict).
+
+**The pre-flight resolves — 30%.** Everything measured on this corpus in the last week has come in
+below the resolution floor: −0.00059, −0.00030, −0.000303, −0.000591. A hyperparameter retune that
+clears a clustered interval would be the first. Against that, this arm's hyperparameter range really
+is 0.0036, so unlike the shrinkage arms there is genuinely room for a resolvable move.
+
+**If it does reach the gate, `gbm` still fails — 70%.** A retune would have to find more than
+0.00055 of test-span improvement *and* survive a family of five. The honest position is that this is
+a check on whether the rejection was safe, not an attempt to overturn it, and the most likely
+outcome is a confirmed rejection on a better instrument.
+
+### What a pass would and would not mean
+
+It would not mean Arm 5 was wrong. Arm 5's central finding was structural and is untouched by any
+hyperparameter: the **blend weight fitter drives to exactly zero at 91.3% of test-span barriers**,
+and the entire ensemble penalty comes from 9.8% of matches where an early fitter working off ~400
+resolved forecasts put the weight at 1.0. That is a boundary-solution result about the pooling
+instrument, not about the tree. A better GBM might change whether the weight collapses — which
+would be a genuinely new finding — but the collapse itself was never a statement about tuning.
