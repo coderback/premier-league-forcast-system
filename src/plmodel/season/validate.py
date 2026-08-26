@@ -33,6 +33,8 @@ tuning span.
 """
 from __future__ import annotations
 
+from typing import Callable
+
 from dataclasses import dataclass
 
 import numpy as np
@@ -271,13 +273,20 @@ def run_span(
     prob_floor: float,
     deductions: dict[str, dict[str, int]] | None = None,
     progress: bool = False,
+    fit_factory: Callable[[object, pd.DataFrame, pd.Timestamp], object] | None = None,
 ) -> pd.DataFrame:
     """Forecast every barrier of every season under every spec, and score it.
 
     One fit per barrier, shared by every spec: the specs differ in how they propagate uncertainty
     from the fit, and giving each its own fit would let a difference in the optimiser's path show
     up as a difference in calibration.
+
+    ``fit_factory`` replaces :func:`production_fit` for callers comparing two *models* rather than
+    two uncertainty specs -- the promotion-prior arm scores the same barriers, seeds, specs and
+    questions, and differs only in how the fit was built. Default None IS ``production_fit``, so
+    every existing caller is untouched and the production path does not gain an indirection.
     """
+    build_fit = fit_factory if fit_factory is not None else production_fit
     if not specs:
         raise SeasonError("run_span needs at least one spec")
     questions = {tuple(s.questions) for s in specs.values()}
@@ -294,7 +303,7 @@ def run_span(
         for barrier in matchweek_barriers(
             rows, weeks=weeks, fixtures_per_week=fixtures_per_week
         ):
-            fit = production_fit(cfg, matches, barrier.date)
+            fit = build_fit(cfg, matches, barrier.date)
             played = rows[rows["date"] < barrier.date]
             remaining = rows[rows["date"] >= barrier.date]
             for name, spec in specs.items():

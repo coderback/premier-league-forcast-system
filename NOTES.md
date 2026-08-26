@@ -5506,3 +5506,110 @@ in two days, and both times against a mechanism that demonstrably works and simp
 enough.
 
 654 unit tests pass, from 640.
+
+---
+
+## 2026-08-26 — PRE-REGISTRATION: the promotion prior, gated against the season simulator
+
+*Written after the tuning span was read and before either evaluation span was touched. Every number
+below is either from the tuning window — the third window neither evaluation span sees — or from
+measurements already in this ledger.*
+
+### Why the same mechanism gets a second instrument, and why that is not shopping
+
+Arm 11 stopped at the resolution pre-flight: as a **match** forecaster the promoted-club effect is
+−0.00059 on 28% of fixtures, about a third of what 3,800 matches can resolve. Arm 12 then showed
+there is no separate general-shrinkage effect to find — the whole thing is the promoted clubs.
+
+The mechanism was never wrong. It was too small **for that instrument**. The season simulator is a
+different instrument with a much larger error on exactly these clubs:
+
+```
+                 mean relegation forecast    actually relegated    Brier (test)
+established (170)         0.098                   0.082              0.0464
+promoted     (30)         0.446                   0.533              0.1611
+```
+
+**Three to four times worse on every window, consistently in one direction.**
+
+The disclosure that has to travel with this: I know this mechanism works, and I am proposing a
+second instrument after it failed on the first. What makes it legitimate is that **arm 11's plan
+named this exact target before any result existed** — *"secondary, reported not gating: promoted
+clubs' preseason relegation forecast should move from 0.446 toward the observed 0.533"*. Promoting
+a pre-registered secondary to a primary is defensible; inventing it now would not have been.
+
+**The family is 1.** Arm 11 stopped before touching an evaluation span, so the promotion prior has
+never consumed an evaluation scoring. That is precisely what the pre-flight was for, and it is why
+this arm starts with a clean family rather than at α/2.
+
+### What is being run
+
+Shrinkage **inherited at 16**, arm 11's tuned value, and deliberately **not re-tuned**. It was
+selected on the tuning span against match RPS before any simulator number existed, so for this
+instrument it is effectively a blind choice — a stronger position than re-tuning, which would add a
+selection this arm does not need and which Rule 1 would then govern.
+
+Both arms share barriers, seeds, specs, questions and the replicate stream. `run_span` gained a
+`fit_factory`; only the fit differs. Uncertainty spec is `drift`, the adopted production setting.
+
+### The tuning span, and it is the reason this is worth running
+
+```
+                        n     brier            delta        95% CI (clustered by season)
+promoted clubs        120   0.2097 -> 0.1777   -0.03200   [-0.06217, -0.00219]
+established clubs     680   0.0559 -> 0.0553   -0.00068   [-0.00200, +0.00057]
+all clubs             800   0.0790 -> 0.0736   -0.00538   [-0.01065, -0.00037]
+
+calibration      mean forecast          actual
+  promoted       0.381 -> 0.441         0.467
+  established    0.109 -> 0.099         0.094
+```
+
+The promoted-club interval excludes zero on the tuning span — something neither arm 11 nor arm 12
+managed on any window — and the forecast closes about **two thirds** of its calibration gap without
+moving established clubs anywhere they should not go.
+
+### The gate, declared before the numbers exist
+
+The four-gate acceptance rule governs *match* forecasts and does not apply here; the simulator's own
+reports have always carried `acceptance_rule_applies: false`. So the bar is declared explicitly:
+
+1. **Primary.** On the **test span**, promoted clubs' relegation Brier improves with a season-
+   clustered 95% CI excluding zero. This is the one test the arm lives or dies on.
+2. **Falsifier.** Established clubs must not get worse — their interval must not sit wholly above
+   zero. A promoted-club fix bought by damaging the other 85% of club-seasons is not a fix, and
+   this is the mirror of arm 12's falsifier, which is what killed it.
+3. **Sensitivity.** The same sign on the sensitivity span. A result that reverses across decades is
+   an era artefact, which is the failure mode `dc-gas` and the per-parameter decay arms both hit.
+4. **Calibration direction.** Promoted clubs' mean relegation forecast must move **toward** 0.533,
+   not past it. Overshooting into over-prediction is a different error, not a fix.
+
+All four must hold. Nothing here is graded on the pooled all-clubs figure, because that number is
+dominated by the 85% of club-seasons the arm barely touches.
+
+### Prediction, recorded to be scored
+
+**Promoted-club relegation Brier on the test span: −0.015 to −0.030, and I put ~60% on the interval
+excluding zero.**
+
+The mechanism is stronger on the test decade than on the tuning one — the promoted-club gap has
+roughly doubled since 1996-2006 (−0.165 to −0.321 in log attack), and arm 11 established the prior
+tracks that drift because it is estimated per barrier. Against that: the test span has 30 promoted
+club-seasons in 10 clusters, and the tuning span's interval only just cleared zero at
+[−0.062, −0.0022]. Ten clusters is a small number to ask for significance from, and that is the
+whole reason this is 60% and not 85%.
+
+**Mean promoted relegation forecast: 0.446 → about 0.50**, closing roughly two thirds of the gap to
+0.533, as it did on the tuning span.
+
+**Established clubs: between −0.002 and 0.000.** Fractionally better or unchanged. If they get
+materially worse the falsifier fires and the arm is rejected whatever the promoted column says.
+
+### What a pass does and does not license
+
+It does not wire the seam into the match model. `model.seams.promotion.enabled` governs production
+forecasts, which are gated by the four-gate rule, and arm 11 already failed that pre-flight. A pass
+here licenses the prior **for the simulator**, which is a separate consumer with its own declared
+bar — and any such split has to be visible in config rather than implied, because a model that is
+one thing when forecasting a match and another when simulating a season is exactly the kind of
+quiet inconsistency this ledger exists to prevent.
