@@ -5835,3 +5835,139 @@ and the entire ensemble penalty comes from 9.8% of matches where an early fitter
 resolved forecasts put the weight at 1.0. That is a boundary-solution result about the pooling
 instrument, not about the tree. A better GBM might change whether the weight collapses — which
 would be a genuinely new finding — but the collapse itself was never a statement about tuning.
+
+---
+
+## 2026-09-21 — RESULT: the retuned GBM fails all four gates, and the retune moved the tuning window and nothing else
+
+The pre-flight resolved, so the gate ran. `gbm` rejects on **all four gates on the test span**, and
+the sensitivity decade rejects it harder. The verdict is not the finding — a confirmed rejection was
+the 70% outcome and it is what happened. The finding is that a hyperparameter re-selection which
+cleared this project's resolution rule, **the first one ever to clear it**, transferred one
+hundred-thousandth of an RPS point to the decade it was meant to help.
+
+### The test span, which is the gate
+
+2016-17..2025-26, 1,153 barriers, 3,800 matches, 2,660 of them priced.
+
+```
+arm                    RPS  log loss   skill  draw res  vs market   vs baseline
+dixon-coles        0.20047    0.9718   16.1%   0.00202   +0.00824   (baseline)
+gbm                0.20101    0.9737   15.9%   0.00256   +0.00868   +0.00054 [+0.00000, +0.00111] P=0.025
+```
+
+Every P(better) in this entry is a *P(worse)*: the sign is positive on both decades.
+
+### The four gates, scored
+
+```
+1  paired delta favourable on test     FAIL   +0.000543 [+0.000000, +0.001108], P(better) 0.025
+2  does not degrade vs the market      FAIL   baseline gap +0.008242 -> arm gap +0.008684
+3  survives BH across a family of 5    FAIL   adjusted p 0.2504 at alpha 0.05
+4  sensitivity does not contradict     FAIL   P(better) there 0.006, against a bar of 0.5
+```
+
+Gate 3 earns a line of its own. The raw Diebold-Mariano p-value is **0.0501**, so the arm would have
+sat on the alpha boundary with no multiplicity correction at all, and the declared family of five
+was never the binding constraint. It is a two-sided test and the sign is against the arm; the
+correction is arithmetic applied to something that had already failed.
+
+### The sensitivity span
+
+2006-07..2015-16, 995 barriers, 3,800 matches, **none priced** — gate 2 is NOT EVALUABLE there, as it
+is for every arm on this decade.
+
+```
+dixon-coles        0.19671
+gbm                0.19744   +0.00073 [+0.00015, +0.00130]  P=0.006
+```
+
+That run reports `gate3 pass` and it reads wrong at a glance, so it is written down here. BH there is
+rejecting the null of *equal forecast accuracy*, on a two-sided p-value, at a family of one because
+`--family-size` belongs on the test run. It says the two arms differ. They differ against the arm.
+
+### The retune moved the tuning window and nothing else
+
+This is the entry's reason to exist.
+
+```
+                  tuning span        test span            sensitivity span
+incumbent            0.20472    0.20102  +0.00055      0.19739  +0.00068
+retuned              0.20428    0.20101  +0.00054      0.19744  +0.00073
+                    -0.00044   -0.00001               +0.00005  (worse)
+```
+
+The tuning-span gain was **resolved** under the rule added on 2026-08-25: −0.000444, 95% CI
+[−0.000754, −0.000105], clustered by season. That rule exists to stop a shipped value moving on this
+window's own noise, and it had never once said yes. It said yes here, and what it bought on the
+decade the arm is judged on is 0.00001 — on the other decade it is negative.
+
+So the resolution check did its job, and its job is narrower than it looked when it was written. It
+certifies that **this window can tell two configurations apart**. It says nothing about whether the
+difference it resolved is a property of football or a property of 1996-2006, and here it was the
+second.
+
+**This is the fourth era-transfer failure**, after `dc-gas`'s retune, the per-parameter decay axes
+and the promotion prior. Three of those reversed sign across decades. This one does not reverse, it
+simply evaporates — the milder version to read and the more discouraging one to hold, because a
+reversal at least says the window measured something real about its own era. Here there was nothing
+to transfer.
+
+### What the tree actually bought, since it is not nothing
+
+Murphy decomposition on the test span, baseline -> arm, where reliability is a penalty and
+resolution is a credit:
+
+```
+          reliability            resolution              brier
+draw   0.00016 -> 0.00039   0.00202 -> 0.00256   0.17617 -> 0.17622
+home   0.00030 -> 0.00059   0.03327 -> 0.03323   0.21287 -> 0.21333
+away   0.00070 -> 0.00056   0.02983 -> 0.02863   0.18806 -> 0.18869
+```
+
+**All three Briers are worse**, which is the only summary line that needs defending. Underneath it
+the movement is not uniform. `gbm` discriminates draws better by +0.00054 of resolution — against a
+standing expectation in this project that nothing moves draw resolution — and hands the whole gain
+back by calibrating them worse, draw reliability more than doubling. Away is the mirror image: the
+worst-calibrated outcome of the three improves, 0.00070 -> 0.00056, while away resolution falls by
+0.00120 and takes the Brier with it. Home resolution is flat to within 0.00004 and home reliability
+doubles.
+
+So the tree is not finding nothing. It is finding a little extra draw signal, mis-pricing it, and
+losing more on away discrimination than the draw gain is worth. That is one arm's diagnostic on one
+decade, it is not a gate, and nothing is built on it.
+
+### Predictions, scored
+
+| prediction | outcome |
+|---|---|
+| at least one axis moves — 75% | **right** — two moved, `num_leaves` 5 -> 3 and `n_estimators` 200 -> 400 |
+| the pre-flight resolves — 30% | **wrong**, and scored wrong when it happened rather than now |
+| if it reaches the gate, `gbm` still fails — 70% | **right**, on all four gates |
+
+The one I got wrong is the one that mattered least, and the shape of that is worth naming: I was
+wrong about whether the search could resolve anything, and right about whether resolving anything
+would help. Those are separate questions and this run separated them cleanly.
+
+### What is closed
+
+Arm 5's structural finding is untouched, exactly as the pre-registration said it would be. This run
+scored `gbm` alone, so the blend-weight collapse — exactly zero at 91.3% of test-span barriers, the
+whole ensemble penalty arriving from 9.8% of matches — was never re-tested and nothing here speaks
+to it.
+
+**The second look is spent.** The hazard that pre-registration opened with was re-running rejected
+arms until one passes. One arm was named before the instrument was repaired, one arm was run, and it
+failed on a better instrument than the one that rejected it the first time. The rejection was safe.
+`gbm` is not revisited again.
+
+### Status
+
+No config value moves. `model.gbm` keeps the re-selected hyperparameters: they are the honest
+tuning-span optimum, the arm they belong to is not in production, and nothing in the production path
+reads them.
+
+Thirteen arms attempted — this run adds no arm, it re-scores one — one accepted under a rule since
+tightened, nothing in production but the model that was there at the start.
+
+654 unit tests pass.
