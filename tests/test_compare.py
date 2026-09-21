@@ -431,3 +431,30 @@ def test_a_hand_built_fdr_block_without_a_family_size_still_reports(cfg) -> None
                   "p_adjusted": {"home-rate": 0.09}, "rejected": {"home-rate": False}}
     reason = gate_verdicts(report, sensitivity=sens)["home-rate"]["gate3_reason"]
     assert "declared family of 1" in reason
+
+
+def test_a_gate_three_rejection_says_which_way_it_ran(cfg) -> None:
+    """BH rejects a TWO-SIDED null, so an arm that is decisively WORSE rejects it too.
+
+    The retuned `gbm` did exactly that on the sensitivity span (2026-09-21): BH-adjusted p 0.0140,
+    printed as `gate3 pass`, beside an arm losing to the baseline by +0.00073. Nothing was accepted
+    — gate 1 had already failed — but the line reads as an endorsement of the arm, and a reader
+    scanning four gate labels is exactly who this harness is written for.
+
+    The gate's VALUE is deliberately unchanged: it still reports what BH decided, and narrowing it
+    to a one-sided rule would be an amendment to the acceptance rule rather than a wording fix.
+    """
+    report, sens = _passing(cfg)
+
+    report.arms[1].vs_baseline_dm = {"mean_diff": +0.00073, "p_value": 0.014}
+    verdict = gate_verdicts(report, sensitivity=sens)["home-rate"]
+    assert "AGAINST this arm" in verdict["gate3_reason"]
+    assert "worse, not better" in verdict["gate3_reason"]
+    assert verdict["gate3_family_wise"] is True  # the value, not the wording, is what BH said
+
+    report.arms[1].vs_baseline_dm = {"mean_diff": -0.00073, "p_value": 0.014}
+    assert "favours the arm" in gate_verdicts(report, sensitivity=sens)["home-rate"]["gate3_reason"]
+
+    # A non-rejection cannot be misread as an endorsement, so it says only what it means.
+    report.fdr["rejected"]["home-rate"] = False
+    assert "favours" not in gate_verdicts(report, sensitivity=sens)["home-rate"]["gate3_reason"]

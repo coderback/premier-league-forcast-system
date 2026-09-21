@@ -1455,6 +1455,11 @@ def gate_verdicts(
     Gate 3 — Benjamini-Hochberg across this run's family of arms rejects the null for this arm.
              Reported since the first arm; binding since 2026-08-21, because `dc-copula` passed a
              rule that printed "BH rejects 0 of 3" beside its own acceptance.
+             **The null is equal accuracy and the DM p-value is TWO-SIDED**, so a rejection means
+             the forecasts differ, not that the arm is better — an arm that is decisively WORSE
+             rejects it too, and then prints `gate3 pass`. The reason line says which direction
+             the rejection ran, because the label alone reads as an endorsement and the retuned
+             `gbm` produced exactly that on the sensitivity span (2026-09-21).
     Gate 4 — the sensitivity span does not contradict: P(better) there >= 0.5. Deliberately weak.
              It cannot be computed from a single run, so ``sensitivity`` must be supplied, and
              **a run without it accepts nothing** — which is the point, since the alternative is
@@ -1476,6 +1481,10 @@ def gate_verdicts(
             gate2 = bool(arm.vs_market["delta_rps"] <= baseline.vs_market["delta_rps"])
 
         gate3 = bool(rejected.get(arm.name, False)) if report.fdr else None
+        # Which way a gate-3 rejection ran. Read off the DM's own loss differential rather than
+        # the bootstrap's, so the direction describes the same statistic whose p-value BH corrected
+        # — negative favours the arm, matching every other sign convention in this project.
+        dm_favours_arm = float((arm.vs_baseline_dm or {}).get("mean_diff", 0.0)) < 0.0
 
         other = (sensitivity or {}).get(arm.name)
         gate4 = None if other is None else bool(
@@ -1505,6 +1514,18 @@ def gate_verdicts(
                     f" ({(report.fdr or {}).get('n_tests', 0)} scored here)"
                     if (report.fdr or {}).get("family_size", 0)
                     > (report.fdr or {}).get("n_tests", 0) else ""
+                )
+                # Only a rejection needs the direction spelled out: a non-rejection cannot be
+                # misread as an endorsement, so it is left to say the one thing it means.
+                + (
+                    "" if not gate3 else
+                    "; the two-sided test rejects and the loss differential favours the arm"
+                    if dm_favours_arm else
+                    # ASCII on purpose: this string is printed to the console by _print_compare,
+                    # and a non-ASCII character here would raise UnicodeEncodeError on a cp1252
+                    # terminal at the very end of a twenty-minute walk.
+                    "; NOTE the two-sided test rejects AGAINST this arm -- the loss differential "
+                    "favours the BASELINE, so this is evidence the arm is worse, not better"
                 )
             ),
             "gate4_sensitivity": gate4,
