@@ -280,12 +280,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
     print(arm.slices.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
 
     print("\ncalibration by outcome (Murphy decomposition):")
-    print(f"  {'outcome':9}{'base rate':>11}{'reliability':>13}{'resolution':>12}{'brier':>9}")
-    for outcome, block in arm.calibration.items():
-        d = block["decomposition"]
-        print(f"  {outcome:9}{d['base_rate']:>11.4f}{d['reliability']:>13.5f}"
-              f"{d['resolution']:>12.5f}{d['brier']:>9.4f}")
-    print("\n  Draw resolution is expected to stay flat: nothing in the literature moves it.")
+    for line in _calibration_lines(arm.calibration):
+        print(line)
 
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
     out_path = cfg.output_dir / f"audit_{arm.name}.json"
@@ -303,6 +299,38 @@ def cmd_audit(args: argparse.Namespace) -> int:
     )
     print(f"\nreport    : {out_path}")
     return 0
+
+
+def _calibration_lines(calibration: dict) -> list[str]:
+    """The Murphy readout, with the discretisation error beside the score it distorts.
+
+    ``resid`` is ``brier - brier_from_decomposition``. :mod:`plmodel.eval.calibration` has always
+    computed both and says in its own docstring that reporting the pair "makes the discretisation
+    visible instead of hiding it" — and then this readout printed only one of them, which is where
+    the visibility was lost. NOTES.md 2026-09-22 records what that cost: a +0.00054 draw-resolution
+    gap that read as a finding, survived into an entry as a lead, and turned out to be the two arms'
+    binning residuals differing by 0.00037.
+
+    The residual is a property of the GRID, not of the forecaster. It earns a column because a
+    resolution difference is only readable when it is large against the residuals underneath it.
+    """
+    header = (f"  {'outcome':9}{'base rate':>11}{'reliability':>13}{'resolution':>12}"
+              f"{'brier':>9}{'from bins':>11}{'resid':>10}")
+    lines = [header]
+    for outcome, block in calibration.items():
+        d = block["decomposition"]
+        implied = d["brier_from_decomposition"]
+        lines.append(
+            f"  {outcome:9}{d['base_rate']:>11.4f}{d['reliability']:>13.5f}"
+            f"{d['resolution']:>12.5f}{d['brier']:>9.4f}{implied:>11.4f}"
+            f"{d['brier'] - implied:>+10.5f}"
+        )
+    lines.append("")
+    lines.append("  Draw resolution is expected to stay flat: nothing in the literature moves it.")
+    lines.append("  Read `resid` before comparing resolution across arms: where two arms' residuals")
+    lines.append("  differ by as much as their resolutions do, the comparison is measuring the bin")
+    lines.append("  grid rather than the forecasts. See NOTES.md 2026-09-22.")
+    return lines
 
 
 def cmd_fit(args: argparse.Namespace) -> int:
