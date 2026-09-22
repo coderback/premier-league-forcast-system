@@ -6227,3 +6227,82 @@ market — is untouched and still open.
 No config value moves and no code changed for this entry. The screen was scratch tooling run
 against cached forecasts and is not committed; every number above is reproducible from
 `output/walk_cache_draw` plus the protocol described here, in under a minute.
+
+## 2026-09-23 — CORRECTION: the sensitivity decade has a market benchmark, and yesterday's entry says it cannot
+
+Yesterday's SCREEN entry rejected a market-decomposition instrument on two grounds. The first one
+is wrong. Quoted from it verbatim:
+
+> **It is single-span forever.** `n_covered` is 2,660 on the test span and **0** on the sensitivity
+> span. Closing odds begin in 2019/20 and no amount of work changes that. Every acceptance claim in
+> this project has had to clear two spans; this instrument structurally cannot produce one.
+
+Every sentence there is true of `avg_closing`. None of it is true of the market. Measured today
+against the families **already defined in `odds.py`**, with no new parsing:
+
+```
+sensitivity span, n=3,800
+  avg_closing        covered      0 (  0.0%)
+  betbrain_avg       covered  3,800 (100.0%)   market 0.19332   gap +0.00339
+  bet365             covered  3,800 (100.0%)   market 0.19328   gap +0.00343
+  william_hill       covered  3,693 ( 97.2%)   market 0.19403   gap +0.00306
+  pinnacle_closing   covered  1,520 ( 40.0%)   market 0.19554   gap +0.00464
+```
+
+I reasoned from one family to all families. `n_covered` was zero in the report in front of me, and
+I wrote down a structural claim about the corpus when what I had was a fact about the benchmark
+the gate happens to be configured with.
+
+### What this changes
+
+**Gate 2 on the sensitivity decade is evaluable today**, at 100% coverage, with two independent
+families agreeing to within 0.00004. The obstacle is `odds.py`'s refusal to mix settlement timings
+in one benchmark — a deliberate and defensible policy, and a different thing entirely from the
+absence of data. A separately labelled pre-close gate, reported on the sensitivity span and never
+pooled with the closing one, is available whenever this project wants it.
+
+**What it does not change: the instrument stays rejected**, because the second ground still holds
+and was always the stronger one. Reliability is a bin-level statistic; `paired_delta`,
+`paired_delta_losses` and `paired_delta_clustered` all consume per-match scalar losses, so none of
+them can put an interval on it. Two un-intervalled point estimates of order 0.0003 remain the
+configuration that produced the draw-resolution error. The conclusion survives; one of its two
+legs does not.
+
+### The finding this hands over
+
+`bet365` is priced on 3,800 of 3,800 matches on **both** decades — one family, one settlement
+convention, complete coverage at each end. So the decades can be compared like for like, with no
+transported penalty and no assumption:
+
+```
+bet365, Shin de-vigged, 100% coverage on both spans
+  sensitivity 2006-07..2015-16   gap +0.00343   CI [+0.00190, +0.00496]
+  test        2016-17..2025-26   gap +0.00648   CI [+0.00461, +0.00840]
+
+  difference  +0.00305   unpaired bootstrap CI [+0.00061, +0.00550]  P 0.993
+                         season-clustered  CI [+0.00028, +0.00609]  P 0.983
+```
+
+**The model's deficit against the same benchmark has grown by +0.00305 between the two decades**,
+and the interval excludes zero even when seasons rather than matches are the resampling unit,
+which is the honest choice with ten seasons a side.
+
+Read it carefully, because it is a weaker claim than it looks. The two pools are disjoint, so this
+is an unpaired comparison carrying every confound that separates 2006-2016 from 2016-2026: a
+different competitive balance, a different bookmaker margin regime — the Premier League overround
+roughly halved across this period — and a different `bet365` pricing operation. It says the gap is
+bigger now than it was. It does not say the model got worse, and it does not identify what changed.
+
+It also sits oddly beside the within-decade season series, which is noise: seven seasons of test-span
+gaps have an observed standard deviation 1.67x what sampling alone predicts, marginal on six degrees
+of freedom, non-monotone, with 2025-26 the second-lowest value. Between decades there is a resolved
+difference; within a decade there is not a trend. Both can be true and this entry claims only the
+first.
+
+### Status
+
+No code, no config, no gate changed. `odds.py` already defines every family used above. The
+sensitivity-span pre-close gate is now a decision this project can take rather than a thing it was
+told it could not have.
+
+
