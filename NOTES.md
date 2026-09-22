@@ -6306,3 +6306,240 @@ sensitivity-span pre-close gate is now a decision this project can take rather t
 told it could not have.
 
 
+
+## 2026-09-23 — RESEARCH: the gap is at the literature's floor, and the survivors are two arms and a scraper
+
+A structured survey of the literature, of obtainable data, and of the 202 corpus columns production
+does not read. Commissioned to answer one question: **is the +0.00824 RPS gap to the closing line
+closeable, and if so by what?**
+
+The programme's honest shape, stated first because it governs how everything below should be read:
+roughly sixty candidate mechanisms and sources were considered and three survive. That is a
+selection from N, and Benjamini-Hochberg across a family of three does not correct for the
+fifty-seven that were discarded. The survivors' priors are correspondingly worse than any
+pre-registration will make them look. This is the same error gate 3 exists to prevent, one level up,
+and it deserves to be written down rather than assumed away.
+
+**A procedural failure to record.** The design for this programme called for a PRE-REGISTRATION
+entry before any agent ran, stating the success criteria and the budget ceiling. I did not write
+one. Everything below is therefore reported after the fact, which is exactly the posture this
+project's whole apparatus exists to avoid. The findings are what they are, but the discipline was
+not applied to the programme itself, and the next one should open with the entry rather than close
+with it.
+
+### The instrument, measured rather than assumed
+
+Two arms have died on the resolution floor (Arm 11 at -0.00059, Arm 12 at -0.000303), and the floor
+itself had never been measured. It is not one number: it depends on which gate binds and on how
+large a family is declared.
+
+Method: take the real per-match dixon-coles loss vector on each span, inject a synthetic improvement
+of mean `delta` with the per-match standard deviation actually observed between two real arms
+(0.01757, gbm against dixon-coles), and run this project's own gate machinery on the result.
+
+```
+                       MDE      gap    share of the gap
+  rps   family 1    0.0008   0.0082        9.7%
+  rps   family 3    0.0008   0.0082        9.7%
+  rps   family 5    0.0008   0.0082        9.7%
+  log   family 1    0.0022   0.0243        9.1%
+  log   family 3    0.0020   0.0243        8.2%
+  log   family 5    0.0026   0.0243       10.7%
+```
+
+**The four-gate floor is 0.0008 to 0.0010 RPS**, against 0.00055 for gate 1's bootstrap alone. A
+candidate must deliver **roughly a tenth of the entire remaining headroom in a single arm** to be
+acceptable. At most a handful of non-overlapping arms fit inside the gap.
+
+A methodological note worth keeping: injecting a *uniform* improvement instead — every match
+improving by exactly delta — passes all four gates at 0.0002, the smallest value on the grid, because
+zero variance in the improvement makes a paired test trivially powerful. No arm behaves that way.
+That model's only value was proving itself useless.
+
+**A recommendation tested and rejected.** Wheatcroft (arXiv:1908.08980) argues on 39,343 English
+matches that the ignorance score resolves a model imperfection in fewer matches than RPS, which
+would attack the binding constraint at zero data cost. It does not transfer here: as a share of the
+gap the two metrics are indistinguishable, and the log column is non-monotone in family size, which
+is noise. Keep RPS.
+
+### Where the gap is
+
+Localised against the closing line on the test decade, reconciling exactly to the pooled +0.008242.
+
+```
+  established_only   +0.00818  [+0.00531, +0.01109]      involves_promoted  +0.00840  [+0.00362, +0.01314]
+  big_six_derby      +0.01283  [+0.00338, +0.02217]      rest_vs_rest       +0.00757  [+0.00387, +0.01124]
+  home_favourite     +0.00636  [+0.00342, +0.00934]      away_favourite     +0.01132  [+0.00703, +0.01566]
+```
+
+**The gap is uniform, not concentrated.** Promoted and established fixtures are the same number to
+within a fifth of a standard error. Four arms were spent on promoted-club mispricing; whatever is
+missing, it is not concentrated there.
+
+One asymmetry survives: the model is substantially worse when the **away side is favoured**.
+Bringing away-favourite fixtures to the home-favourite gap would improve the pooled figure by
+**0.00188**, which is 2.3x the four-gate floor and roughly 23% of the whole gap. Capturing half of
+the asymmetry gives 0.00094 and only just clears; a quarter gives 0.00047 and fails. That is the
+pre-registration threshold, and it is bounded below by this project's own measurement rather than by
+a paper's claim.
+
+Caveat on all of it: roughly twenty group comparisons with no multiplicity correction. These direct
+a search; they do not accept anything.
+
+### The literature's answer, which is not the one hoped for
+
+**Pitcan, Y. (2026), arXiv:2608.11505**, "Does a Structural Model Add Anything to the Closing
+Price?" — verified directly, not taken on report. Dixon-Coles against Shin de-vigged closing odds on
+Serie A, walk-forward, test window 2019-20..2025-26, n=2,660 by the same arithmetic that gives this
+project 7 x 380.
+
+```
+  Serie A   model 0.1972    market 0.1905    gap +0.0067   CI [0.0046, 0.0088]
+  here      model 0.20501   market 0.19676   gap +0.00824  CI [0.00582, 0.01074]
+```
+
+Overlapping intervals, and it independently reproduces **three** results this ledger already holds:
+the log-pool weight on the structural model collapses to exactly 0.000 against the market; a
+shots-on-target model earns 0.35 weight against the goals model but 0.00 against the market; and the
+diagnosis is that "the market's advantage is discrimination rather than honesty", calibration slope
+0.995 for the model against 1.103 for the market.
+
+That third one retrospectively explains yesterday's screen. **The model is better calibrated than
+the market and less sharp.** Recalibration was structurally incapable of closing a sharpness
+deficit — the screen did not merely fail, it could not have succeeded, and the literature says so
+independently.
+
+No peer-reviewed demonstration was found of a goals-only public-data model reaching parity with
+de-vigged closing odds on a multi-season out-of-sample test. Every documented case of parity is one
+of two things: **the market is an input** (a market-calibrated AFT model reaches 0.183 against
+Betfair's 0.185, its authors conceding "calibration to market prices is the dominant driver"), or
+**non-public information is added** (Constantinou & Fenton's pi-football reached parity only after
+subjective team-news inputs; the objective-data-only version did not).
+
+The thirteen refuted arms are not thirteen failures of execution. The gap is approximately the
+documented floor for this class of model.
+
+### Lines closed by this programme
+
+**Half-time goals.** 92.8% covered from 1995, 100% on both evaluation decades, never touched by any
+arm — and flagged in the programme's own plan as the standout lead. It is dead, and provably so
+rather than merely unresolvable. A team-season's share of goals scored in the first half has
+observed variance 0.00486 against a pure-binomial null of 0.00522: **excess variance is negative**,
+permutation p = 0.881. Disattenuated correlation between a team's first- and second-half scoring
+rates is 1.03. It is one parameter with noise, not two. Incremental RPS over DC-plus-trailing-form
+is +0.00011 on test and +0.00043 on sensitivity — both on the wrong side of zero. There is also no
+"this club holds a lead" trait: the club-level odd-versus-even-season correlation of the
+lead-holding residual is **-0.311**.
+
+**Referee as a 1X2 feature.** 165 referees, 100% coverage on both decades. Between-referee variance
+in home-win residual is 0.00082 against a permutation null of 0.00114 — **below chance**, p = 0.850.
+The detection limit of the design is a between-referee SD of 0.0232 in home-win probability, worth
+about 0.00027 RPS. Even the largest effect the corpus could be hiding is half the floor. Dead, and
+the corpus can prove it rather than merely fail to find it.
+
+**Parsing the Asian-handicap and over/under columns into market families.** They do not reach
+further back than the 1X2 families already parsed (`william_hill` 2000-08-19, `bet365` 2002-08-17,
+against the earliest AH at 2003-08-16), they add no sensitivity-span coverage over families already
+at 100%, and a de-vigged AH+OU inversion is **not sharper** than the direct 1X2 it would replace
+(0.17970 against 0.17937 on the 1,190 half-ball matches where the comparison is clean).
+
+**The backward xG gap.** Shot coordinates in the European Soccer Database are 0.0% populated for
+2008-09 through 2013-14 and 99.9% for 2014-15 and 2015-16 — the earliest free shot-location data
+merely overlaps the Understat mirror already held. No free per-match xG or shot-location series
+exists for 2006-2016. Since gate 4 needs the sensitivity decade and xG begins in 2015, the binding
+constraint was always the backward gap, not the forward one the 2026-08-21 survey chased. Record it
+as settled rather than re-surveyed; the forward gap remains an operational limit on `pl predict` and
+is not a lead.
+
+**Transfermarkt, and a trap worth recording.** ToS 11.1 prohibits automated collection *and*
+prohibits use for machine learning specifically, with the Section 44b UrhG text-and-data-mining
+exception expressly reserved. Its robots.txt is permissive (`Allow: /`), which is the trap: the
+terms govern. Separately, the CC0-labelled `transfermarkt-datasets` mirror advertises transfers from
+1993, and the range is real while the *density* is not — 13 rows touch nine of the largest clubs in
+the world in 2006 against 356 in 2024, because it holds only the career histories of currently
+profiled players and thins backwards as they retire out. Net spend computed from it for 2006 would
+be near zero for every club and would look like a signal. **This is the FPL collection-era failure
+in a new disguise**, and it fails quietly.
+
+### What survives
+
+**1. Shots on target as a trailing-form regressor.** The strongest measured candidate.
+
+```
+  test  -0.00100  CI [-0.00167, -0.00028]   (excludes zero, both window lengths)
+  sens  -0.00068 to -0.00098   P(better) 0.91-0.97
+```
+
+Two to three times the floor on both decades, same sign at K=20 and K=38, measured against the
+honest control of DC plus trailing full-time goal form rather than against raw DC. The mechanism is
+distinct from the refuted `dc+sot` arm: that pooled shots on target as a second observation channel
+**inside the likelihood**, forcing shots and goals to share one latent strength. As an external
+regressor **on top of** goal-based strength it is not constrained that way, and the earlier null does
+not cover it.
+
+Underlying it, the literature's claim quantified on this corpus: a shot differential carries a
+signal-to-noise ratio of 0.247 per match against 0.131 for goals, reaching a given rating precision
+in **16 matches rather than 31**.
+
+Three cautions, all of which belong in the pre-registration. The measurement is a stacked logit over
+DC probabilities using raw unadjusted counts, which could be a floor or a ceiling. Shots win at K=5
+to K=10 and **lose** at K=38, which says the gain lives in the short-memory regime — the same place a
+shorter half-life lives, and this proxy cannot separate the two. And roughly nine feature sets across
+two windows and two spans were tried, so **gate 3 is the binding constraint, not gate 1**; the
+sensitivity-span result at P around 0.97 uncorrected very likely does not survive BH.
+
+**2. Strength-dependent home advantage.** One interaction parameter: home advantage as a function of
+the already-estimated strength differential, not twenty free per-club parameters. It addresses the
+away-favourite asymmetry directly, since an away-favourite fixture is by construction a weak home
+side against a strong away side, and a single global `h` would systematically under-credit the home
+side there if home advantage is larger for weaker teams. Goals and team identity only, so both
+decades trivially. Not covered by the refuted home-advantage arms, which tested a time trend and
+empty stadiums. The literature is **contested on the direction** of the interaction, which makes it a
+test rather than an assumption. Headroom bounded below at 0.00188 by this project's own partition.
+
+Note the tension with Arm 12, which should be argued in the pre-registration rather than waved at:
+twenty free per-club home advantages is the setting where "there is no general shrinkage effect on
+this corpus" predicts failure. The one-parameter interaction is the construction that avoids it.
+
+**3. Lineups, back to 2006 — the Arm 7 blocker may be breakable.** `11v11.com` carries confirmed
+starting XIs, the manager of each club on the date, referee, venue and attendance for English
+top-flight matches, verified at both ends of the evaluation window under one schema. It is the only
+Target-1 candidate found that reaches 2006. This matters because the literature says the only two
+routes to parity are to consume the market or to add team news the market already contains, and this
+is a source for the second.
+
+**It is not actionable as it stands, and the constraint is not technical.** The site's terms permit
+download "for your own personal use only" and separately forbid users to "create derivative works,
+or in any way exploit, any of the content". Whether a derived feature table for a private model is
+permitted personal use or a prohibited derivative work is genuinely ambiguous, and it is a decision
+for the project's owner rather than for a research programme. Nothing was scraped. The honest first
+step is a licence enquiry to AFS, who do licence commercially.
+
+Also standing: `PhysioRoom` injury tables via the Internet Archive, continuously from 2005, content
+complete on every capture with only the capture cadence varying — a materially milder defect than
+the FPL flags, whose *meaning* drifted. And per-club transfer spend from Wikipedia's transfer-list
+series back to 2002-03, CC BY-SA, machine-readable via `{{ntsh}}` sort keys, with roughly 20% of
+rows "Undisclosed" and not missing at random.
+
+### What I got wrong, stated plainly
+
+**Half-time goals were my own flagged standout** and they are dead, with the variance component that
+would have to exist measured at zero. I promoted them on coverage — 92.8%, both decades, untouched —
+without asking whether the quantity had any team-specific variance to estimate. Coverage is not
+signal, and I had the corpus in front of me the whole time.
+
+**I told the user the decade-over-decade gap had "nearly doubled", then that overlapping intervals
+made that too strong, then that it was resolved after all.** The first statement was right, the
+second was the overlapping-confidence-interval fallacy, and only the third was properly tested. Two
+intervals that overlap can still differ; the comparison belongs on the difference, not on the pair.
+
+**I reasoned from one odds family to all of them** and committed a structural claim about the corpus
+that was a fact about a configuration choice. That has its own CORRECTION entry above.
+
+**The programme ran without its pre-registration**, as recorded at the top.
+
+### Status
+
+No config value moves, no code changed, no arm registered. `NOTES.md` is the only file this work
+touches. Three agents, roughly sixty candidates considered, three surviving, and the honest summary
+of the literature is that this project's remaining headroom is not in the goals pipe.
