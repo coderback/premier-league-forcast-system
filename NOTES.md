@@ -6068,3 +6068,162 @@ rather than the 37 minutes of walks it took to get them back — which is the ca
 module doing exactly what its docstring promises.
 
 662 unit tests pass.
+
+## 2026-09-22 — SCREEN: recalibration is dead on both decades, so the market gap is resolution
+
+Production sits **+0.00824 RPS behind the de-vigged closing line** on the test decade — CI
+[+0.00582, +0.01074] on the 2,660 priced matches, an interval nowhere near zero. That gap is either
+a calibration defect or a discrimination one, and the two cost wildly different amounts to close. A
+calibration defect is a map applied to forecasts already in hand. A discrimination defect needs
+information the model does not have, and the base rate for finding some, in this ledger, is one arm
+in thirteen.
+
+Nothing in the repo separated them. `_market_block` scores the market on RPS and log loss and never
+decomposes it; `calibration_report` runs on arms only. The obvious fix — print the market's Murphy
+decomposition beside each arm's — was considered and rejected before it was built, for reasons that
+belong here because they will come up again:
+
+* **It is single-span forever.** `n_covered` is 2,660 on the test span and **0** on the sensitivity
+  span. Closing odds begin in 2019/20 and no amount of work changes that. Every acceptance claim in
+  this project has had to clear two spans; this instrument structurally cannot produce one.
+* **Nothing here can put an interval on it.** `paired_delta`, `paired_delta_losses` and
+  `paired_delta_clustered` all consume a per-match loss vector — that pairing is exactly what
+  resolves 0.002-level differences on a thousand matches. Reliability is a bin-level statistic, not
+  a per-match loss, so none of them can be pointed at it.
+* Two un-intervalled point estimates of order 0.0003, with binning residuals of the same order
+  underneath, is the precise configuration of the entry above this one.
+
+So the question was asked a different way.
+
+### The screen, and what kind of evidence it is
+
+This is a **screen, not an acceptance run**. No gate, no FDR, no registered arm, and nothing below
+accepts anything. It is a cheap question asked of data already on disk, to decide whether an
+expensive question was worth asking.
+
+Both decades' walk-forward `dixon-coles` forecasts were already cached under
+`output/walk_cache_draw`, so no walk was re-run: loading both pools and both forecast arrays takes
+eight seconds. Each span is cut at a **date boundary** at its midpoint — no matchday straddles the
+cut — the map is fitted on the first half and applied to the second. Strictly forward in time, so
+the screen itself cannot leak.
+
+Two maps, both fitted by minimising mean log loss, the proper scoring rule for the thing being
+tested:
+
+```
+temperature   softmax(log p / T)         1 param    global over/under-confidence
+vector        softmax(a * log p + b)     6 params   per-class scale and bias
+```
+
+The second rung is there because the audit's reliability figures are not symmetric across outcomes
+— home 0.00030, draw 0.00016, away 0.00070 — and temperature scaling is symmetric by construction,
+so it cannot fix a class-specific bias even in principle.
+
+### The maps fit, and every gain is overfit
+
+```
+                        in-sample d RPS      held-out d RPS
+test span
+  temperature               -0.00029            +0.00039
+  vector                    -0.00052            +0.00081
+sensitivity span
+  temperature               -0.00012            +0.00018
+  vector                    -0.00055            +0.00106
+```
+
+The optimiser works: both maps improve both metrics on both spans in-sample, which is what rules out
+reading a broken fit as a finding. Then every gain reverses out of sample, and reverses **by more
+than it gained**, with near-identical magnitudes on two independent decades. That is the signature
+of fitting noise.
+
+### Held out, with intervals
+
+```
+test span        hold 2021-08-28 -> 2026-05-24, n=1,880
+  raw              RPS 0.20381    log loss 0.98652
+  temperature          +0.00039            +0.00134    CI [-0.00019, +0.00098]  P 0.096
+  vector               +0.00081            +0.00445    CI [+0.00009, +0.00153]  P 0.015
+
+sensitivity span hold 2011-05-15 -> 2016-05-17, n=1,916
+  raw              RPS 0.20229    log loss 0.99211
+  temperature          +0.00018            +0.00077    CI [-0.00013, +0.00049]  P 0.125
+  vector               +0.00106            +0.00592    CI [+0.00033, +0.00182]  P 0.003
+```
+
+Positive is worse; `P` is P(recalibrated better), the bootstrap's one-sided quantity, at `n_boot`
+10,000 and seed 20260822. Vector scaling's interval **excludes zero on the worse side on both
+decades independently**. This is not a null result. It is a replicated, resolvable loss.
+
+### Three ways out, all closed
+
+**Metric mismatch.** The maps were fitted to minimise log loss and they degrade log loss out of
+sample — all four cells positive, and by a wider margin than they degrade RPS. The evaluation
+metric is not what is failing them.
+
+**The two decades disagree about what the correction is.** Fitted `a`, home/draw/away:
+
+```
+test span         [0.8031  1.4542  1.3005]     b  [-0.4306  +0.2811  +0.1496]
+sensitivity span  [0.9212  0.9796  1.2584]     b  [-0.0982  -0.0343  +0.1326]
+```
+
+The draw coefficient is 1.45 against 0.98 — one map sharpens draws hard, the other leaves them
+alone. Fitted temperature is 0.9013 against 0.9443. A stable miscalibration would produce agreeing
+maps; these are each fitting whatever their own half happens to contain.
+
+**Reliability itself gets worse.** On the held-out halves, at 10 bins:
+
+```
+                     home      draw      away
+test span    raw   0.00044   0.00015   0.00113
+             temp  0.00107   0.00040   0.00109
+             vec   0.00063   0.00128   0.00263
+sens  span   raw   0.00087   0.00016   0.00028
+             temp  0.00171   0.00011   0.00058
+             vec   0.00201   0.00036   0.00212
+```
+
+Ten of the twelve recalibrated cells are worse than raw, and the two exceptions are both
+temperature and both improve by under 0.00005. Correcting for a bias that is not there injects
+one. These are 10-bin figures on ~1,900 matches and carry the residual the entry above
+describes, so they are read here for direction and sign only, which is all they can carry.
+
+### What I got wrong, stated plainly
+
+I argued the away/draw reliability asymmetry — 0.00070 against 0.00016 in the full-span audit —
+pointed at a class-specific bias worth a per-class term. It does not replicate. Away reliability is
+the **worst** class on the test hold-out at 0.00113 and among the **best** on the sensitivity
+hold-out at 0.00028. The asymmetry was a property of the slice I read it off, not of the model, and
+the per-class map built to exploit it is the one that did the most damage on both spans.
+
+This is the second time in two days that a decomposition number of order 0.0005 has been read as a
+lead and turned out to be noise. The pattern is now specific enough to state as a rule: **a
+reliability or resolution difference in this project is not evidence until it survives a second
+decade.**
+
+### What this settles, and what it does not
+
+**The market gap is resolution, not calibration.** Dixon-Coles is already as well calibrated as any
+fixed reshaping of its own output can make it. There is no headroom there to reclaim.
+
+**The recalibration arm is not worth building.** The production version — a map refitted before
+every barrier, nested inside the walk under `assert_no_leakage` — was costed at multiple hours and
+is now cancelled. It would face a strictly harder problem than this screen did, refitting on less
+data per barrier than the ~1,900 matches that already failed to generalise.
+
+**It sharpens what the rejected arms mean.** They were not failing to exploit an available
+calibration gain. There was no calibration gain available. An arm that reshapes forecasts the model
+already produces is not a candidate; only an arm that brings information is.
+
+**It does not close these.** A *rolling* recalibration is not strictly refuted, only made
+implausible — though the two decades' disagreement about the correction is evidence against it
+rather than merely absence of evidence for it. The market's own calibration remains unmeasured and
+unmeasurable to the standard this project uses. And the de-vig audit — whether Shin produces
+coherent probabilities at all, which is a check on our own instrument rather than a claim about the
+market — is untouched and still open.
+
+### Status
+
+No config value moves and no code changed for this entry. The screen was scratch tooling run
+against cached forecasts and is not committed; every number above is reproducible from
+`output/walk_cache_draw` plus the protocol described here, in under a minute.
