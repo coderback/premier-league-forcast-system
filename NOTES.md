@@ -5886,6 +5886,10 @@ That run reports `gate3 pass` and it reads wrong at a glance, so it is written d
 rejecting the null of *equal forecast accuracy*, on a two-sided p-value, at a family of one because
 `--family-size` belongs on the test run. It says the two arms differ. They differ against the arm.
 
+**Addendum, 2026-09-22:** the harness says this itself now — `gate3_reason` carries the direction the
+rejection ran, so the ledger is no longer the only place it is recorded (`0eb535f`). The gate's value
+is unchanged: narrowing it to one side would be an amendment to the acceptance rule, not a wording fix.
+
 ### The retune moved the tuning window and nothing else
 
 This is the entry's reason to exist.
