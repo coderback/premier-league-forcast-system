@@ -287,7 +287,19 @@ def test_real_walk_trains_on_the_full_history(corpus: pd.DataFrame) -> None:
         min_train_matches=cfg.backtest.min_train_matches,
     )
     assert splits[0].n_train > 8_000
-    assert splits[-1].n_train == len(corpus) - splits[-1].n_test
+
+    # The walk is contiguous: every match tested at one barrier is a training match at the next,
+    # so the last split's training set is the first's plus everything tested in between. This is
+    # what a dropped barrier date or a flipped `searchsorted` side would break.
+    assert splits[-1].n_train == splits[0].n_train + sum(s.n_test for s in splits[:-1])
+
+    # And the walk stops at the SPAN, wherever the corpus happens to end. This read
+    # `len(corpus) - n_test` until 2026-09-22, which held only while the two coincided; the first
+    # ingest of a live season parted them and the assertion then failed on every matchday of the
+    # weekly loop. Phrased against the span it is stable in both directions — a corpus that runs
+    # past the span and an off-season corpus that stops exactly on it.
+    assert (corpus.loc[corpus["date"] == splits[-1].barrier, "season"]
+            == cfg.backtest.test_span.last_season).all()
 
 
 @pytest.mark.integration
