@@ -301,7 +301,15 @@ def test_real_corpus_loads() -> None:
     corpus, metas = load_matches(cfg)
     assert len(corpus) > 60_000
     e0 = corpus[corpus["division"] == "E0"]
-    assert len(e0) == 12_704, "E0 1993/94-2025/26 is 462 + 462 + 31 * 380"
+    # Season lengths, not a frozen total. `len(e0)` was pinned at 12,704 and grew by one match
+    # every matchday once the live season was first ingested, so the weekly `pl ingest` loop broke
+    # this test permanently. The invariant underneath is what was meant: 462 for the two 22-team
+    # seasons, 380 for every completed season after them.
+    per_season = e0.groupby("season").size()
+    latest = per_season.index.max()               # season labels sort lexically: 1993-94 .. 2026-27
+    completed = per_season.drop(latest) if per_season[latest] < 380 else per_season
+    assert set(completed.loc[["1993-94", "1994-95"]]) == {462}
+    assert set(completed.drop(index=["1993-94", "1994-95"])) == {380}
     assert corpus["date"].min() == pd.Timestamp("1993-08-14")
     # 2004/05 is the only cp1252 era, and it is cp1252 in all four divisions.
     assert {m.season for m in metas if m.encoding == "cp1252"} == {"2004-05"}
@@ -322,6 +330,11 @@ def test_real_corpus_team_match_counts_are_exact() -> None:
     cfg = load_config()
     corpus, _ = load_matches(cfg, divisions=("E0",))
     per_season = corpus.groupby("season")["home_match_index"].max()
+    # The season in progress has not reached 38 yet and is excluded rather than asserted on --
+    # its clubs had played 5 matches when this stopped passing. Everything else must be exact.
+    latest = per_season.index.max()
+    if per_season[latest] < 38:
+        per_season = per_season.drop(latest)
     # 42 for the 22-team seasons, 38 thereafter. Nothing else is acceptable for a completed E0.
     assert set(per_season.unique()) == {38, 42}
     assert set(per_season[per_season == 42].index) == {"1993-94", "1994-95"}

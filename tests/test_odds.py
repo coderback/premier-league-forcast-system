@@ -187,9 +187,17 @@ def corpus() -> pd.DataFrame:
 
 @pytest.mark.integration
 def test_gate_benchmark_coverage_on_the_real_corpus(corpus: pd.DataFrame) -> None:
-    """The gate-2 pool is 2,660 E0 matches from 2019/20 — the figure the plan committed to."""
+    """The gate-2 pool is 2,660 E0 matches from 2019/20 — the figure the plan committed to.
+
+    Scoped to the test span, which is what 2,660 was always a statement about. It happened to
+    equal whole-corpus coverage only while the corpus stopped where the span does: `avg_closing`
+    starts in 2019/20 and the span ended in 2025/26, so every priced match fell inside it. The
+    first ingest of a live season parted them and the count became 2,710.
+    """
     cfg = load_config()
     e0 = corpus[corpus["division"] == "E0"]
+    span = cfg.backtest.test_span
+    e0 = e0[e0["season"].between(span.first_season, span.last_season)]
     _, covered, n_invalid = resolve_family(e0, cfg.odds.gate_benchmark)
     assert int(covered.sum()) == 2660
     assert n_invalid == 0
@@ -247,7 +255,13 @@ def test_bet365_zero_sentinels_are_counted(corpus: pd.DataFrame) -> None:
 
 @pytest.mark.integration
 def test_family_coverage_report(corpus: pd.DataFrame) -> None:
-    cov = family_coverage(corpus[corpus["division"] == "E0"], names=("avg_closing",))
+    # Scoped to the test span for the same reason as the gate-benchmark test above: 2,660 is a
+    # statement about the span, and whole-corpus coverage now runs past it.
+    cfg = load_config()
+    span = cfg.backtest.test_span
+    e0 = corpus[corpus["division"] == "E0"]
+    e0 = e0[e0["season"].between(span.first_season, span.last_season)]
+    cov = family_coverage(e0, names=("avg_closing",))
     assert set(cov["family"]) == {"avg_closing"}
     overall = cov[cov["season"] == "ALL"].iloc[0]
     assert overall["n_priced"] == 2660
