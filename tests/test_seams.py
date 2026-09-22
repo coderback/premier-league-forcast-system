@@ -67,6 +67,37 @@ def _digest(probs: np.ndarray) -> str:
     return hashlib.sha256(np.ascontiguousarray(probs, dtype=np.float64).tobytes()).hexdigest()
 
 
+def _off_value(cfg, seam: str):
+    """The seam's own shipped block with its switch set to off.
+
+    Built from ``cfg.model.seams`` rather than from ALL_OFF on purpose. The question the
+    byte-identity test asks is "does setting the SWITCH to off change anything", so the tuned
+    values sitting beside the switch have to be the shipped ones. ALL_OFF deliberately carries
+    different ones — promotion shrinkage 1.0 against the shipped 16.0 — and substituting it here
+    would quietly test a different proposition.
+
+    This lives in a function rather than inline in the test because it used to be inline, and when
+    `promotion` and `shrinkage` joined SEAM_NAMES nobody added them to it. Those two seams then had
+    no byte-identity coverage at all until 2026-09-23. `test_every_seam_has_an_explicit_off_value`
+    below is the guard against a third one going the same way.
+    """
+    seams = cfg.model.seams
+    return {
+        "covariates": [],
+        "dynamics": {"enabled": False},
+        "observation": {"channels": ["goals"]},
+        "ensemble": {"enabled": False},
+        "home_advantage": {**seams["home_advantage"], "mode": "global"},
+        "tiers": ["E0"],
+        "scoreline": {**seams["scoreline"], "marginal": "poisson", "dependence": "tau"},
+        "decay": {**seams["decay"], "enabled": False},
+        # Same shape as decay: a switch with its tuned values beside it, so an off block still
+        # carries what "on" would have meant.
+        "promotion": {**seams["promotion"], "enabled": False},
+        "shrinkage": {**seams["shrinkage"], "enabled": False},
+    }[seam]
+
+
 def _run(cfg, corpus, *, seams=None) -> np.ndarray:
     model = cfg.model if seams is None else dataclasses.replace(cfg.model, seams=seams)
     tuned = dataclasses.replace(cfg, model=model)
@@ -87,6 +118,23 @@ def test_every_seam_is_declared(cfg) -> None:
 
 def test_shipped_configuration_has_every_seam_off(cfg) -> None:
     assert cfg.model.seams_are_inert()
+
+
+def test_every_seam_has_an_explicit_off_value(cfg) -> None:
+    """Both off-mappings must cover SEAM_NAMES, or a seam silently loses its byte-identity test.
+
+    This is the cheap guard for an expensive miss. `promotion` and `shrinkage` were added to
+    SEAM_NAMES when Arms 11 and 12 introduced them, and to ALL_OFF, but not to the mapping the
+    byte-identity test used — so from then until 2026-09-23 the two newest seams were the two with
+    no inertness coverage, which is the wrong way round.
+
+    Deliberately NOT marked integration. The full suite takes fifty minutes and the miss survived
+    because nobody ran it; this runs in the unit suite in milliseconds, so the next omission is
+    caught before it is committed rather than a month later.
+    """
+    assert set(ALL_OFF) == set(SEAM_NAMES), "ALL_OFF does not cover every declared seam"
+    for seam in SEAM_NAMES:
+        _off_value(cfg, seam)          # KeyError here means the mapping has drifted
 
 
 def test_the_all_off_mapping_really_is_off(cfg) -> None:
@@ -131,19 +179,8 @@ def test_seams_off_is_byte_identical_to_no_seams_at_all(cfg, corpus) -> None:
 @pytest.mark.parametrize("seam", SEAM_NAMES)
 def test_each_seam_off_explicitly_is_byte_identical(cfg, corpus, seam: str) -> None:
     """Setting a seam to its off value must change nothing at all."""
-    off = {
-        "covariates": [],
-        "dynamics": {"enabled": False},
-        "observation": {"channels": ["goals"]},
-        "ensemble": {"enabled": False},
-        "home_advantage": {**cfg.model.seams["home_advantage"], "mode": "global"},
-        "tiers": ["E0"],
-        "scoreline": {**cfg.model.seams["scoreline"], "marginal": "poisson",
-                      "dependence": "tau"},
-        "decay": {**cfg.model.seams["decay"], "enabled": False},
-    }[seam]
     baseline = _run(cfg, corpus)
-    explicit = _run(cfg, corpus, seams={**cfg.model.seams, seam: off})
+    explicit = _run(cfg, corpus, seams={**cfg.model.seams, seam: _off_value(cfg, seam)})
     assert _digest(baseline) == _digest(explicit)
 
 
