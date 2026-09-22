@@ -5975,3 +5975,96 @@ Thirteen arms attempted — this run adds no arm, it re-scores one — one accep
 tightened, nothing in production but the model that was there at the start.
 
 654 unit tests pass.
+
+---
+
+## 2026-09-22 — INSTRUMENT: the `draw res` column is grid noise at the magnitudes this ledger prints
+
+The retuned `gbm` gained **+0.00054 of draw resolution** on the test span, against a standing
+expectation — recorded at the start of this project and cited as reasoning in Arm 9 — that nothing
+moves draw resolution. It was written up yesterday as a lead worth exactly one arm's diagnostic.
+
+Chased, it is not a signal at all. It is an artifact of where ten bin edges happen to fall, and the
+useful finding is about the instrument rather than the tree.
+
+### The bin-free checks, which is where a bin-dependent lead should be taken first
+
+```
+                            test span                     sensitivity span
+draw Brier      0.17617 -> 0.17622  +0.00005      0.18941 -> 0.18946  +0.00006
+   clustered CI  [-0.00007, +0.00017] P 0.190      [-0.00014, +0.00024] P 0.272
+draw AUC         0.5671 -> 0.5676   +0.0005        0.5595 -> 0.5611   +0.0016
+   clustered CI   [-0.0028, +0.0033] P 0.598        [-0.0033, +0.0058] P 0.725
+```
+
+Both intervals straddle zero on both decades and the Brier leans the wrong way. Ten seasons, the
+honest sample size. There is no draw discrimination difference between these two arms.
+
+### The resolution difference is not stable in the bin count
+
+```
+bins      5        10        20        50       100
+test   +0.00058  +0.00054  -0.00000  -0.00004  +0.00039
+sens   +0.00011  +0.00006  +0.00016  -0.00008  +0.00013
+```
+
+It changes sign twice on the test span. A difference in discrimination cannot depend on where the
+bin edges are drawn; this one does, so it is not one.
+
+Worth noting separately: the resolution **level** is not a fixed property either. It climbs
+monotonically with the bin count for both arms — dixon-coles 0.00174 at 5 bins to 0.00340 at 100,
+`gbm` 0.00232 to 0.00379 — which is the ordinary upward bias of a binned estimate as bins get
+emptier. Every absolute draw-resolution figure in this ledger is a statement about a 10-bin grid on
+3,800 matches, not about a forecaster.
+
+### What I got wrong, stated plainly
+
+I predicted the mechanism before looking and the data refuted it. My reading was that a Dixon-Coles
+draw probability is nearly a deterministic function of the two rates and therefore tightly
+clustered, while a tree spreads its draw forecasts wider and so fills more bins and books resolution
+for the spread. The distributions are near-identical, and `gbm`'s is if anything the **narrower** of
+the two:
+
+```
+                  sd      p05     p50     p95     max    modal-bin share
+dixon-coles     0.0444  0.1547  0.2482  0.3014  0.4004       0.776
+gbm             0.0437  0.1591  0.2473  0.3012  0.4005       0.784
+```
+
+The real mechanism is duller. **Both** arms put ~78% of matches in a single bin, so a 10-bin
+decomposition is reading the ~22% that fall outside it, and which side of an edge those few hundred
+matches land on decides the answer. At 20 bins the test-span gap vanishes outright; the
+sensitivity span, where there was barely a gap at 10 bins to begin with, wanders instead of
+converging, which is the same statement about noise made less tidily.
+
+The binning residuals I flagged first — −0.00035 against +0.00002 on the test span, and nearly equal
+on the sensitivity span where the gain was nearly nil — tracked the gain for the same reason, not
+because one causes the other. Both are functions of the same grid-placement accident.
+
+### What this does and does not change
+
+**It changes how the `draw res` column should be read.** Eight entries print it. A difference of
+~0.0005 between two arms is inside this statistic's grid noise on this corpus and means nothing on
+its own.
+
+**It changes no verdict, and that is not luck.** No gate reads resolution: the acceptance rule
+scores RPS, gate 2 scores RPS against the market, gate 3 reads a DM p-value on RPS, gate 4 reads
+P(better) on RPS. The decomposition has always been a diagnostic here, printed by `pl audit` and
+carried in the reports, and the one place draw resolution entered an argument — Arm 9's premise that
+a Frank copula is in RPS terms a bet on draw probabilities — used the standing *expectation* as
+prior reasoning and never a measured difference. I checked the ledger for a decision resting on one
+and did not find any.
+
+**`calibration.py` already knew.** It computes `brier_from_decomposition` beside the direct Brier
+and its docstring says reporting both "makes the discretisation visible instead of hiding it". The
+JSON carries both. `cmd_audit`'s printed table drops the pair, which is where the visibility was
+lost, and that is the one change worth making off the back of this.
+
+### Status
+
+No config value moves and no code changed for this entry. The forecasts these numbers come from are
+cached under `output/walk_cache_draw`, so any further sub-analysis of these two arms is seconds
+rather than the 37 minutes of walks it took to get them back — which is the case for the cache
+module doing exactly what its docstring promises.
+
+662 unit tests pass.
