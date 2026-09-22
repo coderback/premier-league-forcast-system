@@ -886,7 +886,13 @@ def _parse_fixtures(args: argparse.Namespace) -> list[tuple[str, str]]:
                 continue
             for token in _FIXTURE_SEPARATORS:
                 if token in f" {text} ":
-                    home, _, away = text.partition(token.strip() if token != " - " else " - ")
+                    # Partition on the token WHOLE. Stripping " v " to "v" splits inside any home
+                    # side whose name contains one -- Everton, Aston Villa, Coventry, Wolves --
+                    # and the guard above has already established the spaced token is present, so
+                    # there was never anything for the strip to buy. The " - " special case that
+                    # used to sit here was this bug half-noticed: one separator was exempted from
+                    # the stripping instead of all four.
+                    home, _, away = text.partition(token)
                     if home.strip() and away.strip():
                         pairs.append((home.strip(), away.strip()))
                         break

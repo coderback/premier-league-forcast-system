@@ -143,6 +143,26 @@ def test_every_spelling_of_against_is_accepted(text: str) -> None:
     assert _parse_fixtures(_args(fixtures=text)) == [("Arsenal", "Coventry")]
 
 
+@pytest.mark.parametrize("text, expected", [
+    ("Everton v Hull", ("Everton", "Hull")),
+    ("Aston Villa v Hull", ("Aston Villa", "Hull")),
+    ("Coventry v Hull", ("Coventry", "Hull")),
+    ("Wolves v Hull", ("Wolves", "Hull")),
+    ("Aston Villa V Hull", ("Aston Villa", "Hull")),
+    ("Everton vs Hull", ("Everton", "Hull")),
+    ("Everton - Hull", ("Everton", "Hull")),
+])
+def test_a_home_side_containing_the_separator_is_not_split_inside(text, expected) -> None:
+    """`pl predict --fixtures "Everton v Hull"` used to fail with "no club matches 'E'".
+
+    The guard tests for the SPACED token and the partition then stripped it to a bare "v", so any
+    home side carrying one was cut in half. Three of the twenty clubs in the 2026-27 division are
+    affected, and every existing spelling test used "Arsenal" as the home side — a name with no
+    "v" in it — which is exactly why this survived to a shipped command the README documents.
+    """
+    assert _parse_fixtures(_args(fixtures=text)) == [expected]
+
+
 def test_several_fixtures_come_back_in_order() -> None:
     got = _parse_fixtures(_args(fixtures="Arsenal v Coventry, Man Utd v Hull"))
     assert got == [("Arsenal", "Coventry"), ("Man Utd", "Hull")]
