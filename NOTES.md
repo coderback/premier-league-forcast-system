@@ -6854,3 +6854,52 @@ fingerprint hashes only the pool's identity columns, so no cached forecast moves
 
 What this does **not** do is make half-time data an arm. The column is redundant with the half-time
 goals, which were already populated and are the input any half-time arm would actually use.
+
+## 2026-09-23 — PRE-FLIGHT: `dc+ha-strength` is withdrawn, because the direction is wrong
+
+The pre-registration's mechanism for the second arm is directional: a global `h` **under-credits
+the home side when it is the underdog**, because home advantage is larger for weaker home teams, and
+that is why away-favourite fixtures trail the closing line by +0.01132 against +0.00636 for home
+favourites. That claim was checked before any seam was written, two ways, on each decade separately.
+
+### A — does dixon-coles under-credit home underdogs out of sample?
+
+On the cached walk forecasts (loaded by fingerprint from `output/walk_cache_draw`, nothing refit),
+residual `r = (1[H] − 1[A]) − (pH − pA)` against the model's own differential `d = pH − pA`. The
+claim predicts `r > 0` where `d < 0` and a negative slope.
+
+```
+                                   sensitivity 2006-16            test 2016-26
+residual, away favourites (d<0)   +0.0137 [-0.0347, +0.0620]   -0.0079 [-0.0512, +0.0363]
+slope of r on d                   +0.0170 [-0.0512, +0.0859]   +0.0402 [-0.0266, +0.1059]
+```
+
+Nothing to recover: the away-favourite residual changes sign between decades around zero, and the
+slope has the wrong sign on both.
+
+### B — is home advantage heterogeneous in strength at all?
+
+Per club-season, `HA = mean GD at home − mean GD away` on venue-neutral strength (their mean):
+
+```
+slope of HA on strength           +0.0631 [-0.0514, +0.1700]   +0.1368 [+0.0324, +0.2351]
+sampling-noise bias in the slope  -0.0035                      -0.0076
+```
+
+It is — **the other way round.** Stronger clubs take more home advantage, positive on both decades
+and resolved on the test one, and the noise bias is negative so correcting for it only strengthens
+that. Yet A shows the forecasts are not mis-priced along the differential, so the fitted strengths
+already carry it. This agrees with the recalibration screen of 2026-09-22: on the H-versus-A axis an
+`h × Δ` interaction behaves much like temperature scaling, which degraded out of sample on both
+decades.
+
+### Status
+
+`dc+ha-strength` is **withdrawn at pre-flight**: never built, no gate slot spent. In the
+pre-registration's terms this is its NULL: the away-favourite asymmetry against the market is not
+home advantage. The consistent reading is resolution — the market knows more about those fixtures —
+not mis-specification.
+
+`dc+sot-form` proceeds alone. `--family-size` stays at the declared 2 rather than being reduced
+after looking at data: the measured effect of -0.00125 clears even the family-3 MDE of 0.0008, so
+the conservative bar costs nothing, and moving it would be an amendment made after the fact.
