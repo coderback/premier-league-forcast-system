@@ -7016,3 +7016,31 @@ same time-decayed sample as the strengths it sits on top of.
   optimum may move now that shots carry part of the recency the decay used to — on the tuning span,
   at `tuning_min_train_matches`, through `selection_is_resolved`.
 * **Nothing is wired.** Production is still plain dixon-coles.
+
+## 2026-09-23 — RETUNE: `dc+sot-form` after acceptance — unresolved, and the incumbent stands
+
+The rule: *an accepted variant earns a hyperparameter retune BEFORE production wiring.* Two axes —
+the shots window K, which was screened and never tuned, and the decay half-life, whose optimum could
+move now that shots carry part of the recency. Tuning span only, scored on its shots-covered seasons
+2000-01..2005-06 at `tuning_min_train_matches` (597 barriers, 2,280 matches; before 2000-01 the term
+is undefined and the arm is dixon-coles). Coordinate descent, point estimates, then the winner against
+the incumbent through `selection_is_resolved`, clustered by season.
+
+```
+K at 730d      5 0.20126   10 0.20100   15 0.20094   20 0.20106   30 0.20098   45 0.20103   60 0.20120
+HL at K=15    30 0.23835   60 0.22309   90 0.20759  120 0.20568  180 0.20362  240 0.20240
+             365 0.20151  548 0.20106 1095 0.20089 1460 0.20081 1825 0.20098
+K at 1460d     5 0.20127   10 0.20091   15 0.20081   20 0.20092   30 0.20081   45 0.20089   60 0.20110
+
+winner K=15, HL=1460 (both interior)   vs incumbent K=20, HL=730
+  delta -0.00024  clustered CI [-0.00098, +0.00064]  P 0.730  (6 seasons)   -> UNRESOLVED
+```
+
+**No value moves.** K is flat from 10 to 45 — K=15 and K=30 tie exactly at 1460 days — so the
+screened 20 sits inside a plateau rather than on a lucky point, which is the reassurance the retune
+was for.
+
+One direction recorded and not acted on: the half-life optimum moved **longer**, to 1460, where plain
+dixon-coles's own search (2026-08-25) pointed shorter, to 365 — both unresolved. It is what the
+mechanism predicts: once shots carry current form, the goal-based strengths can afford a longer
+memory. It is inside this window's noise, and that is the whole of what the protocol lets it say.
