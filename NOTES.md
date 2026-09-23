@@ -6742,3 +6742,89 @@ are not worth a third arm.
 ### Status
 
 No code yet. `--family-size 2` is the declaration; nothing below it can be loosened.
+
+## 2026-09-23 — PRE-FLIGHT: the shots falsifier does not fire, and `dc+sot-form` proceeds
+
+The pre-registration written earlier today gave `dc+sot-form` a falsifier that runs before the arm
+is built: shots beat goals at trailing windows of 5-10 matches and lose at 38, which is the
+signature of recency rather than shot information, so **if refitting the half-life absorbs the gain,
+the mechanism is not the claimed one and the arm is withdrawn**. It ran. It did not fire.
+
+### First, the effect was re-derived rather than inherited
+
+The -0.00100 in the pre-registration came from a subagent's screen. Taking a reported number and
+calling it verified is the error corrected this morning over Pitcan, so the construction was rebuilt
+from the cached walk-forward forecasts and the corpus: a multinomial stack on the dixon-coles log
+odds, refit each season on strictly earlier seasons, with trailing-20 differentials built only from
+prior matches, controlling against DC **plus trailing full-time goal form** rather than against raw
+DC.
+
+```
+                    DC + goal form   + SoT form       delta            95% CI          P
+test span              0.20266        0.20141      -0.00125   [-0.00205, -0.00043]   0.999
+sensitivity span       0.19894        0.19801      -0.00093   [-0.00171, -0.00016]   0.992
+```
+
+Both intervals exclude zero. Slightly stronger than reported: the screen had the sensitivity span
+at P 0.91-0.97 with the interval straddling zero.
+
+Note what the control already contains. Trailing **goal** form at the same K=20 window is in the
+baseline, so this is not generic recency — it is information a goal differential over an identical
+window does not carry.
+
+### The half-life sweep reproduces 2026-08-25 exactly
+
+```
+   30  0.24269      365  0.20399   <- winner
+   60  0.22006      548  0.20426
+   90  0.21895      730  0.20434   <- incumbent
+  120  0.20717     1095  0.20460
+```
+
+Same winner, same margin of 0.000275, interior to the grid. The re-selection entry of 2026-08-25
+already tested this move and Rule 1 refused it as UNRESOLVED at delta -0.000355, CI [-0.001220,
++0.000557]. Nothing new; the instrument reproduces.
+
+That alone is a strong magnitude argument. The half-life axis's best available move is 0.000355 and
+cannot be resolved from zero, while the shots effect is 0.00125 and is resolved on two decades. An
+axis that cannot produce a resolved gain of any size is unlikely to be the source of one three and a
+half times larger.
+
+### But it was measured, not argued
+
+Dixon-Coles refit at 365 days on both evaluation spans, the same stack rebuilt on each base:
+
+```
+                      base 730d (shipped)                 base 365d (grid winner)
+test span         -0.00125 [-0.00205, -0.00043]      -0.00135 [-0.00230, -0.00039]
+sensitivity span  -0.00093 [-0.00171, -0.00016]      -0.00102 [-0.00184, -0.00020]
+```
+
+**Giving the base the shorter memory does not absorb the gain. It slightly enlarges it**, on both
+decades, with all four intervals excluding zero. The falsifier holds.
+
+### An observation that must not become a selection
+
+```
+raw dixon-coles   test span   730d 0.20047   365d 0.19940   -0.00107
+                  sens span   730d 0.19671   365d 0.19670   -0.00001
+```
+
+A 0.00107 improvement on the test span from a one-line config change is exactly the temptation the
+tuning protocol exists to refuse. It is not available: selecting a hyperparameter on the acceptance
+instrument is the thing the separate tuning span is for, and that span returned UNRESOLVED.
+
+The sensitivity span settles it independently anyway — the same change is worth 0.00001 there. A
+gain that appears on one decade and vanishes on the other is what an unresolved plateau looks like
+from the inside, and it is a cleaner demonstration of why Rule 1 exists than the rule's own
+founding case.
+
+### Status
+
+`dc+sot-form` proceeds to implementation under the pre-registration, family size 2. No config value
+moves; 730 stands. The refits live in the session scratchpad and not in `output/walk_cache*`, so the
+project's cache is untouched and still fingerprinted on the shipped configuration.
+
+Recorded because it is the second time today that work was re-derived which the ledger already
+held — Pitcan this morning, this sweep now — and in both cases the existing version was the better
+one. The ledger is 6,700 lines and is being treated as a reference when it should be read first.
