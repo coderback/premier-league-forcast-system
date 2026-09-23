@@ -6971,3 +6971,48 @@ behind them, so the gate does not meet it.
 
 The gate, both decades, `--family-size 2`: sensitivity first, then the test span with
 `--against-span`. Roughly 45 minutes a span; the arm walks at about 1.7x the baseline.
+
+## 2026-09-23 — RESULT: `dc+sot-form` passes all four gates, the first arm ever to
+
+```
+                               RPS      vs baseline                        vs market (Shin, avg_closing)
+sensitivity  dixon-coles     0.1967     (baseline)
+2006-16      dc+sot-form     0.1953    -0.0014 [-0.0021, -0.0006] P=1.000
+test         dixon-coles     0.2005     (baseline)                         +0.0082
+2016-26      dc+sot-form     0.1982    -0.0022 [-0.0032, -0.0012] P=1.000  +0.0050   (2,660 priced)
+
+ACCEPT  gate1 pass (CI excludes 0)   gate2 pass   gate3 pass (BH p = 0.0001, declared family of 2)
+        gate4 pass (sensitivity P(better) = 1.000)
+```
+
+Log loss 0.9718 → 0.9650 on the test decade; skill 16.1% → 17.1%. **The gap to the closing line
+falls from +0.0082 to +0.0050, about 39% of it.** Still behind the market by a clear margin, so this
+is not an apparent edge and the parity-seeking rule has nothing to object to.
+
+### Larger than the screen, which is why it was audited before being written down
+
+The stack's gain against raw DC was -0.00150 on the test decade and -0.00049 on the sensitivity
+decade; the covariate construction delivers -0.0022 and -0.0014. A result better than the thing that
+predicted it is the shape a leak takes, so the arm was re-run at 12 randomly chosen test-decade
+barriers with **every shot count dated on or after the barrier deleted from the corpus**. All 12
+forecasts are byte-identical. The term cannot see the future.
+
+(The first version of that check blanked shots from the first barrier of a 15-barrier stretch and
+found differences — correctly, because by the tenth barrier those matches are the past. The check was
+wrong, not the model; it is recorded because a reader rerunning it would hit the same thing.)
+
+The plausible reason the covariate beats the stack: the stack learned one weighting per season from
+out-of-sample log-odds, while the covariate is refit at every barrier inside the likelihood, on the
+same time-decayed sample as the strengths it sits on top of.
+
+### What the acceptance does not settle
+
+* **The selection burden stands** as the pre-registration stated it: this came out of a screen of
+  about nine feature sets and two windows, chosen from roughly sixty candidates. BH corrects for the
+  two arms declared, not for that search. The tuning-span check (-0.00084, all six seasons negative)
+  and the sensitivity decade are the evidence that is independent of it.
+* **The window of 20 is screened, not tuned.** The rule is explicit: *an accepted variant earns a
+  hyperparameter retune BEFORE production wiring.* That is the window, and the half-life, whose
+  optimum may move now that shots carry part of the recency the decay used to — on the tuning span,
+  at `tuning_min_train_matches`, through `selection_is_resolved`.
+* **Nothing is wired.** Production is still plain dixon-coles.
