@@ -216,6 +216,37 @@ def test_ftr_disagreeing_with_goals_raises(tmp_path: Path) -> None:
         _read(path)
 
 
+_HT_HEADER = f"{_HEADER},HTHG,HTAG,HTR"
+
+
+def test_half_time_result_is_parsed_as_a_code(tmp_path: Path) -> None:
+    """`HTR` was coerced to a number with the half-time goals, and so was NaN on every row."""
+    path = _write_season(
+        tmp_path,
+        "E0,17/08/2024,Arsenal,Chelsea,2,1,H,0,1,A\nE0,17/08/2024,Everton,Fulham,0,0,D,0,0,\n",
+        header=_HT_HEADER,
+    )
+    frame, _ = _read(path)
+    by_home = frame.set_index("home_team")
+    assert by_home.at["Arsenal", "ht_result"] == "A"
+    assert pd.isna(by_home.at["Everton", "ht_result"])        # a blank code stays missing
+    assert by_home.at["Arsenal", "ht_away_goals"] == 1         # the goals still parse as numbers
+
+
+def test_htr_disagreeing_with_half_time_goals_raises(tmp_path: Path) -> None:
+    path = _write_season(tmp_path, "E0,17/08/2024,Arsenal,Chelsea,2,1,H,1,0,D\n",
+                         header=_HT_HEADER)
+    with pytest.raises(schema.SchemaError, match="HTR disagrees"):
+        _read(path)
+
+
+def test_unknown_htr_code_raises(tmp_path: Path) -> None:
+    path = _write_season(tmp_path, "E0,17/08/2024,Arsenal,Chelsea,2,1,H,1,0,X\n",
+                         header=_HT_HEADER)
+    with pytest.raises(schema.SchemaError, match="unexpected HTR codes"):
+        _read(path)
+
+
 def test_team_playing_itself_raises(tmp_path: Path) -> None:
     path = _write_season(tmp_path, "E0,17/08/2024,Arsenal,Arsenal,1,0,H\n")
     with pytest.raises(schema.SchemaError, match="plays itself"):
@@ -311,6 +342,12 @@ def test_real_corpus_loads() -> None:
     assert set(completed.loc[["1993-94", "1994-95"]]) == {462}
     assert set(completed.drop(index=["1993-94", "1994-95"])) == {380}
     assert corpus["date"].min() == pd.Timestamp("1993-08-14")
+    # The half-time code is present exactly where the half-time goals are. It was declared and
+    # populated on zero rows until 2026-09-23; a regression to that shows up here as a count gap.
+    played = corpus[corpus["played"]]
+    have_goals = played["ht_home_goals"].notna() & played["ht_away_goals"].notna()
+    assert have_goals.sum() > 50_000
+    assert (played["ht_result"].notna() == have_goals).all()
     # 2004/05 is the only cp1252 era, and it is cp1252 in all four divisions.
     assert {m.season for m in metas if m.encoding == "cp1252"} == {"2004-05"}
 

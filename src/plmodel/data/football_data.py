@@ -291,6 +291,11 @@ def _check_season_window(dates: pd.Series, code: str, source: str) -> None:
 
 # --- read one season --------------------------------------------------------------------------
 
+def _result_codes(raw: pd.Series) -> pd.Series:
+    """An H/D/A column as stripped text, blanks as missing."""
+    return raw.astype(str).str.strip().replace({"": None, "nan": None, "None": None})
+
+
 def read_season(
     path: Path, division: str, code: str, *,
     aliases: dict[str, str], roster: set[str],
@@ -333,15 +338,18 @@ def read_season(
         "away_team": canonicalise(raw["AwayTeam"], aliases, roster, source=source),
         "home_goals": home_goals,
         "away_goals": away_goals,
-        "result": raw["FTR"].astype(str).str.strip().replace({"": None, "nan": None, "None": None}),
+        "result": _result_codes(raw["FTR"]),
         # The in-progress season's file carries its unplayed fixtures with blank scores. They are
         # kept — they are the fixture list `pl live` and the season simulator need — but flagged,
         # so no fitting or scoring path can pick them up by accident.
         "played": home_goals.notna() & away_goals.notna(),
     }
     for src_col, dest in {**schema.HALFTIME_COLUMNS, **schema.MATCH_STAT_COLUMNS}.items():
-        if src_col in raw.columns:
-            cols[dest] = pd.to_numeric(raw[src_col], errors="coerce")
+        if src_col not in raw.columns:
+            continue
+        # A letter code coerced to a number is NaN on every row, silently: `ht_result` was.
+        cols[dest] = (_result_codes(raw[src_col]) if dest in schema.RESULT_CODE_COLUMNS
+                      else pd.to_numeric(raw[src_col], errors="coerce"))
     for src_col, dest in schema.TEXT_COLUMNS.items():
         if src_col in raw.columns:
             cols[dest] = raw[src_col].astype(str).str.strip().replace({"": None, "nan": None})

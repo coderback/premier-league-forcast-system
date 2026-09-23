@@ -6828,3 +6828,29 @@ project's cache is untouched and still fingerprinted on the shipped configuratio
 Recorded because it is the second time today that work was re-derived which the ledger already
 held — Pitcan this morning, this sweep now — and in both cases the existing version was the better
 one. The ledger is 6,700 lines and is being treated as a reference when it should be read first.
+
+## 2026-09-23 — FIX: `ht_result` was an ingest bug, not a source gap, and is now populated
+
+The unused-data survey found `ht_result` declared in `data/schema.py` and populated on zero rows,
+and filed it as a gap on the source's side. It was not. `read_season` ran every column of the
+half-time group through `pd.to_numeric(..., errors="coerce")`, and `HTR` is a letter. Every `H`,
+`D` and `A` became NaN without a warning, on every row of every season.
+
+Before tightening anything, the raw files were audited directly: across the 136 cached season files,
+56,539 rows carry both `HTR` and half-time goals, every code is `H`/`D`/`A`, and **not one** row
+disagrees with its own `HTHG`/`HTAG`. So the half-time code is now held to the same check as `FTR`
+— valid codes, agreement with its goals — through one loop over `RESULT_CODE_COLUMNS` rather than a
+second copy of the check.
+
+```
+                      before   after
+ht_result, all divs        0   56,539   (= rows with half-time goals, row for row)
+ht_result, E0              0   11,830   92.8%, from 1995-08-19
+```
+
+Three unit tests, each confirmed to fail against the old ingest; `test_real_corpus_loads` now
+asserts the code is present exactly where the goals are. No arm reads the column, and the walk-cache
+fingerprint hashes only the pool's identity columns, so no cached forecast moves.
+
+What this does **not** do is make half-time data an arm. The column is redundant with the half-time
+goals, which were already populated and are the input any half-time arm would actually use.

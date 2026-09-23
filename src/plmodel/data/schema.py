@@ -66,6 +66,14 @@ _COUNT_COLUMNS: tuple[str, ...] = ("home_goals", "away_goals", *MATCH_STAT_COLUM
 # Valid full-time / half-time result codes.
 RESULT_CODES: frozenset[str] = frozenset({"H", "D", "A"})
 
+# Letter-coded result columns: canonical name -> (source name, the goal pair it must agree with).
+# These are parsed as text and never as numbers. Coercing `HTR` through `pd.to_numeric` alongside
+# the half-time goals is how `ht_result` was declared here and populated on zero rows.
+RESULT_CODE_COLUMNS: dict[str, tuple[str, str, str]] = {
+    "result": ("FTR", "home_goals", "away_goals"),
+    "ht_result": ("HTR", "ht_home_goals", "ht_away_goals"),
+}
+
 # Canonical identity columns, in order. Every downstream join keys on these.
 IDENTITY_COLUMNS: tuple[str, ...] = (
     "date", "division", "season", "matchday", "home_team", "away_team",
@@ -135,21 +143,26 @@ def validate_frame(df: pd.DataFrame, source: str) -> None:
     if len(played) == 0:
         return  # a fixture-list-only file (a season that has not kicked off) is valid
 
-    bad_codes = set(played["result"].dropna().unique()) - RESULT_CODES
-    if bad_codes:
-        raise SchemaError(f"{source}: unexpected result codes {sorted(bad_codes)}")
-
-    # The source's own FTR must agree with its own goals. The brief requires verifying the
+    # The source's own result codes must agree with its own goals. The brief requires verifying the
     # full-time column conventions per season file rather than trusting them: the WC2026 project
-    # found football-data.co.uk's World Cup workbook had FT columns inconsistent across sheets.
-    derived = derive_result(played["home_goals"], played["away_goals"])
-    stated = played["result"]
-    mismatch = stated.notna() & (derived != stated)
-    if mismatch.any():
-        rows = played.loc[mismatch, ["date", "home_team", "away_team", "home_goals", "away_goals"]]
-        raise SchemaError(
-            f"{source}: {int(mismatch.sum())} row(s) where FTR disagrees with FTHG/FTAG:\n{rows}"
-        )
+    # found football-data.co.uk's World Cup workbook had FT columns inconsistent across sheets. The
+    # half-time pair is held to the same standard; on 2026-09-23 all 56,539 raw rows carrying both
+    # HTR and half-time goals agreed, so this check costs nothing and guards the next file.
+    for col, (src, home_col, away_col) in RESULT_CODE_COLUMNS.items():
+        if col not in played.columns:
+            continue
+        stated = played[col]
+        bad_codes = set(stated.dropna().unique()) - RESULT_CODES
+        if bad_codes:
+            raise SchemaError(f"{source}: unexpected {src} codes {sorted(bad_codes)}")
+        home, away = played[home_col], played[away_col]
+        derived = derive_result(home, away)
+        mismatch = stated.notna() & home.notna() & away.notna() & (derived != stated)
+        if mismatch.any():
+            rows = played.loc[mismatch, ["date", "home_team", "away_team", home_col, away_col]]
+            raise SchemaError(
+                f"{source}: {int(mismatch.sum())} row(s) where {src} disagrees with its goals:\n{rows}"
+            )
 
 
 def derive_result(home_goals: pd.Series, away_goals: pd.Series) -> pd.Series:
