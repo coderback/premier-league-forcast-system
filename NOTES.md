@@ -6903,3 +6903,71 @@ not mis-specification.
 `dc+sot-form` proceeds alone. `--family-size` stays at the declared 2 rather than being reduced
 after looking at data: the measured effect of -0.00125 clears even the family-3 MDE of 0.0008, so
 the conservative bar costs nothing, and moving it would be an amendment made after the fact.
+
+## 2026-09-23 — BUILD and TUNING CHECK: `dc+sot-form` as a covariate, and it holds on unseen seasons
+
+Written before either gate run, so the pre-gate record is fixed before a gate result exists.
+
+### What was built, and what was not
+
+The screen measured shots as a **stack**: a multinomial logit on cached dixon-coles log-odds plus
+trailing goal and shots-on-target form, refit each season on earlier seasons. As a registered arm
+that construction needs two warm-up seasons of honest out-of-sample base forecasts before every
+span, and leaves early rows unforecast or falling back to the base.
+
+What was built instead is a `sot_form` term on the existing covariate seam: each side's mean
+shots-on-target differential over its previous 20 **recorded** league matches, entering the rates
+as one differential coefficient (`log lam += b·(v_home − v_away)`, `log mu −= …`). That is the
+pre-registered hypothesis — a trailing-form regressor on top of goal-based strength — in the
+project's own machinery, with no warm-up gap. **It is not the construction the screen measured**,
+so the screen's effect size belongs to the stack, not to this arm; the check below is the first
+measurement of this one. Missing counts are skipped, not zero-filled; the window crosses the summer;
+rows being forecast never contribute their own shots. The window of 20 is screened, not tuned, and
+`config.yaml` says so beside it.
+
+### A margin the screen's entries did not state
+
+The screen's control was DC plus goal form, not raw DC. Against **raw** dixon-coles on the same
+rows — the gate's actual baseline:
+
+```
+                    raw DC     stack+goal   stack+goal+SoT   vs raw DC
+test span          0.20291     0.20266       0.20141        -0.00150
+sensitivity span   0.19850     0.19894       0.19801        -0.00049
+```
+
+On the sensitivity decade the goal-form control is itself worse than raw DC, so the shots gain
+against the real baseline there is -0.00049, at the resolution floor. Gate 4 asks only for
+direction on that decade, so the arm remains viable; the margin is thinner than the pre-registration
+implied.
+
+### The tuning-span check
+
+Bar declared before the run: withdraw if the arm is not better than dixon-coles on the
+shots-covered tuning seasons (delta ≥ 0 or P(better) < 0.5); resolution reported, not required.
+
+`pl compare` applies `min_train_matches: 3800` to every span, so its tuning walk opens on
+2003-01-11 (the 2026-08-25 correction). The same two arms were therefore also run through
+`run_arm` at `tuning_min_train_matches`, over every season with shots, 2000-01 to 2005-06:
+
+```
+window                 n     delta      95% CI                 P(better)
+2000-01..2005-06    2,280  -0.00084  [-0.00180, +0.00013]      0.958
+before 2003-01-11     977  -0.00030  [-0.00210, +0.00144]      0.626
+from 2003-01-11     1,303  -0.00124  [-0.00234, -0.00016]      0.986   = pl compare's -0.0012
+per season: -0.00057  -0.00035  -0.00036  -0.00175  -0.00126  -0.00073
+```
+
+**It passes: negative on the window and in all six seasons**, on data the screen never touched —
+the third independent window pointing the same way. The early seasons are weaker for a known
+reason: shots begin in 2000-08, so each side's window is built on little history there.
+
+One edge case recorded because it will recur for any term fitted from the first rows of new data:
+`cov_sot_form` settles at +0.030 to +0.034, but one early fit, estimated on a few weeks of shots,
+went to the box edge at -0.10. Both evaluation decades open with at least six seasons of shots
+behind them, so the gate does not meet it.
+
+### Next
+
+The gate, both decades, `--family-size 2`: sensitivity first, then the test span with
+`--against-span`. Roughly 45 minutes a span; the arm walks at about 1.7x the baseline.
