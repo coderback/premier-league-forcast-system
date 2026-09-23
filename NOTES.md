@@ -7078,3 +7078,172 @@ already in this ledger keeps meaning what it says. `CLOSED-LINES.md` is updated 
 
 677 unit tests pass; the seams, covariates, live, predict and config integration tests pass (15, in
 9.5 minutes).
+
+## 2026-09-23 — PRE-REGISTRATION: the second round, a family of three, judged against `dc+sot-form`
+
+The first round's research programme ran without a pre-registration and recorded that as a
+procedural failure: *"the next one should open with the entry rather than close with it."* This is
+that entry. **Nothing below has been screened, fetched or built.** Every number here is either an
+existing ledger measurement or a bar being fixed now.
+
+### The baseline has moved
+
+Production is `dc+sot-form` (wired today), so every arm in this round is judged against it:
+
+```
+pl compare --arms dc+sot-form,<A>,<B>,<C> --family-size 3            then --sensitivity
+```
+
+`dixon-coles` stays pinned and plain as the historical baseline; nothing in this round is measured
+against it. The gap still to close is **+0.0050** against the Shin de-vigged closing line.
+
+### The instrument, re-measured before any candidate touches it
+
+The four-gate MDE was measured against plain dixon-coles's loss vector. The ledger states it twice and
+the two statements disagree at family 1 (the research entry's table gives 0.0008 flat; the first
+pre-registration quotes 0.0004 / 0.0008 / 0.0010 at families 1 / 3 / 5). **They agree at family 3:
+0.0008.** Step 0 repeats the injection measurement against `dc+sot-form`'s own per-match losses on
+both decades, using the same machinery. It touches no candidate, so running it first is permitted.
+If the family-3 MDE against the new baseline exceeds **0.0012**, this round is not worth running as
+declared, and that is recorded rather than run anyway.
+
+### What is excluded, and why: exposure, not just prior
+
+**More match counts as form: total shots, corners, shots + SoT, all counts.** They look like the
+obvious next step and are **not eligible**, because the research screen already measured them on
+**both evaluation decades**. What it saw, against the goal-form control at K=20:
+
+```
+                  test decade    sensitivity decade
+SoT alone          -0.00102         -0.00098
+shots + SoT        -0.00143         -0.00052
+all counts         -0.00120         -0.00057
+corners            -0.00063         -0.00094
+```
+
+Adding counts on top of shots on target made the sensitivity decade **worse** in both combinations.
+A result seen on the acceptance instrument cannot be pre-registered afterwards as if unseen. If this
+line is ever reopened, it has to be on seasons that screen never touched, which means live seasons.
+
+**The half-life move to 1460 days** that the retune pointed at is unresolved on the tuning instrument
+(-0.00024, CI [-0.00098, +0.00064]), and more tuning seasons do not exist. Not an arm.
+
+**Referee → cards and fouls.** Real and large, but a counts target with no market, so gate 2 is
+permanently NOT EVALUABLE. Outside a 1X2 family.
+
+**Decisions for the project's owner, deliberately outside this family:** lineups via 11v11
+(terms-of-use judgement, still open); PhysioRoom injury tables via the Internet Archive (terms never
+reviewed); and **using pre-close market prices as a model input.** The last is one of the literature's
+two documented routes to parity. It changes what this project is: the harness judges a model against
+the market, and a model built from the market is a different object. It is not a modelling choice to
+make inside a pre-registration.
+
+### The selection, stated
+
+Six candidates were considered for this entry: the four exclusions above, plus the survivors below
+from the first programme's list and from the ledger's own notes. Three are declared. Benjamini-Hochberg
+across three corrects for three. It does not correct for the first programme's sixty.
+
+### Arm A: `dc+sot-form-adj` — opponent-adjusted shots-on-target form
+
+**Hypothesis.** Raw trailing SoT form mixes a team's quality with its recent schedule. Twenty matches
+against weak sides inflate it, twenty against strong sides deflate it. Removing the schedule leaves a
+cleaner regressor.
+
+**Construction.** Replaces the `sot_form` term rather than adding to it, because the two would be
+near-collinear. For each past match, the side's adjusted differential is
+`(SoT_for − opp_conceded) − (SoT_against − opp_produced)`. Here `opp_conceded` and `opp_produced` are
+the opponent's own trailing means over *its* previous 20 recorded matches, strictly before. The window
+stays 20: the retune found K flat from 10 to 45, and this arm is not a second search over it.
+
+**Why it is not covered by the acceptance.** The screen named it as its first caution ("raw
+unadjusted counts, no opponent adjustment") and never measured it.
+
+**Pre-flight falsifier, on the tuning span only (2000-01..2005-06).** If the adjusted and raw trailing
+differentials correlate above **0.98** across club-matches, the schedule component is too small to
+matter and the arm is withdrawn unbuilt.
+
+**Outcomes.** PASS: schedule noise was hiding shot information, and production's term is replaced.
+NULL: the raw term already carries what shots carry. FALSIFIER FIRES: the same, found for free.
+
+### Arm B: `dc+sot-form+manager` — managerial change
+
+**Hypothesis.** A change of manager shifts a club's level in a way that a 730-day goal memory and a
+20-match shots window both learn late. Named as a candidate by this ledger on 2026-08-17 ("more
+mid-season managerial change … would be an arm, not an entry"), never tested.
+
+**Construction.** One covariate term per side: whether the club's manager changed within its
+previous **10** league matches. Caretaker appointments count as changes. Ten is fixed now, a priori,
+as roughly a quarter of a season, and it is **not tuned**. **The sign is not assumed.** The literature
+is split between a genuine new-manager effect and pure regression to the mean after a bad run, and an
+estimate is the point.
+
+**Data.** The "Managerial changes" tables in Wikipedia's per-season Premier League articles, CC BY-SA
+4.0, read through the MediaWiki API.
+
+**Pre-flight, the collection-era trap first.** Changes per season, every season 2000-01..2025-26.
+Withdrawn unbuilt if either decade's mean density falls below **70%** of the other's, if any season's
+table is missing, or if a spot check of ten changes against the clubs' own articles finds more than
+one disagreement on the date. A dataset whose range is real and whose density is not has already
+cost this project twice.
+
+**Magnitude, stated honestly.** Roughly eight to twelve changes a season touch perhaps a fifth of
+matches. Delivering 0.0008 pooled needs about 0.004 RPS on each affected match, which is large. The
+prior is weak.
+
+**Falsifier.** If the gain does not concentrate in matches where the term is non-zero, the
+coefficient is absorbing something else, and the arm is withdrawn even on a passing RPS.
+
+### Arm C: `dc+sot-form+spend` — summer net transfer spend
+
+**Hypothesis.** Summer squad investment is information about the coming season that last season's
+goals and shots cannot carry. It speaks directly to the "widening wealth gap" this ledger offered on
+2026-08-17 as a reason the modern decade needs more drift.
+
+**Construction.** One covariate term per side: the club's net disclosed summer spend, **z-scored within
+each season** across its twenty clubs. The raw number is meaningless across twenty years of fee
+inflation; the within-season rank is what could carry information. Constant for the season. One
+coefficient, estimated by the fit.
+
+**Data.** Wikipedia's "List of English football transfers summer YYYY" series, CC BY-SA 4.0, from
+2002-03 (verified by the first programme). About 20% of fees are "Undisclosed", **not missing at
+random**, and are counted as zero. That biases the term toward zero; it does not invent signal.
+Transfermarkt is not an alternative: closed on licence.
+
+**Pre-flight, the collection-era trap first.** Disclosed-fee transfers per club-season, compared
+across the two decades at the same 70% bar. Plus the exact test that exposed `transfermarkt-datasets`:
+rows touching the league's largest clubs in 2006 against 2024. A backward thinning withdraws the arm.
+
+**Tuning span is thin.** The data starts in 2002-03, so the tuning-span check covers four seasons.
+Stated now so a weak check is not read later as a strong one.
+
+**Falsifier.** A spend term is correlated with being good, so it can absorb strength rather than add
+information. If its gain is concentrated in the second half of seasons, where goals have already
+revealed what the spend bought, rather than the first half, the arm is withdrawn.
+
+### Sequence, cost, and the bar that does not move
+
+```
+0. MDE vs dc+sot-form, both decades                         ~1.5 h   can stop the round
+1. A pre-flight (correlation, tuning span)                  minutes  can kill A
+2. B and C data: fetch, density pre-flights                 ~1 day   can kill B and/or C
+3. build survivors on the covariate seam                    B and C need a lookup table handed to the
+                                                            design, which today reads only history
+4. tuning-span check per survivor, bar as for dc+sot-form   ~5 min each
+5. one compare run per decade, all survivors, family 3      ~1-1.5 h each
+```
+
+**`--family-size` stays 3 whatever is withdrawn before the gate.** Declared once, here. Withdrawals
+shrink the work, never the bar.
+
+**Expected outcome, stated now.** Most likely none passes. A refines a construction the gates have
+already accepted, and its ceiling is whatever schedule noise the raw term carries. B and C are the
+first arms in this project aimed at information the goals record does not contain. That is the kind
+of input the literature says can move the gap, but both arrive through a thin, coarse public proxy.
+
+**Licence.** Wikipedia text is CC BY-SA 4.0. Raw pulls go to `data/cache/` (gitignored). Any derived
+table committed to this repository carries attribution and the same licence.
+
+### Status
+
+Nothing screened, fetched or built. No config value moves.
