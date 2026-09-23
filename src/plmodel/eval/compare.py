@@ -690,6 +690,17 @@ def _rest_split(ctx: ArmContext) -> np.ndarray:
     return _context_arm(ctx, terms=("rest",), mode="split")
 
 
+@register("dc+sot-form")
+def _dc_sot_form(ctx: ArmContext) -> np.ndarray:
+    """Trailing shots-on-target differential as one coefficient on top of the goal-based strengths.
+
+    The external-regressor construction of the shots hypothesis. ``dc+sot`` put shots INSIDE the
+    likelihood as a second channel sharing the strengths, and was null; here the strengths are the
+    production model's and shots can only add what they have not already absorbed.
+    """
+    return _context_arm(ctx, terms=("sot_form",), mode="diff")
+
+
 @register("congestion")
 def _congestion(ctx: ArmContext) -> np.ndarray:
     """Matches already played in a trailing window, instead of the gap since the last one.

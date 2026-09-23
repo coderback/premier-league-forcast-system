@@ -45,7 +45,7 @@ def test_an_unknown_mode_is_refused() -> None:
         cv.CovariateSpec(terms=("rest",), mode="ridge", rest_clip_days=14, rest_reference_days=7)
 
 
-@pytest.mark.parametrize("terms", [("rest",), ("congestion",), ("euro",)])
+@pytest.mark.parametrize("terms", [("rest",), ("congestion",), ("euro",), ("sot_form",)])
 def test_a_term_without_its_settings_is_refused(terms: tuple[str, ...]) -> None:
     """No plausible default. A clip or a window that nobody justified is a magic number."""
     with pytest.raises(cv.CovariateError):
@@ -137,6 +137,90 @@ def test_the_european_window_wraps_the_year_and_its_complement_does_not() -> Non
     summer = cv.in_european_window(dates, ("06-01", "09-13"))
     assert list(uefa) == [1.0, 1.0, 0.0, 0.0, 1.0]
     assert list(summer) == [1.0 - v for v in uefa], "the placebo window must be the complement"
+
+
+def _sot_frame(rows: list[tuple[str, str, str, str, float, float]]) -> pd.DataFrame:
+    """(date, season, home, away, home_sot, away_sot); goals are irrelevant to the term."""
+    return _frame([(d, s, h, a, 0, 0) for d, s, h, a, _, _ in rows]).assign(
+        home_sot=[r[4] for r in rows], away_sot=[r[5] for r in rows])
+
+
+def test_sot_form_matches_a_brute_force_reading_of_its_definition() -> None:
+    """Mean own-minus-opponent shots on target over the previous `window` RECORDED matches.
+
+    Random fixtures across a season boundary with a fifth of the counts missing, because the three
+    ways to get this wrong -- counting the match itself, reading a missing count as zero, and
+    stopping at the summer -- are all invisible in a fitted coefficient.
+    """
+    rng = np.random.default_rng(17)
+    teams = list("ABCDEF")
+    days = np.sort(rng.choice(np.arange(300), size=90, replace=False))
+    rows = []
+    for day in days:
+        home, away = rng.choice(teams, size=2, replace=False)
+        date = pd.Timestamp("2021-01-01") + pd.Timedelta(days=int(day))
+        season = "2020-21" if date < pd.Timestamp("2021-07-01") else "2021-22"
+        hs, as_ = (np.nan, np.nan) if rng.random() < 0.2 else rng.integers(0, 10, 2)
+        rows.append((str(date.date()), season, home, away, hs, as_))
+    frame = _sot_frame(rows)
+    window = 4
+
+    expected = {"home_team": np.full(len(frame), np.nan), "away_team": np.full(len(frame), np.nan)}
+    for column, out in expected.items():
+        for i in range(len(frame)):
+            team = frame[column].iloc[i]
+            seen = []
+            for j in range(i):
+                r = frame.iloc[j]
+                if np.isnan(r["home_sot"]):
+                    continue
+                if r["home_team"] == team:
+                    seen.append(r["home_sot"] - r["away_sot"])
+                elif r["away_team"] == team:
+                    seen.append(r["away_sot"] - r["home_sot"])
+            if seen:
+                out[i] = np.mean(seen[-window:])
+
+    home, away = cv.trailing_differential(frame, "home_sot", "away_sot", window=window)
+    np.testing.assert_allclose(home, expected["home_team"], equal_nan=True)
+    np.testing.assert_allclose(away, expected["away_team"], equal_nan=True)
+
+
+def test_sot_form_never_reads_the_shots_of_a_match_being_forecast() -> None:
+    """Shots are outcomes. A block of several dates must not see its own earlier matches."""
+    spec = cv.CovariateSpec(terms=("sot_form",), sot_form_window=5)
+    history = _sot_frame([("2021-08-01", "2021-22", "A", "B", 6, 2)])
+    ahead = _sot_frame([("2021-08-08", "2021-22", "A", "C", 9, 0),
+                        ("2021-08-15", "2021-22", "A", "B", 1, 1)])
+    home, _ = cv.per_side_values(ahead, history, "sot_form", spec, division="E0")
+    # A's second forecast still reads only the history: +4, not the mean of +4 and +9.
+    assert list(home) == [4.0, 4.0]
+    other = ahead.assign(home_sot=[0, 0], away_sot=[9, 9])
+    assert np.array_equal(cv.per_side_values(other, history, "sot_form", spec, division="E0")[0],
+                          home)
+
+
+def test_sot_form_behind_a_barrier_equals_sot_form_on_the_whole_corpus(cfg, corpus) -> None:
+    """For a single-date block -- every block the walk makes -- truncation changes nothing."""
+    spec = cfg.model.covariate_spec(terms=("sot_form",))
+    whole = cv.design(corpus, corpus.iloc[:0], spec, division="E0")
+    barrier = corpus.loc[corpus["date"] >= pd.Timestamp("2015-08-20"), "date"].min()
+    history = corpus[corpus["date"] < barrier].reset_index(drop=True)
+    block = corpus[corpus["date"] == barrier].reset_index(drop=True)
+    truncated = cv.design(block, history, spec, division="E0")
+    rows = np.flatnonzero((corpus["date"] == barrier).to_numpy())
+    assert len(rows) > 1 and np.abs(truncated.lam).sum() > 0
+    assert np.array_equal(truncated.lam, whole.lam[rows])
+
+
+def test_sot_form_is_undefined_before_the_source_recorded_shots(cfg, corpus) -> None:
+    """Shots begin in 2000-01. Before that the term is off, never zero-filled into a fit."""
+    spec = cfg.model.covariate_spec(terms=("sot_form",))
+    early = corpus[corpus["season"] <= "2000-01"].reset_index(drop=True)
+    built = cv.design(early, early.iloc[:0], spec, division="E0")
+    before = (early["season"] < "2000-01").to_numpy()
+    assert built.undefined["sot_form"] >= before.sum()
+    assert not built.lam[before].any()
 
 
 # --- the design -----------------------------------------------------------------------------------
@@ -399,6 +483,7 @@ def test_the_configured_settings_are_the_ones_the_arms_use(cfg) -> None:
     assert spec.congestion_window_days == settings["congestion_window_days"]
     assert spec.euro_top_k == settings["euro_top_k"]
     assert spec.euro_window == tuple(settings["euro_window"])
+    assert cfg.model.covariate_spec(terms=("sot_form",)).sot_form_window ==         settings["sot_form_window"]
     # The shipped configuration has the seam off, so the production model asks for no spec at all.
     assert cfg.model.covariate_spec() is None
     assert dataclasses.replace(spec, terms=()).is_inert

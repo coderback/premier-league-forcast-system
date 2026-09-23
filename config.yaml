@@ -237,6 +237,11 @@ model:
     # cov_euro is the WHOLE effect of a European commitment, the flag being 0 or 1. exp(0.5) =
     # 1.65x is far beyond anything a midweek fixture could plausibly do to a league match.
     cov_euro: [-0.5, 0.5]
+    # cov_sot_form is per unit of trailing shots-on-target differential per match. That
+    # differential runs about +/-6 across a season's clubs, so at the top of this box the extreme
+    # pairing moves a goal rate by exp(0.1*6) = 1.8x on top of what the fitted strengths already
+    # say -- beyond any plausible form effect, so an outer box rather than a constraint.
+    cov_sot_form: [-0.1, 0.1]
     # Outer box on a score-driven team state (model.seams.dynamics), in log-goal units of
     # deviation from the team's fitted level. exp(1.5) = 4.5x the team's own long-run rate, which
     # no run of form produces; this is a divergence guard for a recursion that could in principle
@@ -252,6 +257,8 @@ model:
     #   rest        days since that side's previous league match, within the season
     #   congestion  league matches that side played in a trailing window
     #   euro        that club qualified for Europe this season, inside UEFA's playing weeks
+    #   sot_form    that side's trailing shots-on-target differential -- a property of the TEAM,
+    #               carried here because it enters the rates exactly as the context terms do
     #
     # See model/covariates.py, and read its note on measurement error before reading a result:
     # rest is computed from LEAGUE matches only, because the corpus has no cup or European
@@ -633,6 +640,14 @@ model:
     # term is defined to be zero, which is what makes the out-of-window coefficient a placebo
     # test rather than a second free parameter.
     euro_window: ["09-14", "05-31"]
+    # Previous RECORDED league matches averaged into a side's shots-on-target form. SCREENED, not
+    # tuned, and the difference is declared rather than hidden: 20 was the headline window of the
+    # research screen of 2026-09-23, which tried two windows on the evaluation decades -- the
+    # selection burden the pre-registration states in writing. The mechanism supports the order of
+    # magnitude independently: a shot differential reaches a goal differential's rating precision
+    # in about 16 matches rather than 31, so a window much shorter than 16 is noise and one much
+    # longer is the goal-based strength again. The tuning-span check runs before any gate.
+    sot_form_window: 20
 
 # ---------------------------------------------------------------------------------------------
 # BACKTEST

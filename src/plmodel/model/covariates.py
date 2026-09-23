@@ -14,6 +14,15 @@ one:
 * **euro** — whether that club qualified for European football this season, restricted to the
   weeks UEFA actually plays. Its job is not to measure strength; see below.
 
+A fourth term breaks the pattern on purpose, and lives here because the machinery is identical:
+
+* **sot_form** — that side's mean shots-on-target differential over its previous ``window``
+  recorded league matches. It describes the TEAM, not the calendar. It is the external-regressor
+  construction of the shots hypothesis: shots sit on top of the goal-based strengths as one
+  coefficient, rather than inside the likelihood as a second observation channel sharing the same
+  strengths, which is what Arm 4 (``dc+sot``) did and was null at +0.00003. Read
+  ``trailing_differential`` for what counts as a recorded match.
+
 How a covariate enters the rates
 --------------------------------
 A context term is a *temporary strength adjustment*, so it enters exactly where strength does::
@@ -80,7 +89,11 @@ import pandas as pd
 TERM_REST = "rest"
 TERM_CONGESTION = "congestion"
 TERM_EURO = "euro"
-TERMS: tuple[str, ...] = (TERM_REST, TERM_CONGESTION, TERM_EURO)
+TERM_SOT_FORM = "sot_form"
+TERMS: tuple[str, ...] = (TERM_REST, TERM_CONGESTION, TERM_EURO, TERM_SOT_FORM)
+
+# The source columns the shots-form term reads, home then away.
+SOT_COLUMNS: tuple[str, str] = ("home_sot", "away_sot")
 
 MODE_DIFF = "diff"
 MODE_SPLIT = "split"
@@ -114,6 +127,7 @@ class CovariateSpec:
     congestion_window_days: int = _CONFIGURED
     euro_top_k: int = _CONFIGURED
     euro_window: tuple[str, str] = ("", "")
+    sot_form_window: int = _CONFIGURED
 
     def __post_init__(self) -> None:
         unknown = [t for t in self.terms if t not in TERMS]
@@ -135,6 +149,8 @@ class CovariateSpec:
             self.euro_top_k == _CONFIGURED or not all(self.euro_window)
         ):
             raise CovariateError("the euro term needs euro_top_k and euro_window")
+        if TERM_SOT_FORM in self.terms and self.sot_form_window < 1:
+            raise CovariateError("the sot_form term needs a sot_form_window of at least 1")
 
     @property
     def is_inert(self) -> bool:
@@ -224,6 +240,58 @@ def congestion_count(frame: pd.DataFrame, *, window_days: int) -> tuple[np.ndarr
     left = np.searchsorted(key, key - int(window_days), side="left")
     counts = (np.arange(len(rows)) - left).astype(float)
     return _scatter(len(frame), rows, is_home, counts)
+
+
+def trailing_differential(
+    frame: pd.DataFrame, home_col: str, away_col: str, *, window: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Each side's mean ``own - opponent`` count over its previous ``window`` recorded matches.
+
+    Strictly before: a match never counts itself. NOT season-bounded, unlike rest and congestion.
+    Those measure a gap in the calendar, which the summer resets; this measures how well a side is
+    playing, which the summer does not, and a window of twenty spans a season boundary for half of
+    every season's matches.
+
+    A match whose counts are missing is skipped rather than read as zero: before 2000-01 the source
+    records no shots at all, and a zero there would be a claim that two sides produced nothing.
+    A side with no recorded match behind it is undefined, NaN, and the design switches the term off.
+
+    Vectorised over one sort of the appearances, for the same reason ``_appearances`` is: the term
+    is rebuilt at every barrier of a walk.
+    """
+    n = len(frame)
+    if n == 0:
+        return np.zeros(0), np.zeros(0)
+    home_v = pd.to_numeric(frame[home_col], errors="coerce").to_numpy(dtype=float)
+    away_v = pd.to_numeric(frame[away_col], errors="coerce").to_numpy(dtype=float)
+    team = pd.factorize(np.concatenate([frame["home_team"].to_numpy(),
+                                        frame["away_team"].to_numpy()]))[0]
+    day = np.tile(pd.to_datetime(frame["date"]).to_numpy("datetime64[D]").astype(np.int64), 2)
+    diff = np.concatenate([home_v - away_v, away_v - home_v])
+    rows = np.tile(np.arange(n), 2)
+    is_home = np.concatenate([np.ones(n, dtype=bool), np.zeros(n, dtype=bool)])
+    order = np.lexsort((day, team))
+    team, diff, rows, is_home = team[order], diff[order], rows[order], is_home[order]
+
+    values = np.full(len(team), np.nan)
+    valid = ~np.isnan(diff)
+    if not valid.any():
+        return _scatter(n, rows, is_home, values)
+
+    # Rolling mean over the recorded entries only, each one INCLUDING itself ...
+    v_team, v_diff = team[valid], diff[valid]
+    k = np.arange(len(v_diff))
+    starts = np.r_[0, np.flatnonzero(v_team[1:] != v_team[:-1]) + 1]
+    group_start = np.repeat(starts, np.diff(np.r_[starts, len(k)]))
+    cum = np.r_[0.0, np.cumsum(v_diff)]
+    first = np.maximum(k + 1 - window, group_start)
+    through = (cum[k + 1] - cum[first]) / (k + 1 - first)
+
+    # ... then each appearance reads the latest such mean strictly before it, for the same side.
+    last = np.cumsum(valid) - valid - 1
+    same_side = (last >= 0) & (v_team[np.clip(last, 0, None)] == team)
+    values[same_side] = through[last[same_side]]
+    return _scatter(n, rows, is_home, values)
 
 
 def european_qualification(
@@ -368,6 +436,17 @@ def per_side_values(
         away = np.array([qualified.get((s, t), False)
                          for s, t in zip(seasons, frame["away_team"])], dtype=float)
         return home * window, away * window
+    if term == TERM_SOT_FORM:
+        # The rows being FORECAST never contribute their own shots: those are outcomes. Within a
+        # single-date walk block a club cannot precede itself anyway, but a caller predicting
+        # several dates at once would otherwise read the earlier ones' shots into the later.
+        predicting = history is not None and len(history) > 0
+        rows = frame.assign(**{c: np.nan for c in SOT_COLUMNS}) if predicting else frame
+        home, away = trailing_differential(
+            _combine(history, rows, extra=SOT_COLUMNS), *SOT_COLUMNS,
+            window=spec.sot_form_window,
+        )
+        return home[-len(frame):], away[-len(frame):]
     raise CovariateError(f"no measurement defined for covariate {term!r}")
 
 
@@ -389,7 +468,9 @@ def _completed(history: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([history[columns], frame[columns]], ignore_index=True)
 
 
-def _combine(history: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFrame:
+def _combine(
+    history: pd.DataFrame, frame: pd.DataFrame, *, extra: tuple[str, ...] = ()
+) -> pd.DataFrame:
     """History followed by the rows being described, with a fresh index.
 
     The backward-looking terms need each row's predecessors, and for a row being *forecast* those
@@ -397,7 +478,7 @@ def _combine(history: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFrame:
     term looks strictly backwards and a club plays at most once on a matchday, so no row of
     ``frame`` can ever be another row's predecessor.
     """
-    columns = ["date", "season", "home_team", "away_team"]
+    columns = ["date", "season", "home_team", "away_team", *extra]
     if history is None or len(history) == 0:
         return frame[columns].reset_index(drop=True)
     return pd.concat([history[columns], frame[columns]], ignore_index=True)

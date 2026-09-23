@@ -193,6 +193,7 @@ class ModelConfig:
             congestion_window_days=int(settings["congestion_window_days"]),
             euro_top_k=int(settings["euro_top_k"]),
             euro_window=(str(window[0]), str(window[1])),
+            sot_form_window=int(settings["sot_form_window"]),
         )
 
     def _scoreline_spec(self) -> CountSpec:
