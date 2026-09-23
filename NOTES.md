@@ -6543,3 +6543,72 @@ that was a fact about a configuration choice. That has its own CORRECTION entry 
 No config value moves, no code changed, no arm registered. `NOTES.md` is the only file this work
 touches. Three agents, roughly sixty candidates considered, three surviving, and the honest summary
 of the literature is that this project's remaining headroom is not in the goals pipe.
+
+## 2026-09-23 — CORRECTION: the research entry counts one source twice and credits the wrong verification
+
+Yesterday's RESEARCH entry presents Pitcan (2026) as an external finding the literature survey
+turned up, and says of it:
+
+> **Pitcan, Y. (2026), arXiv:2608.11505** ... verified directly, not taken on report.
+> [...] Overlapping intervals, and it independently reproduces **three** results this ledger
+> already holds
+
+Both halves of that are wrong, and they are wrong in a way that inflates the evidence.
+
+### Pitcan is not an external finding. It is a foundational reference of this project
+
+`pl reproduce --paper pitcan2026` has existed since **2026-08-17**, six days after the preprint was
+submitted. The entry recording it sits at line 711 of this file. That reproduction fetched the
+paper's HTML, transcribed §§4, 5.1-5.5 and 6.3-6.4 rather than reconstructing from the abstract,
+implemented the specification on Premier League data, and reproduced **three of four pool weights
+exactly**, establishing that the zero weight is a genuine boundary rather than an optimiser
+stopping early. There is also a `Correction 2 - Pitcan (2026) is load-bearing and was unverified`
+near the top of this ledger, and the name appears at lines 72, 97, 170, 512, 1036, 1189, 1235,
+1309, 1360 and 1388.
+
+So the survey did not find a replication. It rediscovered a reference this project had already
+verified computationally a month earlier, and by a much stronger method than the one I used.
+
+### "Verified directly" credits the wrong work
+
+What I did was fetch the arXiv abstract page and confirm the headline numbers matched what a
+subagent reported. What already existed in the repository was a full reimplementation scored on
+this corpus. Calling mine "verified directly, not taken on report" claims the stronger position
+while having done the weaker thing, in a repository that contained the stronger thing.
+
+I had also listed `pl reproduce` among the commands earlier in the same session and did not connect
+it. The briefing I gave the literature agent described the closed arms in detail and never
+mentioned that the project has a `reproduce` module, so the agent could not have known. That is a
+briefing failure, not an agent failure.
+
+### What this actually costs: the evidence is one source, not two
+
+The damaging sentence is "it independently reproduces three results this ledger already holds".
+The causation runs the other way for at least part of that list. The pooling-weight-zero result and
+the shots-channel result are in this ledger **because** Pitcan was reproduced here and Arm 4 was
+designed against it (lines 1189, 1235, 1309). Presenting them as independent corroboration counts
+one source twice.
+
+**Corrected position.** That a goals-only public-data model sits at roughly this distance from the
+closing line rests on: one preprint, un-peer-reviewed, about a different league, whose central
+result is a boundary solution — already reproduced here on our own corpus, which is real and
+substantial evidence — **plus** the survey's failure to find any counterexample in the peer-reviewed
+literature. Those are two different kinds of support, and the second is an absence rather than a
+finding. It is not two independent replications, and yesterday's entry reads as though it were.
+
+### What survives unchanged
+
+The conclusion. The gap is still approximately the documented floor for this class of model, the
+model is still better calibrated than the market and less sharp, and recalibration still could not
+have succeeded. The August reproduction supports all of that more firmly than the survey did. What
+changes is how much independent weight sits behind it, and who did the verifying.
+
+The rest of yesterday's entry stands: the measured four-gate floor, the gap localisation, the five
+closed lines and the three survivors were all produced by this programme and none of them depend on
+Pitcan.
+
+### Status
+
+No code, no config. Found while auditing an unrecognised filename in a test run --
+`tests/test_reproduce_pitcan2026.py` scrolled past, I did not recognise it, and checking rather
+than assuming is what surfaced this.
