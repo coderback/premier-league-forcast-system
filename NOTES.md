@@ -6612,3 +6612,133 @@ Pitcan.
 No code, no config. Found while auditing an unrecognised filename in a test run --
 `tests/test_reproduce_pitcan2026.py` scrolled past, I did not recognise it, and checking rather
 than assuming is what surfaced this.
+
+## 2026-09-23 — PRE-REGISTRATION: the two survivors of the research programme, as a family of two
+
+Written before any code, which is the thing the research programme itself failed to do and was
+corrected for earlier today. Declaring the family, the bars and the falsifiers now is what stops
+the results being read backwards later.
+
+### The family: two arms, declared
+
+**`dc+sot-form`** — shots on target as a trailing-form regressor on top of goal-based strength.
+**`dc+ha-strength`** — home advantage as a function of the fitted strength differential.
+
+`--family-size 2`. Not three, not five. The measured four-gate MDE is 0.0004 at family 1, 0.0008 at
+family 3 and 0.0010 at family 5; the candidate effect measured for `dc+sot-form` is -0.00100 on the
+test decade and -0.00068 to -0.00098 on the sensitivity decade, so a declared family of 3 leaves it
+marginal on the second span and a family of 5 puts it under the floor before it runs. There are
+exactly two survivors, so a third slot would raise the bar in exchange for nothing. The declaration
+can only ever tighten, so it is made once, here.
+
+### The selection burden, stated rather than assumed
+
+These two were chosen from roughly sixty candidate mechanisms and sources, and `dc+sot-form`
+specifically emerged from a screen that tried about nine feature sets across two trailing windows
+and two spans. Benjamini-Hochberg across a family of two corrects for the two arms actually run. It
+does **not** correct for the fifty-eight that were discarded or for the nine-way feature search.
+
+The screen's feature sets are not counted into the family because they were a screen and not arms —
+the same distinction this ledger already draws for Arms 11 and 12, which were stopped before a gate
+and never spent a slot. But a reader should treat a bare pass here as weaker than a bare pass from a
+cold pre-registration, and this paragraph exists so that judgement is available to them.
+
+### Arm 1: `dc+sot-form`
+
+**Hypothesis.** A shot-on-target differential estimates current team strength with less noise than a
+goal differential does, so a trailing-form regressor built from shots on target carries information
+about the next match that the goal-based fit has not yet absorbed.
+
+**Mechanism.** Measured on this corpus: a shot differential carries a signal-to-noise ratio of 0.247
+per match against 0.131 for goals, reaching a given rating precision in 16 matches rather than 31.
+
+**Distinction from the refuted arm.** Arm 4 (`dc+sot`) pooled shots on target as a second
+observation channel **inside the likelihood**, which forces shots and goals to share one latent
+strength, and was null at +0.00003. This uses shots as an external regressor **on top of** the
+goal-based strength, where no such constraint applies. The earlier null does not cover this
+construction.
+
+**Pre-registered bar.** The four gates, unchanged, at `--family-size 2`.
+
+**Falsifier — and it runs first.** Shots win at trailing windows of 5 to 10 matches and **lose** at
+38. That is the signature of recency rather than of shot information, and the shipped 730-day
+half-life is weakest exactly there. So: **if refitting the half-life on the tuning span absorbs the
+gain, the mechanism is recency and not shots, and the arm is withdrawn** whatever its RPS does.
+
+This is a pre-flight, not a gate, and it costs one tuning-span sweep against the ~33 minutes plus a
+permanent family slot that a full gate run costs. `sweep_half_life` and `selection_is_resolved`
+already exist for exactly this.
+
+**Outcomes.**
+* **FALSIFIER FIRES** — the gain is the 730-day half-life being too long, not shots. That closes the
+  shots-as-form line and hands over a live hyperparameter question, which is the more valuable of
+  the two results and the cheaper to act on.
+* **PASS** — shot counts carry strength information goals do not, and the 2000-08-19 count block
+  becomes a live input after twenty-six years of sitting unread.
+* **NULL** — the stacked-logit screen overstated it, which would say the proxy is not a safe way to
+  size a candidate and would put every future screen of that shape in doubt.
+* **UNRESOLVED** — the effect is real and under the floor, joining Arms 11 and 12. Distinct from
+  NULL: no measurement was made.
+
+### Arm 2: `dc+ha-strength`
+
+**Hypothesis.** Home advantage is not constant across teams; it varies with team strength. A single
+global `h` therefore mis-prices fixtures where the two sides are far apart.
+
+**Mechanism.** An away-favourite fixture is by construction a weak home side against a strong away
+side. If home advantage is larger for weaker home teams, a global `h` under-credits the home side in
+exactly those fixtures. The diagnostic says that is where the model is worst: away-favourite
+fixtures sit at +0.01132 against the closing line, home-favourite at +0.00636.
+
+**Distinction from the refuted arms.** Arm 2 tested a **time trend** and an **empty-stadium**
+indicator. Neither tested whether home advantage varies **across teams**. The literature is
+contested on the direction of the interaction, which makes this an estimate rather than an
+assumption.
+
+**Distinction from the closed shrinkage line.** Twenty free per-club home advantages is the setting
+where "there is no general shrinkage effect on this corpus" predicts failure, and with roughly 19
+home matches per club per season it is also the setting where the standard error swamps the effect.
+This arm is **one interaction parameter** on the already-fitted strength differential, not twenty
+free parameters, and that is the whole reason it is not Arm 12 again.
+
+**Pre-registered bar.** The four gates at `--family-size 2`, plus an arm-specific threshold. The
+asymmetry is worth 0.00188 pooled if it closes entirely. At a declared family of two the floor sits
+near 0.0006, so **the arm must capture roughly a third of the asymmetry** to be acceptable. Capturing
+a quarter yields 0.00047 and fails.
+
+**Falsifier.** If the gain does not concentrate in `slice_favourite == away_favourite`, the mechanism
+is not the claimed one and the arm is withdrawn even on a passing RPS. This is Arm 12's falsifier
+shape, which fired cleanly and closed a whole line, and it is the reason that arm was worth running.
+
+**Outcomes.**
+* **PASS** — home advantage is heterogeneous in team strength, and the one diagnostic asymmetry this
+  project has found is a real mis-specification.
+* **NULL** — the asymmetry is not home advantage, and the +0.00496 of structure between the two
+  halves needs a different explanation.
+* **FALSIFIER FIRES** — an RPS gain from somewhere other than away-favourite fixtures means the
+  interaction is absorbing something else, most likely a strength-scale artefact, and the reading of
+  the diagnostic is wrong.
+
+### Sequence and cost
+
+```
+1. half-life absorption pre-flight, tuning span          ~45 min   can kill Arm 1
+2. if Arm 1 survives: implement, then tuning-span pre-flight
+3. gate both arms, --family-size 2, both spans           ~33 min each
+```
+
+No arm reaches an evaluation span before its tuning-span resolution check. That rule has now saved
+this project two three-hour walks and two permanent family slots.
+
+### What would make this whole family not worth running
+
+Stated now so it cannot be rationalised later. The research programme's own conclusion is that the
+gap is approximately the documented floor for a goals-only public-data model, and the only routes to
+parity in the literature are to consume the market or to add team news. **Both arms are therefore
+expected to fail.** They are worth running because each is cheap, each has a falsifier that closes a
+line whichever way it goes, and neither has been tested. They are not worth running twice, and they
+are not worth a third arm.
+
+### Status
+
+No code yet. `--family-size 2` is the declaration; nothing below it can be loosened.
