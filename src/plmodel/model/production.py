@@ -10,9 +10,14 @@ two: `dc-gas` is accepted and unwired, and promoting it means every one of those
 learn about the dynamics seam. **This module exists so that is one edit rather than four**, and so
 that a command cannot quietly keep using the old model because nobody remembered it existed.
 
-It deliberately does **not** branch on the seam today. The production model is plain Dixon-Coles
-and `model.seams.dynamics.enabled` is false; this is the seam where a branch will go, not the
-branch itself. Adding the branch before the configuration is accepted would be wiring by stealth.
+The first seam to come through here is the covariate seam, after `dc+sot-form` passed all four
+gates on 2026-09-23: production is Dixon-Coles plus a trailing shots-on-target form term. It is
+read from `model.seams.covariates` rather than hardcoded, so the configuration stays the one place
+that says what production is, and a fit made with the seam off is the plain model byte for byte.
+
+**A covariate fit needs its history at prediction time.** The form term is rebuilt from the
+matches behind the barrier, so every caller of ``predict_proba`` / ``match_rates`` on a production
+fit passes the training frame; the fit raises rather than silently dropping the term without it.
 """
 from __future__ import annotations
 
@@ -52,4 +57,6 @@ def production_fit(
         param_bounds=cfg.model.param_bounds,
         min_effective_share=cfg.model.min_effective_share,
         max_iter=cfg.model.max_iter,
+        covariates=cfg.model.covariate_spec(),
+        cov_division=cfg.backtest.prediction_division,
     )

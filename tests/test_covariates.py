@@ -483,7 +483,48 @@ def test_the_configured_settings_are_the_ones_the_arms_use(cfg) -> None:
     assert spec.congestion_window_days == settings["congestion_window_days"]
     assert spec.euro_top_k == settings["euro_top_k"]
     assert spec.euro_window == tuple(settings["euro_window"])
-    assert cfg.model.covariate_spec(terms=("sot_form",)).sot_form_window ==         settings["sot_form_window"]
-    # The shipped configuration has the seam off, so the production model asks for no spec at all.
-    assert cfg.model.covariate_spec() is None
+    shots = cfg.model.covariate_spec(terms=("sot_form",))
+    assert shots.sot_form_window == settings["sot_form_window"]
+    # Production ships the accepted term, so its spec IS the one `dc+sot-form` was gated with.
+    assert cfg.model.covariate_spec() == shots
     assert dataclasses.replace(spec, terms=()).is_inert
+
+
+# --- production ------------------------------------------------------------------------------------
+
+def test_production_forecasts_are_byte_identical_to_the_gated_arm(cfg, corpus) -> None:
+    """What ships must be exactly what passed the gates, not a re-implementation that agrees.
+
+    `dc+sot-form` was accepted through `_context_arm`; production fits through `production_fit`.
+    Two paths to one model is how a shipped model drifts from its evidence, so at a barrier with no
+    earlier fit to warm-start from -- where the two should be the same computation -- they must
+    agree to the last bit.
+    """
+    from plmodel.eval.backtest import walk_forward
+    from plmodel.eval.compare import ArmSpec, run_arm
+    from plmodel.model.production import production_fit
+
+    on = dataclasses.replace(cfg, model=dataclasses.replace(
+        cfg.model, seams={**cfg.model.seams, "covariates": ["sot_form"]}))
+    split = walk_forward(corpus, first_season="2024-25", last_season="2024-25",
+                         min_train_matches=cfg.backtest.min_train_matches)[5]
+    gated, _ = run_arm(ArmSpec.parse("dc+sot-form"), corpus, [split], on)
+
+    fit = production_fit(on, corpus, split.barrier)
+    shipped = fit.predict_proba(split.test(corpus), split.train(corpus))
+    assert fit.cov_names == ("cov_sot_form",)
+    assert np.array_equal(gated, shipped)
+
+
+def test_sot_form_describes_a_fixture_typed_at_the_command_line() -> None:
+    """`pl predict` and `pl fit` build frames of a date and two teams: no season, no shots.
+
+    Missed by every other test here, which all describe corpus-shaped frames, and found by running
+    the commands after production adopted the term.
+    """
+    spec = cv.CovariateSpec(terms=("sot_form",), sot_form_window=5)
+    history = _sot_frame([("2021-08-01", "2021-22", "A", "B", 6, 2)])
+    typed = pd.DataFrame({"date": [pd.Timestamp("2021-08-08")], "home_team": ["A"],
+                          "away_team": ["B"]})
+    home, away = cv.per_side_values(typed, history, "sot_form", spec, division="E0")
+    assert (home[0], away[0]) == (4.0, -4.0)

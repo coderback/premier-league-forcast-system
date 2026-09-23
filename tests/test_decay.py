@@ -59,7 +59,6 @@ def test_the_shipped_seam_is_off_but_carries_tuned_values(cfg) -> None:
     to a single memory, the arms would silently become the baseline and their nulls would mean
     nothing, which is the failure the arm body raises on.
     """
-    assert cfg.model.seams_are_inert()
     assert cfg.model.decay_spec() is None, "the shipped seam must be off"
 
     live = cfg.model.decay_spec(enabled=True)

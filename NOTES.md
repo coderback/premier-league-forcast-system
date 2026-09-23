@@ -7044,3 +7044,37 @@ One direction recorded and not acted on: the half-life optimum moved **longer**,
 dixon-coles's own search (2026-08-25) pointed shorter, to 365 — both unresolved. It is what the
 mechanism predicts: once shots carry current form, the goal-based strengths can afford a longer
 memory. It is inside this window's noise, and that is the whole of what the protocol lets it say.
+
+## 2026-09-23 — WIRED: production is `dc+sot-form`
+
+With the retune unresolved and K=20 / 730 days standing, the accepted arm is now production.
+
+* `config.yaml`: `seams.covariates: [sot_form]` — the first seam ever switched on in production.
+  `test_seams.ADOPTED_SEAMS = ("covariates",)` in the same commit, as that mechanism was built for,
+  and the four tests that asserted "every seam ships off" now assert the adopted truth instead.
+* `production_fit` passes `covariate_spec()` from the config, so the configuration remains the one
+  place that says what production is.
+* `PRODUCTION_ARM = "dc+sot-form"`, which `pl backtest` scores. `pl live` freezes `dc+sot-form`
+  first and keeps `dixon-coles` beside it, so the frozen ledger carries the old and new production
+  models head to head on matches neither has seen.
+* `pl predict` and the `pl fit` table pass the training history, which a covariate fit requires.
+
+**The guarantee that matters:** a new unit test asserts `production_fit`'s forecasts are
+byte-identical to the `dc+sot-form` arm's at a barrier. What ships is exactly what passed the gates,
+not a second implementation that happens to agree.
+
+**One bug the unit suite could not see, found by running the commands.** `pl fit` and `pl predict`
+describe fixtures typed at the command line — a date and two teams, no season — and the helper that
+joins those rows onto the history demanded a `season` column, which the calendar terms need and the
+form term does not. Both commands raised `KeyError`. The form term now asks only for the columns it
+reads, and a unit test in that frame shape keeps it that way. `pl fit`, `pl predict` and
+`pl simulate` all run end to end; `pl live --dry-run` found no fixtures to freeze because matchweek 6
+has not yet been published.
+
+**For every arm from here:** the acceptance baseline is `dc+sot-form`, i.e.
+`pl compare --arms dc+sot-form,<candidate>`. The `dixon-coles` arm stays pinned and plain, because
+`test_the_baseline_arm_stays_plain_dixon_coles_whatever_the_seams_say` exists so that every delta
+already in this ledger keeps meaning what it says. `CLOSED-LINES.md` is updated to match.
+
+677 unit tests pass; the seams, covariates, live, predict and config integration tests pass (15, in
+9.5 minutes).

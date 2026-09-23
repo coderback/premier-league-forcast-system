@@ -116,8 +116,11 @@ def test_every_seam_is_declared(cfg) -> None:
     assert set(cfg.model.seams) == set(SEAM_NAMES)
 
 
-def test_shipped_configuration_has_every_seam_off(cfg) -> None:
-    assert cfg.model.seams_are_inert()
+def test_shipped_configuration_is_off_apart_from_the_adopted_seams(cfg) -> None:
+    """Switching the adopted seams off leaves nothing on -- and the adoption is real, not nominal."""
+    adopted_off = {**cfg.model.seams, **{s: ALL_OFF[s] for s in ADOPTED_SEAMS}}
+    assert dataclasses.replace(cfg.model, seams=adopted_off).seams_are_inert()
+    assert not cfg.model.seams_are_inert() or not ADOPTED_SEAMS
 
 
 def test_every_seam_has_an_explicit_off_value(cfg) -> None:
@@ -198,7 +201,7 @@ def test_the_production_path_is_reproducible(cfg, corpus) -> None:
 # Seams this project has adopted into production. Empty today. When one is adopted its name goes
 # here in the same commit that flips `enabled`, which makes adoption a one-line reviewable change
 # rather than someone deleting a red test at the end of a long day.
-ADOPTED_SEAMS: tuple[str, ...] = ()
+ADOPTED_SEAMS: tuple[str, ...] = ("covariates",)
 
 
 def test_every_unadopted_seam_ships_off(cfg) -> None:

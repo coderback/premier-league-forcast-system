@@ -123,9 +123,17 @@ def test_model_section(cfg: Config) -> None:
     assert -0.4 < lo < 0 < hi < 0.4
 
 
-def test_every_seam_ships_off(cfg: Config) -> None:
-    """The production configuration is the one the byte-identity tests pin."""
-    assert cfg.model.seams_are_inert()
+def test_the_only_seam_shipped_on_is_the_adopted_shots_form_term(cfg: Config) -> None:
+    """Production is Dixon-Coles plus `sot_form`, adopted 2026-09-23, and nothing else.
+
+    Any other seam shipping on would be an adoption nobody gated; test_seams.ADOPTED_SEAMS is where
+    one is declared.
+    """
+    import dataclasses
+
+    assert list(cfg.model.seams["covariates"]) == ["sot_form"]
+    off = {**cfg.model.seams, "covariates": []}
+    assert dataclasses.replace(cfg.model, seams=off).seams_are_inert()
 
 
 def test_the_season_block_is_typed_and_complete(cfg: Config) -> None:

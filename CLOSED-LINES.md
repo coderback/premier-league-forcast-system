@@ -12,11 +12,17 @@ distinction survives a hostile reading, the idea is already answered.
 
 ## The standing conclusion
 
-Production is the plain Dixon-Coles model the project started with. **Thirteen arms have been
-attempted; one passed, under an older two-gate rule, and was never wired.**
+**Updated 2026-09-23.** Production is Dixon-Coles plus a trailing shots-on-target form term
+(`dc+sot-form`), the first arm to pass all four gates and the first seam ever wired. Before it,
+thirteen arms had been attempted and one had passed, under an older two-gate rule, and was never
+wired. **A new arm is now judged against `dc+sot-form`, not against `dixon-coles`**: the
+`dixon-coles` arm stays pinned as the historical baseline every earlier delta was measured against.
 
-The gap to the de-vigged closing line is **+0.00824 RPS** (CI [+0.00582, +0.01074], n=2,660,
-`avg_closing`, test decade). It is approximately the documented floor for a goals-only public-data
+The gap to the de-vigged closing line was **+0.00824 RPS** for plain Dixon-Coles (CI [+0.00582,
++0.01074], n=2,660, `avg_closing`, test decade) and is **+0.0050** for `dc+sot-form`. Everything
+below was measured against the plain model and is read in that light.
+
+The original gap was approximately the documented floor for a goals-only public-data
 model — Pitcan (2026) gets +0.0067 on Serie A with an overlapping interval, and this project
 reproduced that paper on its own corpus on 2026-08-17 (`pl reproduce --paper pitcan2026`).
 

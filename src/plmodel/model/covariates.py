@@ -443,7 +443,7 @@ def per_side_values(
         predicting = history is not None and len(history) > 0
         rows = frame.assign(**{c: np.nan for c in SOT_COLUMNS}) if predicting else frame
         home, away = trailing_differential(
-            _combine(history, rows, extra=SOT_COLUMNS), *SOT_COLUMNS,
+            _combine(history, rows, columns=_FORM_COLUMNS), *SOT_COLUMNS,
             window=spec.sot_form_window,
         )
         return home[-len(frame):], away[-len(frame):]
@@ -468,8 +468,15 @@ def _completed(history: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFrame:
     return pd.concat([history[columns], frame[columns]], ignore_index=True)
 
 
+# The calendar terms need the season; the form term does not, and must not demand it: `pl predict`
+# and `pl fit` describe fixtures typed at the command line, which carry a date and two teams only.
+_CALENDAR_COLUMNS: tuple[str, ...] = ("date", "season", "home_team", "away_team")
+_FORM_COLUMNS: tuple[str, ...] = ("date", "home_team", "away_team", *SOT_COLUMNS)
+
+
 def _combine(
-    history: pd.DataFrame, frame: pd.DataFrame, *, extra: tuple[str, ...] = ()
+    history: pd.DataFrame, frame: pd.DataFrame, *,
+    columns: tuple[str, ...] = _CALENDAR_COLUMNS,
 ) -> pd.DataFrame:
     """History followed by the rows being described, with a fresh index.
 
@@ -478,7 +485,7 @@ def _combine(
     term looks strictly backwards and a club plays at most once on a matchday, so no row of
     ``frame`` can ever be another row's predecessor.
     """
-    columns = ["date", "season", "home_team", "away_team", *extra]
+    columns = list(columns)
     if history is None or len(history) == 0:
         return frame[columns].reset_index(drop=True)
     return pd.concat([history[columns], frame[columns]], ignore_index=True)

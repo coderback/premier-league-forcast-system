@@ -23,7 +23,7 @@ _PLANNED: dict[str, str] = {}
 # The registered arm the production model is scored as. `pl backtest` reads its block out of the
 # report by name, and a lookup that missed used to return an empty dict and skip the entire
 # readout without a word — a trap laid directly in the path of ever renaming or replacing it.
-PRODUCTION_ARM = "dixon-coles"
+PRODUCTION_ARM = "dc+sot-form"
 
 # Accepted spellings of "against" in a fixture typed at the command line.
 _FIXTURE_SEPARATORS = (" v ", " vs ", " V ", " - ")
@@ -369,7 +369,9 @@ def cmd_fit(args: argparse.Namespace) -> int:
     against_average = pd.DataFrame({
         "date": ref, "home_team": list(table["team"]), "away_team": "<league average>",
     })
-    lam, mu = fit.match_rates(against_average)
+    # The opponent has no form, so the shots term is undefined and switches off for every row:
+    # this table is the strengths alone. History is passed because a covariate fit requires it.
+    lam, mu = fit.match_rates(against_average, matches[matches["date"] < ref])
     print(f"\n{'team':18}{'attack':>9}{'defence':>9}{'exp goals for':>15}{'against':>9}")
     for row, home_rate, away_rate in zip(table.itertuples(index=False), lam, mu):
         print(f"{row.team:18}{row.attack:>+9.3f}{row.defence:>+9.3f}"
@@ -840,7 +842,7 @@ def cmd_predict(args: argparse.Namespace) -> int:
             print(f"read '{typed_h} v {typed_a}' as '{h} v {a}'")
 
     frame = pd.DataFrame([{"date": ref, "home_team": h, "away_team": a} for h, a in resolved])
-    lam, mu = fit.match_rates(frame)
+    lam, mu = fit.match_rates(frame, train)
     rho, _ = clamp_rho_for_rates(lam, mu, fit.rho, margin=_PREDICT_RHO_MARGIN)
     grid = scoreline_matrix(lam, mu, rho, cfg.model.max_goals)
     outcome = collapse_three_class(grid)
@@ -1035,7 +1037,9 @@ def build_parser() -> argparse.ArgumentParser:
     # The production model leads the list. The model-free arms cost nothing and are kept as the
     # floor every frozen block is read against, but the reason this ledger exists at all is that a
     # FITTED model's belief before kickoff cannot be reconstructed afterwards.
-    pl_.add_argument("--arms", default="dixon-coles,home-rate,uniform",
+    # `dixon-coles` stays on the list after `dc+sot-form` replaced it in production, so the frozen
+    # ledger carries the old and new production models head to head on matches neither has seen.
+    pl_.add_argument("--arms", default="dc+sot-form,dixon-coles,home-rate,uniform",
                      help="comma-separated arms to freeze")
     pl_.add_argument("--score", action="store_true",
                      help="score previously frozen forecasts instead of freezing")
