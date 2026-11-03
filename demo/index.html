@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Premier League Forecast Ledger</title>
+<meta name="description" content="A Premier League forecasting system built around an acceptance harness: season table projections against what happened, a market benchmark, and the list of ideas it tested and closed.">
+<style>
+:root{
+  --bg:#f5f1ea; --panel:#fffdf9; --ink:#241338; --muted:#62597a; --line:#dcd4e4;
+  --accent:#8a1f6b; --green:#0b7d57; --greenfill:#2bb589; --red:#b3261e; --redfill:#e0594a; --amber:#b86e00; --soft:#ece6f2; --focus:#1b5fd6; --bar:#a99bc4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e0a16; --panel:#171123; --ink:#efeaf7; --muted:#a79cbd; --line:#2d2340;
+    --accent:#ff7ac1; --green:#5fe0b0; --greenfill:#3fc796; --red:#ff7d70; --redfill:#ff7d70; --amber:#ffbd59; --soft:#221a33; --focus:#8fb6ff; --bar:#6c5a96;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e0a16; --panel:#171123; --ink:#efeaf7; --muted:#a79cbd; --line:#2d2340;
+  --accent:#ff7ac1; --green:#5fe0b0; --greenfill:#3fc796; --red:#ff7d70; --redfill:#ff7d70; --amber:#ffbd59; --soft:#221a33; --focus:#8fb6ff; --bar:#6c5a96;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+a{color:var(--accent)}
+a:focus-visible,button:focus-visible,summary:focus-visible,input:focus-visible,select:focus-visible,[tabindex]:focus-visible{outline:3px solid var(--focus);outline-offset:2px;border-radius:4px}
+.mono,.num{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+.skip{position:absolute;left:-999px}.skip:focus{left:8px;top:8px;background:var(--panel);padding:8px 12px;z-index:9}
+.hero{border-bottom:1px solid var(--line);background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 7%,transparent),transparent 70%)}
+.topbar{display:flex;justify-content:space-between;gap:12px;padding:12px 0;font-size:13px;color:var(--muted)}
+.topbar a{font-weight:600;text-decoration:none}
+.hero .inner{padding:34px 0 28px}
+.tag{font:700 12px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.16em;text-transform:uppercase;color:var(--accent)}
+h1{font-size:clamp(30px,6.4vw,56px);line-height:1.04;margin:12px 0 14px;letter-spacing:-.03em;font-weight:800;max-width:18ch}
+h1 em{font-style:normal;color:var(--accent)}
+.lede{font-size:18px;color:var(--muted);max-width:68ch;margin:0}
+.note{margin:20px 0 0;padding:12px 14px;border:1px solid var(--line);border-left:5px solid var(--green);background:var(--panel);border-radius:8px;font-size:14.5px}
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:22px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.kpi b{display:block;font-size:27px;letter-spacing:-.02em}
+.kpi span{font-size:13px;color:var(--muted)}
+nav.jump{display:flex;gap:6px;flex-wrap:wrap;padding:14px 0 0;font-size:14px}
+nav.jump a{padding:4px 10px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--ink);background:var(--panel)}
+section{padding:38px 0;border-top:1px solid var(--line)}
+h2{font-size:clamp(23px,4vw,32px);margin:0 0 6px;letter-spacing:-.02em}
+h3{font-size:17px;margin:22px 0 8px}
+.sub{color:var(--muted);margin:0 0 16px;max-width:76ch}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+.controls{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:flex-end;margin:0 0 14px}
+.cl,.controls label.l{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block;margin-bottom:4px}
+select,input[type=search]{font:inherit;font-size:15px;color:var(--ink);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 10px;min-height:38px}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.seg button{border:1px solid var(--line);background:var(--panel);color:var(--ink);padding:6px 12px;border-radius:999px;font:inherit;font-size:14px;cursor:pointer;min-height:36px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.chk{display:flex;gap:8px;align-items:center;font-size:14.5px;min-height:38px;cursor:pointer}
+.chk input{width:18px;height:18px;accent-color:var(--accent)}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}
+th:first-child,td:first-child,td.l,th.l{text-align:left}
+th{color:var(--muted);font-weight:600;font-size:12px}
+.bar{display:inline-block;height:10px;border-radius:3px;background:var(--bar);vertical-align:middle}
+.bar.hl{background:var(--accent)}
+.pill{display:inline-block;font-size:11.5px;padding:2px 9px;border-radius:999px;border:1px solid var(--line);white-space:nowrap}
+.pill.ok{border-color:var(--green);color:var(--green);font-weight:700}
+.pill.no{color:var(--muted)}
+.pill.am{border-color:var(--amber);color:var(--amber)}
+.good{color:var(--green)}.bad{color:var(--red)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px}
+.cmp{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:0 0 16px}
+.cmp .c{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.cmp b{font-size:24px;display:block}
+.cmp small{color:var(--muted)}
+.legend{font-size:13px;color:var(--muted);display:flex;gap:14px;flex-wrap:wrap;margin-top:8px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:5px;vertical-align:-1px}
+svg text{fill:var(--muted);font:11px ui-sans-serif,system-ui,sans-serif}
+svg .g{stroke:var(--line)}svg .lbl{fill:var(--ink)}
+svg .pt{cursor:pointer}svg .pt:focus{outline:none;stroke:var(--focus);stroke-width:3}
+.cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.cl-row{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.cl-row b{display:block}
+.cl-row .v{font-size:13px;margin:2px 0}
+.cl-row .n{font-size:13.5px;color:var(--muted)}
+.caveat{background:color-mix(in srgb,var(--amber) 11%,var(--panel));border:1px solid color-mix(in srgb,var(--amber) 55%,var(--line));border-radius:12px;padding:14px 16px}
+.caveat li{margin:7px 0}
+.eq{font-family:ui-monospace,Menlo,Consolas,monospace;background:var(--soft);border-radius:8px;padding:10px 12px;font-size:13px;overflow-x:auto;white-space:pre-wrap}
+footer{border-top:1px solid var(--line);padding:26px 0 48px;color:var(--muted);font-size:14px}
+#err{display:none;padding:12px;border:1px solid var(--red);border-radius:8px;margin:16px 0}
+@media (max-width:860px){.kpis{grid-template-columns:1fr 1fr}.two,.cmp,.cards{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:440px){.kpis{grid-template-columns:1fr}}
+@media (prefers-reduced-motion: reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="hero"><div class="wrap">
+  <div class="topbar"><span class="mono">pl-forecast / ledger</span><a href="https://github.com/coderback/premier-league-forcast-system">View the repo on GitHub</a></div>
+  <div class="inner">
+    <div class="tag">Premier League forecasting system</div>
+    <h1>A forecaster built to <em>fail honestly</em></h1>
+    <p class="lede">A Dixon-Coles match model with a season simulator, wrapped in a walk-forward acceptance harness whose job is to reject ideas. Explore its season-table projections against what happened, how far it sits from the bookmakers' closing line, and the long list of ideas it tested and closed.</p>
+    <p class="note"><strong>Saved results, read-only.</strong> Every figure comes from the repo's saved output files and CLOSED-LINES.md. The "actual" tables are computed from the cached football-data.co.uk results. Nothing is run in your browser, and no bets are suggested.</p>
+    <div class="kpis" id="kpis"></div>
+    <nav class="jump" aria-label="Sections"><a href="#seasons">Season projections</a><a href="#market">Market benchmark</a><a href="#closed">Closed lines</a><a href="#fixture">Sample fixture</a><a href="#notes">Notes</a></nav>
+  </div>
+</div></div>
+
+<main id="main"><div class="wrap">
+<div id="err" role="alert">The saved data failed to load. Please reload the page.</div>
+
+<section id="seasons" style="border-top:0">
+  <h2>Table projections against what happened</h2>
+  <p class="sub">Each projection is 50,000 simulated seasons that sample strength uncertainty and play out every remaining fixture. Choose a case, sort, search a team, and reveal the real table.</p>
+  <div class="controls">
+    <div><span class="cl" id="cl1">Case</span><div class="seg" id="caseSeg" role="group" aria-labelledby="cl1"></div></div>
+    <div id="sortWrap"><span class="cl" id="cl2">Sort by</span><div class="seg" id="sortSeg" role="group" aria-labelledby="cl2"></div></div>
+    <div><label class="l" for="q">Team</label><input id="q" type="search" placeholder="Search" autocomplete="off"></div>
+    <label class="chk"><input type="checkbox" id="reveal"> Show the real table</label>
+  </div>
+  <p class="sub" id="caseNote"></p>
+  <div class="panel tablewrap"><table id="sTbl"></table></div>
+  <h3>How have these season probabilities scored historically?</h3>
+  <p class="sub" style="margin-bottom:8px">The repo scores its title, top-four and relegation probabilities against ten completed seasons (2016-17 to 2025-26), at four points in each season. Lower Brier score is better. The "drift" variant is the uncertainty treatment used in the projections above.</p>
+  <div class="cmp" id="sv"></div>
+</section>
+
+<section id="market">
+  <h2>The market benchmark</h2>
+  <p class="sub">Match forecasts are scored with the ranked probability score (RPS, lower is better) over a rolling-origin walk-forward test on the last ten seasons, 2016-17 to 2025-26. The benchmark is the bookmakers' average closing line with the margin removed (Shin method), available for 2,660 of the 3,800 matches. The README's stated goal is parity with that line, not beating it.</p>
+  <div class="cmp" id="mkSum"></div>
+  <div class="two">
+    <div class="panel"><h3 style="margin-top:0">Every arm's gap to the market</h3>
+      <p class="legend" style="margin:0 0 6px">RPS minus the market's, on the 2,660 covered matches, with 95% intervals. Zero would be parity; every arm is on the wrong side of it.</p>
+      <svg id="gapSvg" viewBox="0 0 520 380" role="img" aria-label="Gap to market in RPS for each tested arm with confidence intervals"></svg>
+      <p class="legend" id="gapTip" aria-live="polite">Select a row for detail.</p></div>
+    <div class="panel"><h3 style="margin-top:0">RPS by season</h3>
+      <p class="legend" style="margin:0 0 6px">Plain Dixon-Coles against the production model with the shots-on-target form term, all 3,800 matches.</p>
+      <svg id="seaSvg" viewBox="0 0 520 300" role="img" aria-label="Season by season RPS for two models"></svg>
+      <div class="legend"><span><i style="background:var(--bar)"></i>Dixon-Coles</span><span><i style="background:var(--accent)"></i>With shots-on-target form (production)</span></div></div>
+  </div>
+  <h3>The arms, with the acceptance rule applied</h3>
+  <p class="sub" style="margin-bottom:8px">Every candidate is a change to the baseline, judged on a paired-bootstrap RPS difference, the market gap, a multiple-testing correction and a second, older decade. Older runs used a two-gate rule, and are marked. Filter to see how few survive.</p>
+  <div class="controls"><div class="seg" id="armSeg" role="group" aria-label="Filter arms"></div></div>
+  <div class="panel tablewrap"><table id="armTbl"></table></div>
+  <p class="legend">Delta vs baseline: negative is better than plain Dixon-Coles. "Older decade P(better)" is the paired probability the arm beat the baseline on 2006-07 to 2015-16, where it was run.</p>
+</section>
+
+<section id="closed">
+  <h2>Closed lines</h2>
+  <p class="sub">Condensed from the repo's CLOSED-LINES.md, which exists so the same ideas are not re-derived. Filter by area or search. The numbers are the ones that closed each line.</p>
+  <div class="controls"><div><span class="cl" id="cl3">Area</span><div class="seg" id="clSeg" role="group" aria-labelledby="cl3"></div></div><div><label class="l" for="cq">Search</label><input id="cq" type="search" placeholder="e.g. referee" autocomplete="off"></div></div>
+  <div class="cards" id="clCards"></div>
+  <h3>The resolution floor</h3>
+  <p class="sub" style="margin-bottom:8px">The smallest improvement the gate machinery can detect, measured by injecting a synthetic improvement with a real arm's per-match variance (SD 0.01757).</p>
+  <div class="panel tablewrap"><table><thead><tr><th class="l">Gate configuration</th><th>Minimum detectable effect (RPS)</th></tr></thead><tbody>
+    <tr><td class="l">Bootstrap gate alone</td><td class="num">0.00055</td></tr><tr><td class="l">All four gates, family of 1</td><td class="num">0.0004</td></tr>
+    <tr><td class="l">All four gates, family of 3</td><td class="num">0.0008</td></tr><tr><td class="l">All four gates, family of 5</td><td class="num">0.0010</td></tr></tbody></table></div>
+  <p class="sub" style="margin-top:8px">Two arms died at this floor with real but tiny effects of -0.00059 and -0.00030 RPS, per the ledger.</p>
+</section>
+
+<section id="fixture">
+  <h2>What a forecast looks like</h2>
+  <p class="sub">One saved output of the <span class="mono">pl predict</span> command for a typed fixture, as of the data date shown. Every market is read off a single full-time scoreline distribution.</p>
+  <div class="panel" id="fx"></div>
+</section>
+
+<section id="notes">
+  <h2>How it works, and what to be careful with</h2>
+  <div class="two">
+    <div><div class="eq">acceptance rule (from config.yaml)
+Accept a change iff ALL FOUR:
+ 1 paired-bootstrap RPS delta vs baseline favourable
+ 2 delta vs the de-vigged market does not degrade
+ 3 survives Benjamini-Hochberg across its family
+ 4 the older decade does not contradict it</div>
+      <p style="font-size:14.5px">Leak-freedom is structural: a split raises an error whenever any training date is not strictly before every test date, and there is no k-fold anywhere. Every tunable lives in the config with a justification, and an arm only counts if the harness can show it does something.</p></div>
+    <div class="caveat"><b>Read this before quoting the numbers</b><ul style="margin:6px 0 0;padding-left:18px">
+      <li><b>One season, one projection.</b> The 2025-26 comparison is a single case. A 49% title chance for the eventual runner-up is not an error by itself; see the historical scores above for the aggregate picture.</li>
+      <li><b>The 2025-26 projection is retrospective.</b> It uses only data before 15 August 2025, but the file was produced afterwards.</li>
+      <li><b>The 2026-27 view covers five matchweeks only.</b> The saved projection simulated the 50 fixtures known at the time, so it gives expected points to date, not a season forecast. Title and relegation columns are hidden for that reason.</li>
+      <li><b>Still behind the market.</b> The production model is 0.0050 RPS behind the closing line (interval 0.0028 to 0.0071). The README says as much: parity is the goal, and apparent betting edges should be treated as bugs. This is not betting advice.</li>
+      <li><b>Left out:</b> the 6,700-line decision ledger (NOTES.md), the raw match data, and any live fixtures feed.</li></ul></div>
+  </div>
+</section>
+</div></main>
+
+<footer><div class="wrap">
+  Source: <a href="https://github.com/coderback/premier-league-forcast-system">github.com/coderback/premier-league-forcast-system</a>. Match results and odds: <a href="https://www.football-data.co.uk/">football-data.co.uk</a> (free for personal and research use with attribution); xG from Understat. Raw data is not redistributed here.
+</div></footer>
+
+<script>
+const $=s=>document.querySelector(s);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const pc=v=>{const x=v*100;return x>=10?x.toFixed(0)+"%":x>=1?x.toFixed(1)+"%":x>=0.1?x.toFixed(1)+"%":x>0?"<0.1%":"0%"};
+const f4=v=>v.toFixed(4), sg=(v,d=4)=>(v>=0?"+":"−")+Math.abs(v).toFixed(d);
+let D=null, cs="s2526", sk="mpos";
+fetch("data/site-data.json").then(r=>{if(!r.ok)throw 0;return r.json()}).then(d=>{D=d;init()}).catch(()=>{$("#err").style.display="block"});
+
+function init(){
+  const P=D.prod,m=P.sot.vm,t=D.s2526.teams;
+  const fav=t.slice().sort((a,b)=>b.title-a.title)[0], champ=t.find(x=>x.apos===1);
+  $("#kpis").innerHTML=`
+   <div class="kpi"><b class="num">${P.sot.rps.toFixed(4)}</b><span>production RPS over ${P.n.toLocaleString()} matches (ten seasons); a uniform guess scores ${P.uniform.toFixed(4)}</span></div>
+   <div class="kpi"><b class="num">${sg(m.delta_rps)}</b><span>gap to the de-vigged closing line (95% interval ${sg(m.ci_low)} to ${sg(m.ci_high)}); plain Dixon-Coles was ${sg(P.dc.vm.delta_rps)}</span></div>
+   <div class="kpi"><b class="num">1 of 14</b><span>saved arm runs below passed all four gates (the shots-on-target form term). One earlier run passed an older two-gate rule and was never wired</span></div>
+   <div class="kpi"><b class="num">${pc(champ.title)}</b><span>pre-season title chance of 2025-26 champion ${champ.team}; the model's favourite was ${fav.team} at ${pc(fav.title)}</span></div>`;
+  buildSeasons(); buildMarket(); buildClosed(); buildFixture();
+}
+
+/* ---------- seasons ---------- */
+const SORTS={s2526:[["mpos","Projected position"],["title","Title"],["top4","Top four"],["rel","Relegation"]],s2627:[["mpos","Projected position"],["apts","Actual points"]]};
+function buildSeasons(){
+  const cseg=$("#caseSeg");[["s2526","2025-26, full season"],["s2627","2026-27, first five matchweeks"]].forEach(([k,l])=>{const b=document.createElement("button");b.type="button";b.textContent=l;b.setAttribute("aria-pressed",k===cs);b.onclick=()=>{cs=k;sk="mpos";[...cseg.children].forEach(c=>c.setAttribute("aria-pressed",c===b));sortSeg();renderSeasons()};cseg.appendChild(b)});
+  sortSeg(); ["#q","#reveal"].forEach(s=>$(s).addEventListener("input",renderSeasons)); renderSeasons();
+  const v=D.seasonval_test, row=(k,l)=>`<div class="c"><b class="num">${v[k].brier.toFixed(4)}</b><small>${l}. Title ${v[k].by_q.title.toFixed(3)}, top four ${v[k].by_q.top_four.toFixed(3)}, relegation ${v[k].by_q.relegation.toFixed(3)}. Promoted clubs ${v[k].promoted_brier.toFixed(3)} vs established ${v[k].established_brier.toFixed(3)}.</small></div>`;
+  $("#sv").innerHTML=row("point","Brier, point-estimate strengths")+row("drift","Brier, with drift uncertainty (used above)")+`<div class="c"><b class="num">${sg(v.drift.brier-v.point.brier)}</b><small>drift minus point Brier. Promoted clubs are consistently harder to price, which matches the ledger's closed line on promoted-club strength.</small></div>`;
+}
+function sortSeg(){const seg=$("#sortSeg");seg.innerHTML="";SORTS[cs].forEach(([k,l])=>{const b=document.createElement("button");b.type="button";b.textContent=l;b.setAttribute("aria-pressed",k===sk);b.onclick=()=>{sk=k;[...seg.children].forEach(c=>c.setAttribute("aria-pressed",c===b));renderSeasons()};seg.appendChild(b)})}
+function renderSeasons(){
+  const S=D[cs], full=cs==="s2526", rev=$("#reveal").checked||!full&&false, q=$("#q").value.trim().toLowerCase();
+  $("#caseNote").textContent=full?`Projection as of ${S.barrier}, before the first ball, using only earlier data. ${S.n_replicates.toLocaleString()} simulations of all ${S.n_remaining} fixtures, seed ${S.seed}. Mean points and mean position are averages over simulations.`
+    :`Projection as of ${S.barrier} for the ${S.n_remaining} fixtures then known (five matchweeks), so these are expected points to date, not a season forecast. ${S.n_replicates.toLocaleString()} simulations.`;
+  let rows=S.teams.filter(t=>!q||t.team.toLowerCase().includes(q));
+  const asc=sk==="mpos";
+  rows=rows.slice().sort((a,b)=>sk==="apts"?b.apts-a.apts:(asc?a[sk]-b[sk]:b[sk]-a[sk]));
+  const maxP=Math.max(...S.teams.map(t=>Math.max(t.mpts,t.apts)));
+  const show=$("#reveal").checked;
+  $("#sTbl").innerHTML=`<thead><tr><th class="l">Team</th>${full?"<th>Title</th><th>Top four</th><th>Relegated</th>":""}<th>Mean pts</th><th>Mean pos</th><th class="l">Projected points</th>${show?"<th>Actual pts</th><th>Actual pos</th><th>Actual GD</th>":""}</tr></thead><tbody>`+
+   rows.map(t=>`<tr><td class="l"><b>${esc(t.team)}</b></td>${full?`<td class="num">${pc(t.title)}</td><td class="num">${pc(t.top4)}</td><td class="num">${pc(t.rel)}</td>`:""}<td class="num">${t.mpts.toFixed(1)}</td><td class="num">${t.mpos.toFixed(1)}</td>
+   <td class="l"><span class="bar" style="width:${t.mpts/maxP*140}px"></span>${show?` <span class="bar hl" style="width:${t.apts/maxP*140}px;height:4px;margin-top:-2px;display:block"></span>`:""}</td>
+   ${show?`<td class="num"><b>${t.apts}</b> <span class="${t.apts-t.mpts>=0?"good":"bad"}">${sg(t.apts-t.mpts,1)}</span></td><td class="num">${t.apos}</td><td class="num">${t.agd>0?"+":""}${t.agd}</td>`:""}</tr>`).join("")+`</tbody>`;
+  if(!rows.length)$("#sTbl").innerHTML='<tbody><tr><td class="l">No team matches.</td></tr></tbody>';
+}
+
+/* ---------- market ---------- */
+let armF="all", armSel=null;
+function buildMarket(){
+  const P=D.prod, mk=D.market;
+  $("#mkSum").innerHTML=`<div class="c"><b class="num">${mk.rps_market.toFixed(4)}</b><small>de-vigged closing line (${mk.benchmark}, ${mk.devig} method), ${mk.n_cov.toLocaleString()} of ${mk.n_total.toLocaleString()} matches covered</small></div>
+   <div class="c"><b class="num">${sg(P.dc.vm.delta_rps)} → ${sg(P.sot.vm.delta_rps)}</b><small>gap to market, plain Dixon-Coles then production model. Intervals ${sg(P.dc.vm.ci_low)} to ${sg(P.dc.vm.ci_high)} and ${sg(P.sot.vm.ci_low)} to ${sg(P.sot.vm.ci_high)}.</small></div>
+   <div class="c"><b class="num">${sg(P.sot.vb.delta_rps)}</b><small>production vs plain Dixon-Coles, 95% interval ${sg(P.sot.vb.ci_low)} to ${sg(P.sot.vb.ci_high)}. Adjusted p ${P.verdict.gate3_reason.match(/p = ([\d.]+)/)[1]}.</small></div>`;
+  const seg=$("#armSeg");[["all","All arms"],["better","Better than baseline"],["passed","Passed a gate set"]].forEach(([k,l])=>{const b=document.createElement("button");b.type="button";b.textContent=l;b.setAttribute("aria-pressed",k===armF);b.onclick=()=>{armF=k;[...seg.children].forEach(c=>c.setAttribute("aria-pressed",c===b));renderArms()};seg.appendChild(b)});
+  renderArms(); renderSea();
+}
+function armRows(){let a=D.arms.slice().sort((x,y)=>(x.d_base??9)-(y.d_base??9));if(armF==="better")a=a.filter(x=>x.d_base<0);if(armF==="passed")a=a.filter(x=>x.accepted);return a}
+function renderArms(){
+  const a=armRows();
+  $("#armTbl").innerHTML=`<thead><tr><th class="l">Arm</th><th>RPS</th><th>Delta vs baseline [95% CI]</th><th>Gap to market</th><th>Older decade P(better)</th><th class="l">Verdict</th></tr></thead><tbody>`+a.map(x=>`<tr><td class="l">${esc(x.label)}</td><td class="num">${f4(x.rps)}</td><td class="num ${x.d_base<0?"good":""}">${sg(x.d_base,5)} [${sg(x.d_lo,4)}, ${sg(x.d_hi,4)}]</td><td class="num">${sg(x.d_mkt)}</td><td class="num">${x.sens_p==null?"—":x.sens_p.toFixed(2)}</td>
+   <td class="l">${x.accepted===true?`<span class="pill ok">${x.rule===4?"Passed all four gates":"Passed older two gates"}</span>`:x.accepted===false?`<span class="pill ${x.rule===2?"am":"no"}">Rejected${x.rule===2?" (two-gate rule)":""}</span>`:"—"}</td></tr>`).join("")+`</tbody>`;
+  renderGap();
+}
+function renderGap(){
+  const a=armRows().slice().sort((x,y)=>x.d_mkt-y.d_mkt), W=520,L=210,R=14,T=14,rh=22,H=T+a.length*rh+34;
+  const lo=0,hi=.0125,x=v=>L+(v-lo)/(hi-lo)*(W-L-R);
+  const sv=$("#gapSvg");sv.setAttribute("viewBox",`0 0 ${W} ${Math.max(H,120)}`);let s="";
+  [0,.0025,.005,.0075,.01,.0125].forEach(v=>{s+=`<line class="g" x1="${x(v)}" x2="${x(v)}" y1="${T-4}" y2="${H-28}"/><text x="${x(v)}" y="${H-12}" text-anchor="middle">${v.toFixed(4).replace(/0+$/,"").replace(/\.$/,"")||"0"}</text>`});
+  s+=`<line x1="${x(0)}" x2="${x(0)}" y1="${T-4}" y2="${H-28}" stroke="var(--green)" stroke-width="2"/><text x="${x(0)+3}" y="${T+6}" style="fill:var(--green)">parity</text>`;
+  a.forEach((r,i)=>{const y=T+i*rh+10,prod=r.id==="dc+sot-form",sel=armSel===r.label+r.src;
+   s+=`<g class="pt" tabindex="0" role="button" data-i="${i}" aria-label="${esc(r.label)}: gap ${sg(r.d_mkt)}"><text class="lbl" x="${L-8}" y="${y+4}" text-anchor="end" ${prod?'style="font-weight:700"':""}>${esc(r.label.length>34?r.label.slice(0,33)+"…":r.label)}</text>
+   <line x1="${x(r.m_lo)}" x2="${x(r.m_hi)}" y1="${y}" y2="${y}" stroke="${prod?"var(--accent)":"var(--bar)"}" stroke-width="3"/><circle cx="${x(r.d_mkt)}" cy="${y}" r="${sel?7:5}" fill="${prod?"var(--accent)":"var(--bar)"}"/></g>`});
+  sv.innerHTML=s;
+  sv.querySelectorAll(".pt").forEach(g=>{const r=a[+g.dataset.i];const f=()=>{armSel=r.label+r.src;$("#gapTip").innerHTML=`<b>${esc(r.label)}</b>: gap to market ${sg(r.d_mkt)} (95% ${sg(r.m_lo)} to ${sg(r.m_hi)}); RPS ${f4(r.rps)} over ${r.n.toLocaleString()} matches.`};g.addEventListener("mouseenter",f);g.addEventListener("focus",f);g.addEventListener("click",f)});
+}
+function renderSea(){
+  const S=D.seasons,W=520,H=300,L=40,B=40,T=14,R=10,lo=.17,hi=.215,y=v=>H-B-(v-lo)/(hi-lo)*(H-B-T),bw=(W-L-R)/S.length;let s="";
+  [.17,.18,.19,.2,.21].forEach(v=>{s+=`<line class="g" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L-5}" y="${y(v)+4}" text-anchor="end">${v.toFixed(2)}</text>`});
+  S.forEach((r,i)=>{const cx=L+i*bw+bw/2;
+   s+=`<g class="pt" tabindex="0" aria-label="${r.season}: Dixon-Coles ${r.dc.toFixed(4)}, production ${r.sot.toFixed(4)}"><title>${r.season}: DC ${r.dc.toFixed(4)}, production ${r.sot.toFixed(4)}, uniform ${r.uniform.toFixed(4)}</title><circle cx="${cx-6}" cy="${y(r.dc)}" r="5" fill="var(--bar)"/><circle cx="${cx+6}" cy="${y(r.sot)}" r="5" fill="var(--accent)"/></g><text transform="translate(${cx} ${H-B+12}) rotate(-35)" text-anchor="end">${r.season.slice(2)}</text>`});
+  s+=`<text transform="translate(11 ${H/2}) rotate(-90)" text-anchor="middle">RPS (lower is better)</text>`;
+  $("#seaSvg").innerHTML=s;
+}
+
+/* ---------- closed lines ---------- */
+const CL=[
+ ["model","Elo vs per-team attack and defence","Rejected","+0.0009, wrong-signed against prediction, replicated on the second decade"],
+ ["model","Structural home advantage (time trend, empty stadiums)","Rejected, all 3 variants","Benjamini-Hochberg rejects 0 of 3"],
+ ["model","xG or shots on target as a pooled observation channel","Null","xG earned a 0.457 pool weight and bought 0.0004 RPS"],
+ ["model","Dixon-Coles plus LightGBM hybrids and ensembles","Rejected","Parent error correlation 0.99; blend weight exactly 0 at 91.3% of barriers"],
+ ["model","Rest, fixture congestion, European-commitment flags","Rejected, all 4","Sign flips between decades; the best one was shrinkage wearing a fatigue label"],
+ ["model","Joint multi-division (tiered) fits","Rejected","Market gap worsened from +0.0082 to +0.0097"],
+ ["model","Weibull marginals with a Frank copula","Rejected","+0.00011, and exactly 0.00000 on the sensitivity decade"],
+ ["model","General hierarchical shrinkage of team parameters","Closed","The gain sits entirely in promoted fixtures: no general shrinkage effect on this corpus"],
+ ["model","Promoted-club mispricing as strength estimation","Closed","Four mechanisms failed; the mean can be fixed but the ordering cannot"],
+ ["model","Recalibrating the model's own probabilities","Closed","Temperature and vector scaling both degrade out of sample on both decades"],
+ ["data","Half-time goals","Closed","Team-specific first/second-half variance measured at zero (p = 0.881)"],
+ ["data","Referee as a 1X2 feature","Closed","Between-referee variance is below the permutation null (p = 0.850); largest hidden effect about 0.00027 RPS, half the floor"],
+ ["data","Asian-handicap and over/under odds as a market family","No gain","De-vigged AH+OU is less sharp than direct 1X2 (0.17970 vs 0.17937)"],
+ ["data","Backward xG (2006 to 2016)","Closed","No free per-match xG or shot-location series exists that far back"],
+ ["data","Transfermarkt data","Blocked on licence","Its terms forbid automated collection and use for machine learning"],
+ ["blocked","Lineups and player availability","Not closed, blocked","Never refuted. A usable source exists but is blocked on a terms-of-use judgement; nothing has been scraped"]
+];
+const CLAB={all:"All",model:"Model specification",data:"Data and features",blocked:"Blocked, not closed"};
+let clf="all";
+function buildClosed(){
+  const seg=$("#clSeg");Object.entries(CLAB).forEach(([k,l])=>{const b=document.createElement("button");b.type="button";b.textContent=l;b.setAttribute("aria-pressed",k===clf);b.onclick=()=>{clf=k;[...seg.children].forEach(c=>c.setAttribute("aria-pressed",c===b));renderClosed()};seg.appendChild(b)});
+  $("#cq").addEventListener("input",renderClosed);renderClosed();
+}
+function renderClosed(){
+  const q=$("#cq").value.trim().toLowerCase();
+  const r=CL.filter(x=>(clf==="all"||x[0]===clf)&&(!q||x.join(" ").toLowerCase().includes(q)));
+  $("#clCards").innerHTML=r.map(x=>`<div class="cl-row"><b>${esc(x[1])}</b><div class="v"><span class="pill ${x[2].startsWith("Not closed")||x[2].startsWith("Blocked")?"am":"no"}">${esc(x[2])}</span></div><div class="n">${esc(x[3])}</div></div>`).join("")||'<p class="legend">Nothing matches.</p>';
+}
+
+/* ---------- fixture ---------- */
+function buildFixture(){
+  const p=D.predict,f=p.fixtures[0],mx=Math.max(...f.top_scorelines.map(s=>s.p));
+  $("#fx").innerHTML=`<div class="two"><div><h3 style="margin-top:0">${esc(f.home_team)} v ${esc(f.away_team)}</h3>
+   <p class="legend" style="margin:0 0 10px">Model data as of ${p.as_of}; trained on ${p.n_train.toLocaleString()} Premier League matches. Expected goals ${f.expected_goals[0].toFixed(2)} to ${f.expected_goals[1].toFixed(2)}.</p>
+   <div style="display:flex;height:22px;border-radius:5px;overflow:hidden;max-width:420px" role="img" aria-label="Home ${pc(f.home)}, draw ${pc(f.draw)}, away ${pc(f.away)}"><i style="width:${f.home*100}%;background:var(--greenfill)"></i><i style="width:${f.draw*100}%;background:var(--bar)"></i><i style="width:${f.away*100}%;background:var(--redfill)"></i></div>
+   <p class="num" style="margin:6px 0">${esc(f.home_team)} ${pc(f.home)} &nbsp; draw ${pc(f.draw)} &nbsp; ${esc(f.away_team)} ${pc(f.away)}</p>
+   <p style="margin:0;font-size:14.5px">Over ${p.line} goals ${pc(f.over)}, under ${pc(f.under)}; both teams to score ${pc(f.both_teams_to_score)}.</p></div>
+   <div><h3 style="margin-top:0">Most likely scorelines</h3>${f.top_scorelines.map(s=>`<div style="display:grid;grid-template-columns:44px minmax(0,1fr) 48px;gap:8px;align-items:center;margin:4px 0;font-size:14px"><span class="num">${s.home_goals}-${s.away_goals}</span><span class="bar hl" style="width:${s.p/mx*100}%"></span><span class="num">${pc(s.p)}</span></div>`).join("")}
+   <p class="legend">${esc(p.not_modelled)}</p></div></div>`;
+}
+</script>
+</body>
+</html>
