@@ -70,6 +70,8 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 | Weibull marginals + Frank copula | rejected | +0.00011, and exactly 0.00000 on the sensitivity decade |
 | **General hierarchical shrinkage of team parameters** | **CLOSED** | gain concentrates entirely in promoted fixtures; "there is no general shrinkage effect on this corpus" |
 | **Promoted-club mispricing as strength estimation** | **CLOSED** | 4 mechanisms failed. "The mean can be fixed. The ordering cannot" — it needs information the project does not have |
+| **Promoted clubs' own Championship shots as form** (`dc+sot-form+e1`) | rejected, null | orders promoted clubs the right way on both decades (−0.00036 / −0.00017 on their fixtures) but −0.0001 pooled, P 0.70 / 0.84. The ordering CAN be moved; this source moves it a tenth of the detectable amount |
+| **Dropping promoted clubs' stale E0 form** (`dc+sot-form-recent`) | withdrawn at tuning check | +0.00003: stale Premier League form is a weak but real prior on a returning club's level |
 | **Recalibration of our own probabilities** | **CLOSED** | temperature and vector scaling both degrade out-of-sample on both decades, intervals excluding zero on the worse side |
 
 ---

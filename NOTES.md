@@ -7709,3 +7709,70 @@ The gate, with **`--family-size` 2 as registered**, although only one arm remain
 pl compare --arms dc+sot-form,dc+sot-form+e1 --family-size 2 --sensitivity --out gate_e1_sens.json
 pl compare --arms dc+sot-form,dc+sot-form+e1 --family-size 2 --against-span output/gate_e1_sens.json --out gate_e1_test.json
 ```
+
+## 2026-11-17 — RESULT: `dc+sot-form+e1` REJECTS — a clean null that does the right thing too weakly; the promoted-club line stays closed
+
+The gate, with `--family-size 2` as registered, `dc+sot-form` as baseline. Both decades were run
+from commit 3ccb920.
+
+```
+                      RPS (base -> arm)   delta     95% CI              P(better)  DM p   vs market
+test 2016-26          0.1982 -> 0.1982   -0.0001  [-0.0004, +0.0002]    0.695    0.592  +0.0050 -> +0.0049
+sensitivity 2006-16   0.1953 -> 0.1952   -0.0001  [-0.0003, +0.0001]    0.838    0.317      --
+
+gate1 FAIL (P 0.695)   gate2 pass   gate3 FAIL   gate4 pass (0.838)   ->  REJECT
+```
+
+### It worked as designed, and it was not enough
+
+**The gain is where the mechanism says it should be:**
+
+```
+change in RPS                     involves_promoted (n=1,080)   established_only (n=2,720)
+sensitivity 2006-16                      -0.00036                      -0.00001
+test 2016-26                             -0.00017                      -0.00004
+```
+
+**The map was live at every refit on both decades**, with no barrier below the promotion minimum. Its
+trajectory is stable and agrees with the pre-flight's:
+
+| decade | level a | slope b |
+|---|---|---|
+| sensitivity | −2.23 to −2.60 | +0.32 to +0.50 |
+| test | −2.17 to −2.35 | +0.31 to +0.41 |
+
+`cov_sot_form_e1` stays positive at every fit, with a mean of +0.034 and +0.045.
+
+**So Championship shots do order promoted clubs, in the right direction, on both decades.** The
+effect is two to four ten-thousandths of RPS on a sixth of the matches. Pooled, that is a tenth of
+the detectable effect. The pre-registration's size paragraph predicted this outcome in advance, and it
+is the outcome that happened.
+
+### What closes, and what stays open
+
+* **Promoted-club strength, all four routes, is now closed**, each on a different mechanism: a
+  pooled E0+E1 fit, a group prior, general shrinkage, and now the club's own Championship shots. The
+  last is the first to move the ordering the right way, and it still cannot reach the bar. Whatever
+  separates promoted clubs beyond this is in information the corpus does not hold: squads, spend,
+  the market's own view.
+* **The stale-form defect remains in production.** Dropping it made the tuning span slightly
+  worse (`dc+sot-form-recent`, withdrawn), and replacing it with Championship form is a null.
+  Neither fix earns its place. A club's old Premier League form is a weak but not worthless prior on
+  its level.
+
+### Two engineering findings from the run
+
+**1. The first test-decade run ran out of memory, and the cause was this arm.** Every fit keeps its
+covariate spec, and each spec held a full-width copy of the Championship rows: 192 columns, held for
+all 1,153 barriers. Fixed in 3ccb920 by keeping only the five columns the term reads. Bit-identity
+was checked directly: at 11 barriers across the sensitivity walk, the term's values are
+**identical** with full and slim rows, at fit time and at forecast time.
+
+**2. The `pl` command is not BLAS-pinned, so CLI gate numbers move in the third decimal between
+identical runs.** The sensitivity decade gave P(better) = 0.835 before the fix and 0.838 after, with
+the baseline row identical and the term proven identical. The variation is in the fit's
+floating-point summation order. `tests/conftest.py` pins OpenBLAS to one thread, and the 2026-08 entry
+recorded why: deterministic summation, and 84 MB at import instead of 1,106 MB on this 16-core host.
+The CLI never received the pin, so every `pl compare` in this ledger ran unpinned. **No recorded
+verdict is near enough to its bar for this to matter.** It is still a gap in a project that asserts
+byte-identity in six places, and it also inflated the memory that made finding 1 fatal.
