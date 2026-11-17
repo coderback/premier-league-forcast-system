@@ -36,15 +36,19 @@ The literature's only two documented routes to parity: **feed the model the clos
 
 ## The resolution floor — check this before anything else
 
-| gate configuration | minimum detectable effect |
-|---|---|
-| gate 1 bootstrap alone | 0.00055 RPS |
-| all four gates, family of 1 | 0.0004 |
-| all four gates, family of 3 | 0.0008 |
-| all four gates, family of 5 | 0.0010 |
+| gate configuration | MDE, passes half the time | MDE, passes 80% of the time |
+|---|---|---|
+| gate 1 bootstrap alone | 0.0005 RPS | 0.00075 |
+| all four gates, family of 1 | 0.0006 | 0.00085 |
+| all four gates, family of 3 | 0.0007 | 0.00095 |
+| all four gates, family of 5 | 0.00075 | 0.0010 |
 
 Measured by injecting a synthetic improvement with the per-match variance of a real arm (SD 0.01757)
-and running the project's own gate machinery. **A candidate must deliver roughly a tenth of the
+and running the project's own gate machinery, 1,000 draws a point (re-measured 2026-11-17 against
+`dc+sot-form`; an earlier family-1 figure of 0.0004 was impossible, below gate 1 alone). **The MDE
+is about 0.040 × the per-match differential's SD at the 50% point**, and the baseline's own losses
+do not enter it. An arm that moves forecasts a lot per match needs a proportionally larger gain:
+`dc+sot-form` against `dixon-coles` has SD 0.0315, which puts its own family-3 MDE at 0.00125. **A candidate must deliver roughly a tenth of the
 entire remaining headroom in a single arm.** Arms 11 and 12 died here with real, mechanistically
 clean effects of −0.00059 and −0.00030.
 
@@ -78,6 +82,8 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 | **Referee as a 1X2 feature** | **CLOSED** | between-referee variance in home-win residual is *below* the permutation null, p = 0.850. Largest effect the corpus could hide ≈ 0.00027 RPS, half the floor |
 | Asian-handicap / over-under odds as a market family | no gain | reach back less far than the 1X2 families already parsed; add no sensitivity-span coverage; de-vigged AH+OU is *less* sharp than the direct 1X2 (0.17970 vs 0.17937) |
 | **Backward xG (2006–2016)** | **CLOSED** | no free per-match xG or shot-location series exists. Earliest free shot coordinates are 2014-15, which only overlaps the Understat mirror already held |
+| **Opponent-adjusted shots-on-target form** | **withdrawn at pre-flight** | correlates 0.986 with the raw term once the 2000-01 warm-up is excluded (0.990 on full windows); 0.949 pooled only because of that warm-up |
+| More match counts on top of SoT form (total shots, corners, all counts) | **not eligible** | already seen on both evaluation decades; adding counts made the sensitivity decade worse. Reopen only on live seasons |
 | Transfermarkt (direct or via mirrors) | **blocked on licence** | ToS §11.1 forbids automated collection *and* use for machine learning; §44b UrhG reserved |
 
 **Referee → cards/fouls is NOT closed** — it is real and large (excess SD 0.319 cards/match after

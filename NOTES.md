@@ -7318,3 +7318,55 @@ as a new gate: the registered bar has been applied and has passed.
 
 Nothing screened, fetched or built. No config value moves. Next: Arm A's pre-flight correlation on
 the tuning span.
+
+## 2026-11-17 — PRE-FLIGHT: `dc+sot-form-adj` is withdrawn unbuilt; the opponent adjustment is collinear with the raw term wherever a scored forecast lives
+
+Arm A's registered falsifier: if the adjusted and raw trailing shots-on-target differentials correlate
+above **0.98** across club-matches on the tuning span (2000-01..2005-06), the schedule component is
+too small to matter, and the arm is withdrawn before it is built.
+
+### What was measured
+
+* **The raw term is production's own `trailing_differential`** (K = 20, strictly before, E0 history,
+  as the walk sees it). The script rebuilds it a second way and asserts the two agree value for value.
+* **The adjusted term follows the registered construction.** For each past match of side X against
+  O: `(SoT_for − O_conceded) − (SoT_against − O_produced)`. O's means come from its own previous 20
+  recorded matches, strictly before that match. X's term is the mean of these over X's previous 20
+  matches where the adjustment is defined. Nothing after 2005-06 is read.
+
+```
+club-matches, tuning span                          corr     n
+  pooled, as registered                            0.949    4,508
+  2000-01 alone                                    0.822      720
+  excluding 2000-01                                0.986    3,788
+  club's own 20-match window full                  0.990    3,960
+  per season, 2001-02 .. 2005-06                   0.980  0.978  0.991  0.990  0.988
+  the column the design carries (home − away)      0.943    pooled
+```
+
+### The verdict, and the reading it rests on
+
+**By the letter, the arm proceeds:** 0.949 is under 0.98. **It is withdrawn anyway, by the owner's
+decision, and the reason is stated here so the reading can be checked.**
+
+2000-01 is the first season with shots in the source. Every 20-match window in it is still filling,
+and the opponent means the adjustment subtracts are built from one to a handful of matches. The
+adjustment in that season is noise added to the raw term, and that noise alone pulls the pooled
+correlation under the bar. From 2001-02 the windows are full, and the two terms agree at 0.978 to
+0.991. Both evaluation decades start in 2006-07, inside that regime. **Wherever a gated forecast
+would be made, the adjusted term carries only 1 to 3% of variance the raw term does not**, which is
+the case the bar was registered to exclude.
+
+**Why reading a rule after seeing the data is acceptable here, and only here:** this reading can only
+withdraw an arm. It cannot accept one or loosen a gate. The registered figure is kept above beside
+the one that was acted on.
+
+**For the next pre-registration:** a correlation falsifier on a trailing feature should state its
+warm-up exclusion in advance. "Club-matches whose windows are full" is the natural definition, and
+the one this entry would have registered had the warm-up been anticipated.
+
+### Status
+
+Arm A withdrawn unbuilt. **`--family-size` stays 3**, as declared: withdrawals shrink the work, never
+the bar. B (managerial change) and C (summer net spend) remain. Their data fetch and density
+pre-flights are next. No config value moves.
