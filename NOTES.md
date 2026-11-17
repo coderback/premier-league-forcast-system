@@ -7776,3 +7776,51 @@ recorded why: deterministic summation, and 84 MB at import instead of 1,106 MB o
 The CLI never received the pin, so every `pl compare` in this ledger ran unpinned. **No recorded
 verdict is near enough to its bar for this to matter.** It is still a gap in a project that asserts
 byte-identity in six places, and it also inflated the memory that made finding 1 fatal.
+
+## 2026-11-17 — CORRECTION: the run-to-run variation was a set-order bug in `promotion_map`, not BLAS; the CLI is now pinned anyway
+
+The result entry above attributes the sensitivity decade's P(better) of 0.835 against 0.838 to
+unpinned BLAS summation order. **That was wrong.** It was inferred from a plausible mechanism and
+written down without a test, which is how this ledger has been wrong before.
+
+### What was tested
+
+The same `pl compare --arms dc+sot-form,dc+sot-form+e1` over 2026-27 to date, run twice per
+configuration, with the BLAS variables removed from the environment. The reports were compared
+byte for byte:
+
+```
+before the fix   pinned:   differ     unpinned: differ     only the e1 arm's numbers move
+after the fix    pinned, PYTHONHASHSEED 1 vs 2:   byte-identical
+                 unpinned, PYTHONHASHSEED 1 vs 2: byte-identical
+                 pinned vs unpinned:              byte-identical
+```
+
+**The cause was mine.** `promotion_map` walked the promoted clubs in set order. Python randomises
+string hashing per process, so the OLS summed its pairs in a different order on every run. The fits
+are warm-started across barriers, and the resulting last-bit differences in the map grew into
+third-decimal differences in P(better). The baseline was identical throughout, which should have
+pointed here and not at BLAS. **Fixed by iterating in sorted order.** A test now computes the map
+under four hash seeds in fresh processes and requires identical output. It fails without the fix.
+
+**BLAS threading changes no number on this workload.** Pinned and unpinned reports are
+byte-identical.
+
+### What this does to the recorded gate result
+
+The 2026-11-17 gate numbers for `dc+sot-form+e1` came from one arbitrary club ordering, so they are
+reproducible only to about the third decimal. **The verdict cannot move:** P(better) of 0.695 and 0.838
+against a bar of 0.95, with run-to-run spread under 0.01. They are left as recorded rather than
+re-run, and this entry is the caveat. No earlier result in the ledger touches `promotion_map`.
+
+### The pin, kept for its other reason
+
+`plmodel/__init__.py` now sets the four BLAS thread variables to 1 with `setdefault`, before any
+submodule can import numpy. Under `pl`, OpenBLAS now reports 1 thread where it reported 16. This
+removes about a gigabyte of import-time commit on this host (1,106 MB against 84 MB, the 2026-08
+measurement), which is what made the first test-decade walk fragile. It changes no output, as shown
+above.
+
+* An exported thread count is respected; a test covers it.
+* A third test keeps the package's variable list identical to `tests/conftest.py`'s.
+* **690 unit tests pass.**

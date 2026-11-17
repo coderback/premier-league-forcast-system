@@ -160,6 +160,42 @@ def test_e1_entries_enter_the_window_mapped_onto_the_e0_scale() -> None:
     assert np.isnan(recent[first_p1])      # without E1 the term is off there
 
 
+def test_the_map_is_identical_whatever_the_process_hash_seed() -> None:
+    """Promoted clubs were once walked in set order, which Python randomises per process.
+
+    The OLS then summed in a different order each run, and identical `pl compare` runs disagreed in
+    P(better). Twelve clubs with irrational-looking shot means make the sums order-sensitive.
+    """
+    import subprocess
+    import sys
+
+    code = (
+        "import numpy as np, pandas as pd\n"
+        "from plmodel.model import covariates as cv\n"
+        "rng = np.random.default_rng(3); W = 3; e0 = []; e1 = []\n"
+        "clubs = [f'P{i:02d}' for i in range(12)]\n"
+        "for k in range(4): e0.append(('2020-10-0%d' % (k + 1), '2020-21', 'S1', 'S2', 3.0, 3.0))\n"
+        "for c in clubs:\n"
+        "    for i in range(W):\n"
+        "        e1.append((str((pd.Timestamp('2020-09-01') + pd.Timedelta(days=len(e1))).date()), '2020-21',"
+        " c, 'C', float(rng.random() * 7), float(rng.random() * 3)))\n"
+        "        e0.append((str((pd.Timestamp('2021-08-14') + pd.Timedelta(days=len(e0))).date()), '2021-22',"
+        " c, 'S1', float(rng.random() * 5), float(rng.random() * 6)))\n"
+        "f = lambda rows, d: pd.DataFrame(rows, columns=['date','season','home_team','away_team',"
+        "'home_sot','away_sot']).assign(date=lambda x: pd.to_datetime(x['date']), division=d)\n"
+        "print(repr(cv.promotion_map(f(e0,'E0'), f(e1,'E1'), window=W, min_promotions=3)))\n"
+    )
+    import os
+
+    outs = set()
+    for seed in ("1", "2", "3", "4"):
+        done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True,
+                              env={**os.environ, "PYTHONHASHSEED": seed})
+        assert done.returncode == 0, done.stderr
+        outs.add(done.stdout)
+    assert len(outs) == 1, outs
+
+
 # --- 4. the fallback -----------------------------------------------------------------------------
 
 def test_below_the_promotion_minimum_the_e1_term_is_the_bounded_term() -> None:

@@ -428,7 +428,9 @@ def _fit_promotion_map(
     long1 = long1[~np.isnan(long1["diff"])].sort_values(["team", "day"], kind="stable")
     xs, ys = [], []
     for previous, season in zip(seasons[:-1], seasons[1:]):
-        for club in members[season] - members[previous]:
+        # Sorted, not set order: string hashing is randomised per process, and the OLS sums in
+        # whatever order the pairs arrive. Set order made identical runs disagree in P(better).
+        for club in sorted(members[season] - members[previous]):
             first = long0[(long0["team"] == club) & (long0["season"] == season)].head(window)
             if len(first) < window or first["diff"].isna().any():
                 continue
