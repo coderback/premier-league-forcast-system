@@ -90,7 +90,17 @@ TERM_REST = "rest"
 TERM_CONGESTION = "congestion"
 TERM_EURO = "euro"
 TERM_SOT_FORM = "sot_form"
-TERMS: tuple[str, ...] = (TERM_REST, TERM_CONGESTION, TERM_EURO, TERM_SOT_FORM)
+# The same form term with a recency bound, and the bounded term also fed by Championship matches.
+# Both exist because `sot_form` reads E0 history only and has no time limit, so a promoted club's
+# form comes from its last Premier League spell however long ago that was (Coventry's 2026-27 form
+# opened on its 2000-01 shots). See NOTES.md, 2026-11-17, for the pre-registration.
+TERM_SOT_FORM_RECENT = "sot_form_recent"
+TERM_SOT_FORM_E1 = "sot_form_e1"
+TERMS: tuple[str, ...] = (
+    TERM_REST, TERM_CONGESTION, TERM_EURO, TERM_SOT_FORM, TERM_SOT_FORM_RECENT, TERM_SOT_FORM_E1,
+)
+_FORM_TERMS: tuple[str, ...] = (TERM_SOT_FORM, TERM_SOT_FORM_RECENT, TERM_SOT_FORM_E1)
+_BOUNDED_FORM_TERMS: tuple[str, ...] = (TERM_SOT_FORM_RECENT, TERM_SOT_FORM_E1)
 
 # The source columns the shots-form term reads, home then away.
 SOT_COLUMNS: tuple[str, str] = ("home_sot", "away_sot")
@@ -128,6 +138,12 @@ class CovariateSpec:
     euro_top_k: int = _CONFIGURED
     euro_window: tuple[str, str] = ("", "")
     sot_form_window: int = _CONFIGURED
+    sot_form_recency_days: int = _CONFIGURED
+    sot_form_e1_min_promotions: int = _CONFIGURED
+    # Championship matches for `sot_form_e1`, already truncated at the barrier by the walk. Data
+    # rather than a setting, so it is excluded from equality and repr: two specs that say the same
+    # thing about what a term MEANS compare equal whatever rows they were handed.
+    e1_rows: pd.DataFrame | None = field(default=None, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         unknown = [t for t in self.terms if t not in TERMS]
@@ -149,8 +165,12 @@ class CovariateSpec:
             self.euro_top_k == _CONFIGURED or not all(self.euro_window)
         ):
             raise CovariateError("the euro term needs euro_top_k and euro_window")
-        if TERM_SOT_FORM in self.terms and self.sot_form_window < 1:
-            raise CovariateError("the sot_form term needs a sot_form_window of at least 1")
+        if any(t in self.terms for t in _FORM_TERMS) and self.sot_form_window < 1:
+            raise CovariateError("a shots-form term needs a sot_form_window of at least 1")
+        if any(t in self.terms for t in _BOUNDED_FORM_TERMS) and self.sot_form_recency_days < 1:
+            raise CovariateError("a bounded form term needs sot_form_recency_days of at least 1")
+        if TERM_SOT_FORM_E1 in self.terms and self.sot_form_e1_min_promotions < 1:
+            raise CovariateError("the sot_form_e1 term needs sot_form_e1_min_promotions")
 
     @property
     def is_inert(self) -> bool:
@@ -292,6 +312,170 @@ def trailing_differential(
     same_side = (last >= 0) & (v_team[np.clip(last, 0, None)] == team)
     values[same_side] = through[last[same_side]]
     return _scatter(n, rows, is_home, values)
+
+
+def _side_appearances(frame: pd.DataFrame) -> dict[str, np.ndarray]:
+    """One entry per side of every row: team, day number, own-minus-opponent SoT, row, is_home."""
+    n = len(frame)
+    home_v = pd.to_numeric(frame[SOT_COLUMNS[0]], errors="coerce").to_numpy(dtype=float)
+    away_v = pd.to_numeric(frame[SOT_COLUMNS[1]], errors="coerce").to_numpy(dtype=float)
+    day = pd.to_datetime(frame["date"]).to_numpy("datetime64[D]").astype(np.int64)
+    return {
+        "team": np.concatenate([frame["home_team"].to_numpy(), frame["away_team"].to_numpy()]),
+        "day": np.tile(day, 2),
+        "diff": np.concatenate([home_v - away_v, away_v - home_v]),
+        "row": np.tile(np.arange(n), 2),
+        "is_home": np.concatenate([np.ones(n, dtype=bool), np.zeros(n, dtype=bool)]),
+    }
+
+
+def trailing_mean_bounded(
+    team: np.ndarray, day: np.ndarray, diff: np.ndarray, *, window: int,
+    max_age_days: int | None,
+) -> np.ndarray:
+    """Per entry: the mean ``diff`` of that team's previous ``window`` recorded entries.
+
+    Recorded means ``diff`` is not NaN. Previous means an EARLIER DAY, so an entry never reads
+    itself. With ``max_age_days`` set, only entries played within that many days before count; a
+    team with none is NaN, which the design turns into "term off for this match".
+
+    Long-format on purpose: the Championship arm feeds E0 and E1 entries through the same window,
+    and the only thing that marks an E1 entry is that nothing reads a value AT it.
+
+    With ``max_age_days=None`` this is ``trailing_differential``'s definition exactly, which a unit
+    test asserts, so the bounded arm differs from production in the bound and in nothing else.
+    """
+    out = np.full(len(team), np.nan)
+    recorded = ~np.isnan(diff)
+    if not recorded.any():
+        return out
+    codes = pd.factorize(team)[0].astype(np.int64)
+    base = int(day.min())
+    reach = int(max_age_days or 0)
+    # One sorted key per entry: the team in the high digits, the day in the low ones, with room
+    # for a lookback of `reach` days, so a window search can never cross into another team's block.
+    span = int(day.max()) - base + reach + 1
+    key = codes * span + (day - base)
+    order = np.argsort(key[recorded], kind="stable")
+    rec_key = key[recorded][order]
+    cum = np.r_[0.0, np.cumsum(diff[recorded][order])]
+
+    upto = np.searchsorted(rec_key, key, side="left")  # recorded entries on an earlier day
+    start = np.maximum(upto - int(window), np.searchsorted(rec_key, codes * span, side="left"))
+    if max_age_days is not None:
+        start = np.maximum(start, np.searchsorted(rec_key, key - reach, side="left"))
+    count = upto - start
+    ok = count > 0
+    out[ok] = (cum[upto[ok]] - cum[start[ok]]) / count[ok]
+    return out
+
+
+def promotion_map(
+    e0: pd.DataFrame, e1: pd.DataFrame, *, window: int, min_promotions: int
+) -> tuple[float, float] | None:
+    """``(a, b)`` mapping a Championship SoT differential onto the Premier League's scale.
+
+    Fitted by OLS over every COMPLETED promotion in the rows given: a club in an E0 season that was
+    not in the previous E0 season, whose first ``window`` E0 matches that season all have recorded
+    shots (y, their mean differential), and which has ``window`` recorded E1 matches before its
+    first E0 match (x, their mean). Shots only, never results. The rows are what the walk handed
+    over, already behind the barrier, so "completed" is decided by what exists rather than by date.
+
+    A level shift as well as a slope, because a promoted side out-shoots Championship opponents and
+    is out-shot in the Premier League; no pure scale turns a positive into a negative.
+
+    Returns None below ``min_promotions`` pairs, and the arm then reads E0 only.
+    """
+    if e0 is None or e1 is None or len(e0) == 0 or len(e1) == 0 or "season" not in e0:
+        return None
+    # Called at fit time and again at prediction time on the same rows, at every barrier of a walk.
+    # Keyed on what determines the answer, so a different frame can never read a stale map.
+    memo_key = (_content_digest(e0, ("season", *_FORM_COLUMNS)),
+                _content_digest(e1, _FORM_COLUMNS), int(window), int(min_promotions))
+    if memo_key in _MAP_MEMO:
+        return _MAP_MEMO[memo_key]
+    if len(_MAP_MEMO) >= MAP_MEMO_LIMIT:
+        _MAP_MEMO.clear()
+    _MAP_MEMO[memo_key] = result = _fit_promotion_map(
+        e0, e1, window=window, min_promotions=min_promotions)
+    return result
+
+
+def _content_digest(frame: pd.DataFrame, columns: tuple[str, ...]) -> tuple[int, int]:
+    """Row count and an order-sensitive content hash of the columns the map reads."""
+    hashed = pd.util.hash_pandas_object(frame[list(columns)], index=False).to_numpy()
+    return len(frame), int(np.bitwise_xor.reduce(hashed * np.arange(1, len(hashed) + 1,
+                                                                    dtype=np.uint64)))
+
+
+# Entries kept before the memo is emptied. A walk asks for one map per barrier, twice, and over at
+# most ~1,200 barriers; this is a memory ceiling, not a tuning choice, and any value above one
+# barrier's worth of calls gives the same answers.
+MAP_MEMO_LIMIT = 4096
+_MAP_MEMO: dict[tuple, tuple[float, float] | None] = {}
+
+
+def _fit_promotion_map(
+    e0: pd.DataFrame, e1: pd.DataFrame, *, window: int, min_promotions: int
+) -> tuple[float, float] | None:
+    seasons = sorted(e0["season"].unique())
+    members = {s: set(e0.loc[e0["season"] == s, "home_team"]) for s in seasons}
+    side0 = _side_appearances(e0)
+    side0["season"] = np.tile(e0["season"].to_numpy(), 2)
+    long0 = pd.DataFrame(side0).sort_values(["team", "day"], kind="stable")
+    side1 = _side_appearances(e1)
+    long1 = pd.DataFrame(side1)
+    long1 = long1[~np.isnan(long1["diff"])].sort_values(["team", "day"], kind="stable")
+    xs, ys = [], []
+    for previous, season in zip(seasons[:-1], seasons[1:]):
+        for club in members[season] - members[previous]:
+            first = long0[(long0["team"] == club) & (long0["season"] == season)].head(window)
+            if len(first) < window or first["diff"].isna().any():
+                continue
+            before = long1[(long1["team"] == club) & (long1["day"] < first["day"].min())]
+            before = before.tail(window)
+            if len(before) < window:
+                continue
+            xs.append(float(before["diff"].mean()))
+            ys.append(float(first["diff"].mean()))
+    if len(xs) < min_promotions:
+        return None
+    b, a = np.polyfit(np.asarray(xs), np.asarray(ys), 1)
+    return float(a), float(b)
+
+
+def _bounded_form(
+    frame: pd.DataFrame, history: pd.DataFrame, spec: CovariateSpec, *, with_e1: bool
+) -> tuple[np.ndarray, np.ndarray]:
+    """(home, away) bounded form for the rows of ``frame``; optionally fed by mapped E1 entries."""
+    predicting = history is not None and len(history) > 0
+    rows = frame.assign(**{c: np.nan for c in SOT_COLUMNS}) if predicting else frame
+    e0 = _combine(history, rows, columns=_FORM_COLUMNS)
+    side = _side_appearances(e0)
+    team, day, diff = side["team"], side["day"], side["diff"]
+    if with_e1:
+        if spec.e1_rows is None:
+            raise CovariateError(
+                "sot_form_e1 was asked for but no Championship rows were handed to the spec; "
+                "refusing to fall back to E0 only, which would silently make this arm sot_form_recent"
+            )
+        # The map is fitted on what is behind the barrier: the fit's own frame at fit time, the
+        # history at prediction time -- the same rows either way.
+        mapping = promotion_map(
+            history if predicting else frame, spec.e1_rows,
+            window=spec.sot_form_window, min_promotions=spec.sot_form_e1_min_promotions,
+        )
+        if mapping is not None:
+            extra = _side_appearances(spec.e1_rows[list(_FORM_COLUMNS)])
+            a, b = mapping
+            team = np.concatenate([team, extra["team"]])
+            day = np.concatenate([day, extra["day"]])
+            diff = np.concatenate([diff, a + b * extra["diff"]])
+    values = trailing_mean_bounded(
+        team, day, diff, window=spec.sot_form_window, max_age_days=spec.sot_form_recency_days
+    )[: len(side["team"])]
+    home, away = _scatter(len(e0), side["row"], side["is_home"], values)
+    return home[-len(frame):], away[-len(frame):]
 
 
 def european_qualification(
@@ -447,6 +631,10 @@ def per_side_values(
             window=spec.sot_form_window,
         )
         return home[-len(frame):], away[-len(frame):]
+    if term == TERM_SOT_FORM_RECENT:
+        return _bounded_form(frame, history, spec, with_e1=False)
+    if term == TERM_SOT_FORM_E1:
+        return _bounded_form(frame, history, spec, with_e1=True)
     raise CovariateError(f"no measurement defined for covariate {term!r}")
 
 

@@ -242,6 +242,10 @@ model:
     # pairing moves a goal rate by exp(0.1*6) = 1.8x on top of what the fitted strengths already
     # say -- beyond any plausible form effect, so an outer box rather than a constraint.
     cov_sot_form: [-0.1, 0.1]
+    # The bounded form terms are the same quantity on the same scale (E1 entries are mapped onto
+    # E0's before they are averaged), so they get the same outer box.
+    cov_sot_form_recent: [-0.1, 0.1]
+    cov_sot_form_e1: [-0.1, 0.1]
     # Outer box on a score-driven team state (model.seams.dynamics), in log-goal units of
     # deviation from the team's fitted level. exp(1.5) = 4.5x the team's own long-run rate, which
     # no run of form produces; this is a divergence guard for a recursion that could in principle
@@ -652,6 +656,16 @@ model:
     # in about 16 matches rather than 31, so a window much shorter than 16 is noise and one much
     # longer is the goal-based strength again. The tuning-span check runs before any gate.
     sot_form_window: 20
+    # Days back a match may be and still count towards the BOUNDED form terms (sot_form_recent,
+    # sot_form_e1). FIXED BY DATES, not tuned (NOTES.md 2026-11-17): a club continuously in E0
+    # never carries a match older than 285 days in its 20-window, covid pause included, and a
+    # promoted club's previous E0 match is never fewer than 384 days back. 365 removes every
+    # promoted club's previous-spell form and leaves every other club's term exactly as it was.
+    sot_form_recency_days: 365
+    # Completed promotions the E1->E0 shots map needs before sot_form_e1 uses Championship rows;
+    # below it the term is sot_form_recent. Fixed in the pre-registration: an OLS slope from fewer
+    # than ten clubs is mostly the clubs. Both evaluation decades open with at least fifteen.
+    sot_form_e1_min_promotions: 10
 
 # ---------------------------------------------------------------------------------------------
 # BACKTEST

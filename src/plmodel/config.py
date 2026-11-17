@@ -194,6 +194,8 @@ class ModelConfig:
             euro_top_k=int(settings["euro_top_k"]),
             euro_window=(str(window[0]), str(window[1])),
             sot_form_window=int(settings["sot_form_window"]),
+            sot_form_recency_days=int(settings["sot_form_recency_days"]),
+            sot_form_e1_min_promotions=int(settings["sot_form_e1_min_promotions"]),
         )
 
     def _scoreline_spec(self) -> CountSpec:

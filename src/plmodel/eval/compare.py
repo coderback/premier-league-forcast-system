@@ -632,7 +632,9 @@ def _dc_weibull_copula(ctx: ArmContext) -> np.ndarray:
     return _family_arm(ctx, marginal="weibull", dependence="frank")
 
 
-def _context_arm(ctx: "ArmContext", *, terms: tuple[str, ...], mode: str) -> np.ndarray:
+def _context_arm(
+    ctx: "ArmContext", *, terms: tuple[str, ...], mode: str, with_e1: bool = False
+) -> np.ndarray:
     """Shared body for the match-context arms.
 
     One function so the four combinations cannot drift from each other, and so the only thing
@@ -645,12 +647,27 @@ def _context_arm(ctx: "ArmContext", *, terms: tuple[str, ...], mode: str) -> np.
     whether it is in Europe are both known before kickoff, so using them is leak-free — and the
     history reaches no further than the barrier, because the splitter truncated it.
     """
+    from plmodel.model.covariates import promotion_map
     from plmodel.model.dixon_coles import fit_dixon_coles
 
     model = ctx.cfg.model
     spec = model.covariate_spec(terms=terms, mode=mode)
+    if with_e1:
+        if ctx.tiers is None:
+            raise ValueError(
+                "this arm reads Championship rows; pass `tiers=` to run_arm. Refusing to run on "
+                "E0 alone, which would silently make it the recency-bounded arm."
+            )
+        e1 = ctx.tiers[ctx.tiers["division"] == "E1"]
+        spec = dataclasses.replace(spec, e1_rows=e1)
     previous = ctx.state.get("fit")
     if previous is None or ctx.split.is_refit:
+        if with_e1:
+            # Recorded per refit so the report can show what the map did over the walk.
+            ctx.state.setdefault("e1_maps", []).append(promotion_map(
+                ctx.train, spec.e1_rows, window=spec.sot_form_window,
+                min_promotions=spec.sot_form_e1_min_promotions,
+            ))
         previous = fit_dixon_coles(
             ctx.train,
             half_life_days=model.decay_half_life_days,
@@ -699,6 +716,32 @@ def _dc_sot_form(ctx: ArmContext) -> np.ndarray:
     production model's and shots can only add what they have not already absorbed.
     """
     return _context_arm(ctx, terms=("sot_form",), mode="diff")
+
+
+@register("dc+sot-form-recent")
+def _dc_sot_form_recent(ctx: ArmContext) -> np.ndarray:
+    """`dc+sot-form` with the form window bounded to matches in the last year.
+
+    Corrects a defect rather than adding information: production's term reads a promoted club's
+    form from its last Premier League spell however old. Bounded, that club's term is off until it
+    has played in its new spell, and no other club's term changes. Pre-registered 2026-11-17.
+    """
+    return _context_arm(ctx, terms=("sot_form_recent",), mode="diff")
+
+
+@register("dc+sot-form+e1")
+def _dc_sot_form_e1(ctx: ArmContext) -> np.ndarray:
+    """The bounded form term, fed by the club's recent Championship matches as well.
+
+    Each E1 match's differential is mapped onto the E0 scale by a level and slope refitted at every
+    barrier from completed promotions (shots only). It is the first arm aimed at WHICH promoted
+    club is good rather than at promoted clubs as a group. Pre-registered 2026-11-17.
+    """
+    return _context_arm(ctx, terms=("sot_form_e1",), mode="diff", with_e1=True)
+
+
+# Arms that read divisions beyond the prediction division, and so need `tiers=` from the caller.
+ARMS_NEEDING_TIERS: frozenset[str] = frozenset({"dc-tiers", "dc-tiers3", "dc+sot-form+e1"})
 
 
 @register("congestion")
@@ -1217,7 +1260,32 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
         **_context_block(fits),
         **_decay_block(fits),
         **_blend_block(state),
+        **_e1_map_block(state),
     }
+
+
+def _e1_map_block(state: dict) -> dict[str, object]:
+    """The E1->E0 shots map over the walk. Empty for every arm that does not read E1.
+
+    The share of refits with no map is the number that separates "Championship form was tried and
+    did nothing" from "it was never switched on": below the promotion minimum the arm IS the
+    recency-bounded arm, and a null from those barriers says nothing about the Championship.
+    """
+    maps = state.get("e1_maps")
+    if not maps:
+        return {}
+    live = [m for m in maps if m is not None]
+    out: dict[str, object] = {"n_refits": len(maps), "n_without_map": len(maps) - len(live)}
+    if live:
+        a = np.array([m[0] for m in live])
+        b = np.array([m[1] for m in live])
+        out.update({
+            "level_a": {"mean": float(a.mean()), "min": float(a.min()), "max": float(a.max()),
+                        "final": float(a[-1])},
+            "slope_b": {"mean": float(b.mean()), "min": float(b.min()), "max": float(b.max()),
+                        "final": float(b[-1])},
+        })
+    return {"e1_map": out}
 
 
 def _dynamics_block(fits: Sequence[object]) -> dict[str, object]:

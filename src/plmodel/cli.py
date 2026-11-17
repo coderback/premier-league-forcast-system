@@ -173,12 +173,19 @@ def cmd_compare(args: argparse.Namespace) -> int:
         return 2
 
     splits = _build_splits(cfg, matches, span=span)
+    # Only arms that read other divisions get them, and they get them through run_arm, which
+    # truncates every extra row at each barrier exactly as it truncates the prediction division.
+    from plmodel.eval.compare import ARMS_NEEDING_TIERS
+
+    tiers = (corpus[corpus["played"]] if any(a in ARMS_NEEDING_TIERS for a in arm_names)
+             else None)
     report = run_compare(
         matches, splits, cfg, arm_names,
         history=corpus[corpus["division"] == cfg.backtest.prediction_division],
         n_bins=cfg.audit.calibration_bins,
         big_six=cfg.audit.big_six,
         family_size=args.family_size,
+        tiers=tiers,
     )
 
     sensitivity = _sensitivity_deltas(args.against_span)
