@@ -7597,3 +7597,46 @@ apply to Arm E, which adds information rather than correcting a defect.
 ### Status
 
 Registered. Next: Arm E's two pre-flights on the tuning span.
+
+## 2026-11-17 — PRE-FLIGHT: `dc+sot-form+e1` passes both registered checks and proceeds to build
+
+The 15 promotions of the tuning span (into 2001-02..2005-06). x is each club's mean SoT differential
+over its last 20 E1 matches before promotion, y the same over its first 20 E0 matches, and ppg its
+points per game over those 20.
+
+```
+club            season  x_E1   y_E0   ppg   stale E0 form at first match
+Blackburn       2001-02  4.30  -0.55  1.10   -
+Bolton          2001-02  1.75  -1.45  1.10   -
+Fulham          2001-02  1.60  -0.30  1.35   -
+Birmingham      2002-03  1.70  -1.10  1.25   -
+Man City        2002-03  2.60   0.85  1.35  -1.5
+West Brom       2002-03  1.25  -1.30  0.80   -
+Leicester       2003-04 -0.15  -1.30  0.95  -1.5
+Portsmouth      2003-04  1.00  -0.85  0.95   -
+Wolves          2003-04  1.85  -3.10  0.75   -
+Crystal Palace  2004-05  1.45  -4.15  0.75   -
+Norwich         2004-05  0.55  -4.10  0.75   -
+West Brom       2004-05  2.50  -1.95  0.55  -2.0
+Sunderland      2005-06  1.65  -2.10  0.30  -2.1
+West Ham        2005-06  0.75  -3.20  1.30   0.2
+Wigan           2005-06  3.30  -1.40  1.70   -
+```
+
+**1. The map's slope: b = +0.497, a = −2.599. Passes (bar: b ≤ 0 withdraws).** Championship shot
+dominance carries over at about half strength, after a level drop of 2.6 shots on target a match.
+corr(x, y) = +0.39.
+
+**2. Ordering: Spearman(x, ppg) = +0.244, n = 15. Passes (bar: ρ ≤ 0 withdraws).** This is a
+direction check and nothing more: the two-sided p is 0.38.
+
+**Reported, not a bar, and it points the other way.** On the five clubs that carried stale E0 form,
+that stale form ordered their ppg at ρ = +0.82, against +0.20 for E1 form on the same five. Five
+clubs cannot carry a conclusion. It is recorded so that a NULL for Arm E later is not a surprise,
+and so that nobody reads Arm R's premise, that stale form is worthless, as already established.
+
+### Status
+
+Both arms proceed to build, as registered. Next: implement `dc+sot-form-recent` and
+`dc+sot-form+e1` on the covariate seam, with the five unit tests the pre-registration lists, then the
+tuning-span check. `--family-size` stays 2.
