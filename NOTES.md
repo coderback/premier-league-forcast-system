@@ -7247,3 +7247,74 @@ table committed to this repository carries attribution and the same licence.
 ### Status
 
 Nothing screened, fetched or built. No config value moves.
+
+## 2026-11-17 — INSTRUMENT: the four-gate MDE against `dc+sot-form` is 0.0007 to 0.00095, under the 0.0012 bar, so the round proceeds
+
+The second round's first step, run before any candidate was touched. The bar fixed at
+pre-registration: if the family-3 MDE against the new baseline exceeds **0.0012**, the round stops.
+
+### Method, rebuilt rather than inherited
+
+The script behind the 2026-09-23 measurement was never committed and could not be recovered, so the
+injection was rebuilt on this project's own `paired_delta_losses`, `diebold_mariano` and
+`benjamini_hochberg`, at config's `n_boot` and seed. Candidate loss = baseline loss − delta + e, with
+e ~ N(0, SD). The gates are the acceptance rule's:
+
+* gate 1 on the test decade (CI excludes 0 or P(better) ≥ 0.95)
+* gate 2 on its 2,660 market-covered matches (the candidate's gap is no worse than the baseline's)
+* gate 3 as the DM p-value under BH with the declared family, one p-value scored
+* gate 4 from an independent draw on the sensitivity decade, P(better) ≥ 0.5
+
+The MDE is the smallest delta on a 0.00005 grid that passes all four in 50% (p50) and 80% (p80) of
+1,000 draws. The bootstrap uses one fixed seed, so a shifted differential shifts every resample mean
+and leaves the HAC variance unchanged. One bootstrap per draw therefore serves the whole grid. A
+check inside the script asserts that the shortcut reproduces the three real functions exactly, at two
+deltas, against both baselines.
+
+The baselines' walks were recomputed through `run_compare` and reproduce the acceptance run to every
+printed digit: test decade 0.2005 → 0.1982 (−0.00222, CI [−0.00322, −0.00122]), sensitivity decade
+0.1967 → 0.1953 (−0.00138, P = 0.9999). 3,800 matches on each decade.
+
+### Result
+
+```
+                                 gate 1 alone     family 1         family 3         family 5
+                                 p50     p80      p50     p80      p50     p80      p50     p80
+ledger SD 0.01757 (registered)   0.0005  0.00075  0.0006  0.00085  0.0007  0.00095  0.00075 0.0010
+observed SD, dc+sot-form vs dc   0.0009  0.00135  0.00105 0.0015   0.00125 0.0017   0.00135 0.0018
+  (0.0315 test, 0.0240 sensitivity; not registered, reported only)
+```
+
+**The registered measurement passes: 0.0007 at p50 and 0.00095 at p80, both under 0.0012.** The
+round proceeds as declared, with `--family-size 3`.
+
+### Three things this measurement says beyond its verdict
+
+**The check could not have failed, and that should have been seen when it was registered.** Under
+this injection, gates 1, 3 and 4 depend only on the match count and the spread of the per-match
+differential, never on the baseline's own losses. Gate 2 depends on them only through which matches
+the market covers. Swapping `dixon-coles` for `dc+sot-form` therefore cannot move the MDE, and the
+script confirms that by producing identical gates against both. The entry asked a question whose
+answer was fixed by construction.
+
+**The ledger's family-1 figure of 0.0004 is wrong, and the "0.0008 flat" table is right.** Passing
+all four gates cannot be easier than passing gate 1 alone, which needs 0.0005 at p50. The 2026-09-23
+figures are consistent with this measurement read off a 0.0002 grid somewhere between p50 and p80.
+
+**The MDE scales with the differential's spread, and that spread is where the real risk lies.** On
+both rows the family-3 MDE is about **0.040 × SD at p50 and 0.054 × SD at p80**. The one real
+covariate arm measured against a goal-only baseline, `dc+sot-form` against `dixon-coles`, has an SD
+of 0.0315 on the test decade, nearly twice the registered 0.01757. An arm with that spread faces an
+MDE of 0.00125 to 0.0017, above this round's bar. Each candidate's own SD against `dc+sot-form`
+will be known only once it is built:
+
+* B and C touch a minority of matches and should sit well below the crossing.
+* A replaces the form term, so its spread is the open question.
+
+The crossing points are SD ≈ 0.030 at p50 and ≈ 0.022 at p80. Recorded for reading the results, not
+as a new gate: the registered bar has been applied and has passed.
+
+### Status
+
+Nothing screened, fetched or built. No config value moves. Next: Arm A's pre-flight correlation on
+the tuning span.
