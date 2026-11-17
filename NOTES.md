@@ -7640,3 +7640,72 @@ and so that nobody reads Arm R's premise, that stale form is worthless, as alrea
 Both arms proceed to build, as registered. Next: implement `dc+sot-form-recent` and
 `dc+sot-form+e1` on the covariate seam, with the five unit tests the pre-registration lists, then the
 tuning-span check. `--family-size` stays 2.
+
+## 2026-11-17 — BUILD and TUNING CHECK: `dc+sot-form-recent` is withdrawn; `dc+sot-form+e1` passes and goes to the gate
+
+### What was built
+
+Two new covariate terms, `sot_form_recent` and `sot_form_e1`, behind arms `dc+sot-form-recent` and
+`dc+sot-form+e1`. **Production's `sot_form` and its `trailing_differential` are untouched.**
+
+* **Shared trailing mean.** The new terms share a long-format trailing mean,
+  `trailing_mean_bounded`. A unit test asserts it equals `trailing_differential` exactly when
+  unbounded, so the recency arm differs from production in the bound and nothing else.
+* **The map.** `promotion_map` fits the E1→E0 level and slope by OLS over completed promotions,
+  memoised on a content hash because it is asked for twice per barrier.
+* **Championship rows** reach the spec from `ctx.tiers`, so they are truncated at each barrier by
+  `training_frame` exactly as E0 is. `pl compare` now hands extra divisions to the arms in
+  `ARMS_NEEDING_TIERS` (`dc-tiers`, `dc-tiers3`, `dc+sot-form+e1`), which it did not do before.
+* **Config.** `sot_form_recency_days: 365` and `sot_form_e1_min_promotions: 10`, each with its
+  justification, and outer boxes for the two new coefficients matching `cov_sot_form`'s.
+* **Tests.** `tests/test_stale_form.py` covers the five registered properties: a brute-force
+  reading of the bound, the no-other-club property on the real corpus, the map as the OLS line, the
+  fallback below the promotion minimum, and that no forecast row reads its own shots. It adds the
+  unbounded identity above and a refusal to run the E1 term without Championship rows.
+  **686 unit tests pass**, plus the corpus test.
+
+### The tuning-span check
+
+The bar was registered before the run: withdraw if the arm is not better than `dc+sot-form` on
+2000-01..2005-06 (delta ≥ 0 or P(better) < 0.5). Walked with `run_arm` at
+`tuning_min_train_matches`, as the `dc+sot-form` check was: 2,280 matches over 597 barriers from
+2000-08-19.
+
+```
+arm                    delta      95% CI                  P(better)   verdict
+dc+sot-form-recent   +0.00003  [-0.00008, +0.00014]        0.294      WITHDRAWN (delta >= 0)
+dc+sot-form+e1       -0.00005  [-0.00021, +0.00011]        0.710      passes
+
+per season          2000-01  2001-02  2002-03   2003-04   2004-05   2005-06
+recent               0        0       -0.00001  -0.00001  +0.00010  +0.00011
+e1                   0        0       -0.00001  -0.00001  +0.00015  -0.00040
+```
+
+**`dc+sot-form-recent` is withdrawn.** The registered defect-correction path does not reach it. That
+path was written for an arm that fails gate 1 at the compare, and this one stopped one step earlier,
+on a bar fixed in advance. Withdrawing a defect correction on a check registered as weak is
+uncomfortable, and it is recorded rather than argued away. The finding is real: **on the tuning span,
+dropping a promoted club's previous-spell form made the forecast slightly worse, not better.** That
+agrees with the pre-flight's five-club note, where stale form ordered those clubs at ρ = +0.82. Old
+Premier League shots are not worthless; a club's long-run level persists.
+
+**`dc+sot-form+e1` passes**, weakly, as registered. Two facts qualify it:
+
+* **The map is live for only a quarter of the walk.** 443 of 597 refits had fewer than 10
+  completed promotions behind them and ran as the recency arm, which is why the two arms agree to
+  the digit through 2003-04. The evaluation decades have 15 or more promotions behind every
+  barrier, so the gate will see the map throughout, unlike this check.
+* **The final map, a = −2.599 and b = +0.497, equals the pre-flight's to every printed digit.**
+  It was fitted on the same 15 promotions through independent code, which is a check on both.
+
+`cov_sot_form_e1` settles at +0.0288 against production's +0.030 to +0.034. The term does the same
+job on the same scale.
+
+### Next
+
+The gate, with **`--family-size` 2 as registered**, although only one arm remains:
+
+```
+pl compare --arms dc+sot-form,dc+sot-form+e1 --family-size 2 --sensitivity --out gate_e1_sens.json
+pl compare --arms dc+sot-form,dc+sot-form+e1 --family-size 2 --against-span output/gate_e1_sens.json --out gate_e1_test.json
+```
