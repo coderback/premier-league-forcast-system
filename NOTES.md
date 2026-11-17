@@ -7490,3 +7490,110 @@ Both withdrawn data lines stay open in principle on sources that record what the
 * **Spend** needs fees disclosed consistently across both decades.
 
 Neither source here does. No config value moves.
+
+## 2026-11-17 — PRE-REGISTRATION: stale shots form for promoted clubs, a family of two judged against `dc+sot-form`
+
+**Nothing below has been built, and nothing that reads a match result has run.** The design facts
+quoted are counts of dates, measured before this entry to set the constants. No outcomes were used.
+
+### The defect
+
+`trailing_differential` reads E0 history only and is not time-bounded. A promoted club's form
+therefore comes from its last Premier League spell, however long ago that was. At their first match
+of 2026-27, Coventry's term was built from 2000-01 (25 years old), Hull's from 2016-17 and Ipswich's
+from its 2024-25 relegation season. Of the 78 promotions from 2001-02 to 2026-27, **52 carry form
+from a previous spell**. The other 26 have no E0 shots history, so the term is already off for them.
+
+Each promoted club carries this for up to 20 matches: about 60 club-matches a season, a sixth of
+fixtures. Over 2016-26, production's gap to the closing line is +0.0044 on promoted fixtures and
++0.0052 on established ones. **This is a correction aimed at a defect, not at a known gap.**
+
+**What has already been closed and is not reopened here:** a pooled E0+E1 fit (`dc-tiers`), the
+promotion prior and general shrinkage. All three moved promoted clubs as a group. The ledger's
+lesson was "the mean can be fixed, the ordering cannot" without new information. Arm E below is
+the first to bring new information about **which** promoted club is good: its own Championship shots,
+complete from 2000-01.
+
+### Design facts, measured on dates only
+
+* **Continuous E0 clubs:** the oldest match in any 20-match window is 285 days old, covid pause
+  included (99.9th percentile 280).
+* **Promoted clubs:** the shortest gap back to their previous E0 match is 384 days.
+
+**So the recency bound is D = 365 days.** It removes every promoted club's previous-spell form at
+its first match back and changes no other club's term anywhere in the corpus. Fixed now, not tuned.
+The arm's own build asserts the no-other-club property.
+
+### Arm R: `dc+sot-form-recent`
+
+The sot_form term with one change: a past match counts towards a side's 20-match window only if it
+was played within **365 days** before the match being forecast. A side with no such match is
+undefined, and the design switches the term off for that match, exactly as production already does
+for clubs with no E0 shots history. As a promoted club plays, its window refills from its new spell.
+
+### Arm E: `dc+sot-form+e1`
+
+Arm R's window, drawn from **E0 and E1 together**: the side's 20 most recent recorded matches
+within 365 days, in either division. Each E1 match's differential is mapped onto the E0 scale by an
+affine map, `x_E0 = a + b · x_E1`. A level shift is required: promoted clubs out-shoot Championship
+opponents, then are out-shot in the Premier League, and no pure scale can turn a positive into a
+negative.
+
+* **a and b are re-estimated at every barrier**, by OLS over every promotion completed strictly
+  before it. Completed means the club's first 20 E0 matches are behind the barrier.
+* y is the club's mean SoT differential over those 20 E0 matches; x is its mean over its last 20 E1
+  matches before promotion.
+* **Shots only, never results, and causal.** No constant is chosen by hand.
+* With fewer than **10** completed promotions behind a barrier, E1 rows are not used and the arm is
+  Arm R. Both evaluation decades open with at least 15 behind them.
+* E1 rows reach the design through the multi-division history the walk already hands the tiered
+  arms (`tiers=`).
+
+### Pre-flights, on the tuning span only (2000-01..2005-06, 15 promotions)
+
+**Arm R:** none beyond the design fact above, which it passes by construction. It is a defect
+correction with no mechanism to falsify.
+
+**Arm E, withdrawn unbuilt if either holds:**
+
+1. b ≤ 0 when fitted on the tuning span's promotions. More Championship dominance must mean more
+   Premier League dominance, or the map is noise.
+2. The map's E1-derived form at promotion does not order the promoted clubs' points per game over
+   their first 20 E0 matches: Spearman ρ ≤ 0.
+
+The second bar is deliberately weak. With n = 15, a one-sided 5% test would need ρ ≈ 0.44, and this
+is a direction check, not a significance test. **The stale-form ρ is reported alongside but is not a
+bar**, because most tuning-span promotions have no stale form to compare (shots start in 2000-01).
+
+### Then, both arms if they survive
+
+1. **Build** on the covariate seam, with unit tests: the 365-day bound, the no-other-club property,
+   E1 mapping, fallback below 10 promotions, and the forecast rows never contributing their own shots.
+2. **Tuning-span check**, with the bar used for `dc+sot-form`: withdraw if the arm is not better than
+   `dc+sot-form` on 2000-01..2005-06 (delta ≥ 0 or P(better) < 0.5). **This check is weak and is
+   stated so now.** On the tuning span, only promoted clubs with an E0 spell from 2000-01 onward
+   carry stale form, so few matches differ.
+3. **The gate**, one compare run per decade: `pl compare --arms dc+sot-form,dc+sot-form-recent,
+   dc+sot-form+e1 --family-size 2`, sensitivity first, then test with `--against-span`.
+   **`--family-size` stays 2 whatever is withdrawn.**
+
+### Size, stated honestly
+
+Both arms change only promoted clubs' early matches, about a sixth of fixtures. The MDE scales
+with the per-match spread of the differential against the baseline (2026-11-17: family-3 MDE ≈ 0.040
+× SD), and that spread is small here because five sixths of matches are untouched. So the pooled bar
+will sit well under 0.0007. But the gain has to come from a sixth of the matches, where the whole
+market gap is +0.0044. **The expected outcome is that R is NULL, and E passes only if Championship
+shots carry real ordering information.**
+
+### The one outcome this entry adds a decision for
+
+Arm R corrects a defect whatever its score. If it fails gate 1 but holds P(better) ≥ 0.5 on **both**
+decades and passes gate 2, it is reported to the project's owner as a **defect correction
+candidate**. Adoption on that basis is the owner's decision. It is not an acceptance, and the
+ledger will not call it one. This path is fixed now, before any number exists, and it does not
+apply to Arm E, which adds information rather than correcting a defect.
+
+### Status
+
+Registered. Next: Arm E's two pre-flights on the tuning span.
