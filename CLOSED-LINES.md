@@ -84,6 +84,8 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 | **Backward xG (2006–2016)** | **CLOSED** | no free per-match xG or shot-location series exists. Earliest free shot coordinates are 2014-15, which only overlaps the Understat mirror already held |
 | **Opponent-adjusted shots-on-target form** | **withdrawn at pre-flight** | correlates 0.986 with the raw term once the 2000-01 warm-up is excluded (0.990 on full windows); 0.949 pooled only because of that warm-up |
 | More match counts on top of SoT form (total shots, corners, all counts) | **not eligible** | already seen on both evaluation decades; adding counts made the sensitivity decade worse. Reopen only on live seasons |
+| **Managerial change from Wikipedia season tables** | **withdrawn at pre-flight** | 2 of 10 spot-checked dates disagree with the clubs' own lists, both straddling a league match: the tables record announcements, not when a manager took charge |
+| **Summer net spend from Wikipedia transfer lists** | **withdrawn at pre-flight** | disclosed fees per club-season 3.33 vs 4.77, ratio 0.698 against a 0.70 bar; undisclosed share 57% → 47%; recent "Undisclosed" rows carry sort-key amounts (1,444 vs 2), a one-decade leak |
 | Transfermarkt (direct or via mirrors) | **blocked on licence** | ToS §11.1 forbids automated collection *and* use for machine learning; §44b UrhG reserved |
 
 **Referee → cards/fouls is NOT closed** — it is real and large (excess SD 0.319 cards/match after

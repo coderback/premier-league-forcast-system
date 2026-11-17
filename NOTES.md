@@ -7370,3 +7370,123 @@ the one this entry would have registered had the warm-up been anticipated.
 Arm A withdrawn unbuilt. **`--family-size` stays 3**, as declared: withdrawals shrink the work, never
 the bar. B (managerial change) and C (summer net spend) remain. Their data fetch and density
 pre-flights are next. No config value moves.
+
+## 2026-11-17 — PRE-FLIGHT: `dc+sot-form+manager` and `dc+sot-form+spend` are both withdrawn unbuilt; the second round ends with no arm reaching the gates
+
+Both arms' data were fetched and parsed through the MediaWiki API, the raw pulls cached under
+`data/cache/wikipedia/` (gitignored), and both registered pre-flights were run. **Each fails a
+registered rule.** With Arm A already withdrawn, no candidate of the three reaches `pl compare`.
+
+### Arm B: managerial change
+
+**Source.** The "Managerial changes" table of every per-season article, 2000-01 to 2026-27. All 27
+tables were present and every row parsed, with team and both dates read. Revisions used:
+
+```
+2000:1371813087 2001:1377477843 2002:1384505570 2003:1377475949 2004:1377460135 2005:1379044704
+2006:1377459064 2007:1384509247 2008:1377454716 2009:1378398479 2010:1384511010 2011:1384352217
+2012:1378398117 2013:1385873035 2014:1384514780 2015:1383831346 2016:1378797326 2017:1378397285
+2018:1383879278 2019:1383879360 2020:1383879490 2021:1383732454 2022:1376677138 2023:1385234693
+2024:1385234983 2025:1380557932 2026:1386193958
+```
+
+**Density passes.**
+
+```
+per season                   2006-07..2015-16   2016-17..2025-26   lower/higher
+table rows                         10.7               12.6            0.849
+departures                         10.1               10.7            0.944
+in-season departures                6.7                7.9            0.848
+interim appointments recorded       0.6                2.9            (convention, see below)
+```
+
+**The date spot-check fails.** Ten changes were drawn with the project's seed. Each one's outgoing end
+date and incoming start date were compared against the club's own "List of … managers" article.
+Two automated flags were the matcher reading the wrong row (Clement at Swansea, Rosenior at Chelsea).
+Both agree on direct reading. **Two genuine disagreements remain:**
+
+* **Middlesbrough, McClaren's departure.** The season table says 4 May 2006, when England announced
+  him. The club list says 11 May 2006, after the UEFA Cup final.
+* **Newcastle, Kinnear's appointment.** The season table says 26 Sep 2008, the interim
+  announcement. The club list says 29 Sep 2008.
+
+The registered rule withdraws the arm at more than one disagreement in ten, so it fires. Neither
+difference is cosmetic. **Each gap straddles a league match:** Fulham v Middlesbrough on 7 May 2006,
+Newcastle v Blackburn on 27 Sep 2008. In both cases the match falls on one side of the change or the
+other depending on which article is believed.
+
+The disagreements are also systematic rather than random. The season tables record when a change was
+**announced**, while the club lists record when the manager **took charge**. A new-manager term needs
+the second. A tolerance that would have let these through was not registered, and adding one now
+would be the one direction this protocol forbids.
+
+**A convention change, recorded for whoever reopens this.** Recent tables give interim spells their
+own rows ("End of interim spell": 0.6 a season in 2006-16, 1.9 in 2016-26). Older tables name a
+caretaker only as the incoming manager, if at all. A term keyed on both dates of every row would see
+more changes in the recent decade for reasons of bookkeeping.
+
+### Arm C: summer net spend
+
+**Source.** "List of English football transfers summer YYYY", 2002 to 2026, permanent moves only.
+Loans sit inside the main table to 2016 and in their own table from 2017, and are excluded in both
+cases. Summer 2004 is written as a definition list rather than a table and was parsed from its
+bullets (83 rows). Clubs were mapped through an explicit table of the 45 corpus clubs since 2002, with
+no fuzzy matching. The only Premier League-looking names left unmapped are Villarreal and Newcastle
+Jets, both correctly excluded. Revisions used:
+
+```
+2002:1381531482 2003:1381531405 2004:1385347960 2005:1381531241 2006:1381531077 2007:1381530743
+2008:1383042149 2009:1381530367 2010:1383042100 2011:1383041924 2012:1383042434 2013:1381529733
+2014:1385694896 2015:1381529221 2016:1381529068 2017:1381528929 2018:1381527539 2019:1381527606
+2020:1385862329 2021:1381527805 2022:1385894457 2023:1385862564 2024:1385866250 2025:1381540833
+2026:1381539763
+```
+
+**Density fails, by the narrowest margin it could.**
+
+```
+per Premier League club-season          2006-07..2015-16   2016-17..2025-26
+disclosed-fee transfers                       3.325              4.765        ratio 0.698  (bar 0.70)
+undisclosed                                   4.465              4.150
+undisclosed share of fee-bearing moves        57.3%              46.6%
+club-seasons with no disclosed fee              31                  8         of 200 each
+
+big six, permanent rows: summer 2006 = 63, summer 2024 = 90                  ratio 0.700
+```
+
+**0.698 is under the bar, and the arm is withdrawn.** It is three transfers short: the earlier decade
+needed 668 disclosed fees and has 665. That is close enough that a parsing error could move it either
+way, and the parse was audited for exactly that before this was written: club mapping as above, fee
+classes read directly in the weakest year (2010-11: 34 disclosed, 120 "Undisclosed", 113 free,
+208 loans, across rows touching any club in the mapping). No error was found. A recount pursued only because the verdict went against the arm
+would be a search in one direction, and none was run.
+
+**The big-club test does not fire.** The pre-registration gave it no number, only the
+`transfermarkt-datasets` precedent of 13 rows against 356. Here the ratio is 0.700, and the summer
+series shows no backward thinning (49, 54, 40, 27, 63 from 2002 to 2006, then 47 to 113). Its verdict
+does not matter, because density alone withdraws the arm.
+
+**Two premises of the pre-registration were wrong, and both point the same way.**
+
+* **It expected about 20% of fees to be "Undisclosed".** Among moves touching a Premier League club
+  the share is 57% and 47%, and it falls between the decades. A term that counts undisclosed fees as
+  zero would therefore mean something different in each decade. That is the missing-not-at-random
+  bias the entry named, larger than it assumed, and not constant.
+* **"Undisclosed" no longer means unknown.** In 2016-26, 1,444 rows marked "Undisclosed" carry a
+  reported amount in their `{{ntsh}}` sort key. In 2006-16 only 2 do. Anyone who builds a spend term
+  from these lists and reads the sort keys will import information that exists in only one decade.
+  This is a trap to record alongside the FPL flags and `transfermarkt-datasets`.
+
+### Where the round ends
+
+**All three arms are withdrawn at pre-flight. No compare run happens, and production stays
+`dc+sot-form`.** The round's own expected outcome was "most likely none passes". It ended earlier than
+that, on its data rather than on its gates. The cost was one day and no exposure of either evaluation
+decade.
+
+Both withdrawn data lines stay open in principle on sources that record what they need:
+
+* **Managerial change** needs dates for when each manager took charge, not when it was announced.
+* **Spend** needs fees disclosed consistently across both decades.
+
+Neither source here does. No config value moves.
