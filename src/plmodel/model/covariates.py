@@ -659,7 +659,8 @@ def _completed(history: pd.DataFrame, frame: pd.DataFrame) -> pd.DataFrame:
 # The calendar terms need the season; the form term does not, and must not demand it: `pl predict`
 # and `pl fit` describe fixtures typed at the command line, which carry a date and two teams only.
 _CALENDAR_COLUMNS: tuple[str, ...] = ("date", "season", "home_team", "away_team")
-_FORM_COLUMNS: tuple[str, ...] = ("date", "home_team", "away_team", *SOT_COLUMNS)
+FORM_COLUMNS: tuple[str, ...] = ("date", "home_team", "away_team", *SOT_COLUMNS)
+_FORM_COLUMNS = FORM_COLUMNS
 
 
 def _combine(

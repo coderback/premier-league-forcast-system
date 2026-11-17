@@ -647,7 +647,7 @@ def _context_arm(
     whether it is in Europe are both known before kickoff, so using them is leak-free — and the
     history reaches no further than the barrier, because the splitter truncated it.
     """
-    from plmodel.model.covariates import promotion_map
+    from plmodel.model.covariates import FORM_COLUMNS, promotion_map
     from plmodel.model.dixon_coles import fit_dixon_coles
 
     model = ctx.cfg.model
@@ -658,7 +658,10 @@ def _context_arm(
                 "this arm reads Championship rows; pass `tiers=` to run_arm. Refusing to run on "
                 "E0 alone, which would silently make it the recency-bounded arm."
             )
-        e1 = ctx.tiers[ctx.tiers["division"] == "E1"]
+        # Only the columns the term reads. Every fit keeps its spec, so a full-width copy here is
+        # held once per barrier for the whole walk -- 192 columns of it exhausted memory on the
+        # 1,153-barrier test decade. Nothing else is read, so this changes no number.
+        e1 = ctx.tiers.loc[ctx.tiers["division"] == "E1", list(FORM_COLUMNS)].reset_index(drop=True)
         spec = dataclasses.replace(spec, e1_rows=e1)
     previous = ctx.state.get("fit")
     if previous is None or ctx.split.is_refit:
