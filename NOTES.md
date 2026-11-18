@@ -8534,3 +8534,75 @@ The per-match SD of this differential is large (the review measured about 0.047)
 for a family of one is therefore about 0.0017, and the season-clustered one can be up to twice that.
 **The test decade may clear gate 1; the sensitivity decade is expected to lean the right way without
 resolving**, which is all gate 4 asks.
+
+---
+
+## 2026-11-18 — RESULT: `odds-ratings` passes all four gates and is accepted onto the market-informed track
+
+Run exactly as pre-registered (4f54934), against code committed before the run (cf00da1). Reports:
+`output/gate_odds_sens.json` and `output/gate_odds_test.json`.
+
+### Test decade, 2016-17..2025-26 (3,800 matches, 1,153 barriers)
+
+| | `dc+sot-form` | `odds-ratings` |
+|---|---|---|
+| RPS | 0.1981 | **0.1958** |
+| log loss | 0.9648 | 0.9572 |
+| skill | 17.1% | 18.1% |
+| gap to bet365 Friday (the gate) | +0.0041 | **+0.0019** |
+| gap to the Friday average (n = 2,660) | +0.0035 | +0.0022 |
+| gap to the close (n = 2,660) | +0.0049 | **+0.0035** |
+| gap to Pinnacle's close (n = 3,630) | +0.0055 | +0.0031 |
+
+| gate | result |
+|---|---|
+| 1 | **pass**: −0.0023, 95% CI [−0.0037, −0.0008], P(better) 0.999 |
+| 1, by season (reported) | CI [−0.0038, −0.0007], t on season means [−0.0042, −0.0004]; 8 of 10 seasons favour the arm |
+| 2 | **pass**: gap to the Friday line +0.0019 against production's +0.0041 |
+| 3 | **pass**: Diebold-Mariano p = 0.0020 (family of 1); the loss differential favours the arm |
+| 4 | **pass**: sensitivity P(better) 0.889 ≥ 0.5 |
+
+Per season: −0.0067, −0.0025, −0.0042, **+0.0023** (2019-20), −0.0009, −0.0026, −0.0033, −0.0048,
+−0.0014, **+0.0011** (2025-26). Log loss improves by 0.0075.
+
+### Sensitivity decade, 2006-07..2015-16 (3,800 matches, 995 barriers)
+
+- **Delta:** −0.0008, CI [−0.0022, +0.0005], P(better) 0.889, DM p 0.226. By season the interval is
+  [−0.0026, +0.0011]; 7 of 10 seasons favour the arm.
+- **Gap to bet365 Friday:** +0.0010 against production's +0.0019, the first market comparison this
+  decade has had.
+- **On its own this decade would not pass,** as the pre-registration expected: it leans the right
+  way without resolving, which is all gate 4 asks.
+
+### Against the expectations stated in advance
+
+| span | expected | measured |
+|---|---|---|
+| test decade | about −0.0024 | **−0.0023** |
+| sensitivity decade | about −0.0010 | **−0.0008** |
+| tuning span | −0.0016 | (the falsifier) |
+
+Both decades land where the review's numbers put them, now under a half-life chosen on the tuning
+span rather than read off these decades.
+
+### What this means, and what it does not
+
+- **`odds-ratings` is the market-informed track's model.** It is the most accurate forecaster this
+  project has built.
+- **It does not become production, by the rule.** Production stays `dc+sot-form`, the best
+  independent model.
+- **It still does not beat the market:** +0.0019 behind the Friday line and +0.0035 behind the
+  close. It gets most of the way to "what the market thought of these teams last week" and no
+  further. Its remaining gap is match-specific news, which is the line-up line's target.
+- **The gain is the market's knowledge, not the project's.** By construction it cannot say anything
+  the market does not already know; that is why it sits on its own track.
+
+### Next, by the acceptance rule
+
+"An accepted variant earns a hyperparameter retune BEFORE production wiring." Read here, wiring
+means adding the arm to `pl live`'s frozen set. Two settings were not tuned:
+- the ridge (0.05);
+- the half-life, chosen from only three points.
+
+The retune is a tuning-span grid on ridge and half-life, with interior optima required, run before
+the arm is frozen live. Not started.

@@ -51,6 +51,21 @@ Corrected production's gaps, test decade:
 On the sensitivity decade the gap to bet365 Friday is +0.0019, the first market comparison that
 decade has had. **A smaller headline is a fairer stick, not a better model.**
 
+**The market-informed track's model, accepted 2026-11-18: `odds-ratings`.** It fits ratings to the
+goal rates implied by earlier matches' prices and never reads the forecast match's own.
+
+| | test decade | sensitivity decade |
+|---|---|---|
+| vs `dc+sot-form` | −0.0023, CI [−0.0037, −0.0008] (by season [−0.0038, −0.0007]) | −0.0008, P 0.889 |
+| gap to bet365 Friday | +0.0019 | +0.0010 |
+| gap to the close | +0.0035 | |
+
+It passes all four gates, never becomes production, and still sits behind the market.
+
+A market-informed candidate is now judged against `odds-ratings` as well as against independent
+production. **"Use the market's view of strength" is answered;** what remains open on that track is
+match-specific news.
+
 The original gap was approximately the documented floor for a goals-only public-data
 model — Pitcan (2026) gets +0.0067 on Serie A with an overlapping interval, and this project
 reproduced that paper on its own corpus on 2026-08-17 (`pl reproduce --paper pitcan2026`).
