@@ -7824,3 +7824,130 @@ above.
 * An exported thread count is respected; a test covers it.
 * A third test keeps the package's variable list identical to `tests/conftest.py`'s.
 * **690 unit tests pass.**
+
+## 2026-11-18 — LINE-UPS: a permitted source for 1992-2018 passes its checks, and a registered falsifier says recorded line-ups carry the news the model lacks
+
+Arm 7 (line-ups and availability) has been blocked on data since 2026-08-20. Today's work asked whether
+it can be unblocked from sources whose terms permit a private predictive model. **Nothing here touches
+a match result in either evaluation decade, and no config value moves.**
+
+### Sources, by what their own terms say (all read on 2026-11-18)
+
+| source | covers | what its terms say | standing |
+|---|---|---|---|
+| FBref / Sports Reference | line-ups, substitution and goal minutes, back to 2006 | data-use page bars use "for purposes of ... supporting machine learning methods used to predict, classify, label, or score inputs"; bots limited to 10 requests a minute; custom datasets from $5,000 | **closed on terms** |
+| Transfermarkt | full history | clause 11.1: no bots or screen scraping; no use "for the training or development of artificial intelligence (AI), including ... machine learning"; § 44b UrhG reserved | **closed on terms**, including as a manual verification tool |
+| Fantasy Premier League | minutes and starts, flags | 2026/27 T&C 28(d): no "automated systems to access the Game and extract information"; clause 29 reserves "any Game data"; premierleague.com bars "creating a database" from its material | **closed on terms**; the public FPL archives were built the same way |
+| worldfootball.net | line-ups and substitution minutes back to 2006 | personal, non-commercial use allowed; robots.txt has `Disallow: /` for `Claude-User`, `ClaudeBot` and other AI agents | human reading only; a permission request is drafted |
+| Understat | 2014-15 on | site down ("We will come back soon"); robots.txt was `Disallow: /` when up | unavailable |
+| European Soccer Database (Kaggle) | starting XIs 2008-16, no substitution minutes | ODbL tag, contents owned by the original source, no commercial use | redundant given the next row |
+| **`pssguy/epldata`** (Andrew Clark) | **every Premier League match, Aug 1992 to May 2018**: starters, time on and off, cards, goal minutes, players with birth dates | **`License: MIT`**, compiled by the author over 25 years, "none of the data is official"; no updates after May 2018 | **usable**; downloaded to `data/cache/epldata/` (git-ignored), source commit `c61f77a` |
+
+**A process note against myself:** I read three worldfootball.net pages through the Chrome agent before
+its robots.txt was checked; that file disallows `Claude-User`. It will not be done again. Any check
+against worldfootball.net is the owner's, by hand.
+
+### `epldata`, structure check D1 (thresholds fixed in the plan before the data was opened)
+
+Over 2006-07..2017-18:
+
+* **Join:** 100% of matches in every season, on (season, home, away), which identifies a fixture
+  uniquely here. A first pass with a ±3-day date window missed one: Crystal Palace v Everton, which
+  `epldata` dates 17 April 2016 and the corpus dates 13 April, the rearranged midweek fixture. That
+  was my join, not the data.
+* **Scores:** agree in 99.7-100% of matches each season. Counting the goals table alone matters: it
+  already credits own goals to the side that benefits, and `own_goals` is a separate statistic.
+* **Starting elevens:** exactly 11 per side in 99.9-100% of team sheets.
+* **Dates of birth:** present for 99.6-99.8% of players each season.
+* **Benches:** 5 named substitutes to 2008, 7 from 2008-09, which is the real rule change.
+* **Minutes:** coded consistently from 1998-99. Earlier seasons use a different time encoding, and
+  an unused substitute carries `time_on = 0` exactly like a starter, so the build must read it as 0.
+
+**D1 fails as written, on two records.** The plan required no substitution without a player going
+off. Two have none: Kanu on at 69' for Portsmouth on 2008-11-08, and Bendtner on at 64' for Arsenal on
+2014-01-01. Both are genuine source errors (a missing `time_off` for the player replaced), in about
+9,100 team sheets.
+
+**Accepted by the owner's decision, 2026-11-18, and recorded here because it runs against the rule.**
+The reasons it was put to the owner on: both errors are in minutes, which the falsifier below does not
+read, since it uses `started` only. D1 exists to catch a source thinning out over time, and this one
+does not. **This waives a pre-set bar after seeing the result, in the direction that lets data
+through**, which this project normally refuses. It is written down so it can be judged. The build
+treats those two players' minutes in those two matches as unknown.
+
+### The falsifier, as registered before the data was downloaded
+
+The specification was written at 01:55:57 and the data first downloaded at 01:58:23. It is copied
+here because the plan file sits outside the repository.
+
+* **Data:** `epldata` line-ups and the corpus's Pinnacle prices, Friday (`PSH/PSD/PSA`) and closing
+  (`PSCH/PSCD/PSCA`), both Shin de-vigged. 2012-13..2017-18, 2,279 matched matches, 2,259 with both
+  sides scorable.
+* **Outcome:** the Friday-to-close change in P(home) − P(away), SD 0.0462. No match result is read.
+* **Feature, fixed with no alternatives:** for each side, its previous ten league matches; each
+  player's weight is the share of those he started; the regulars are the eleven heaviest.
+  * `new_absent` is the regulars' weight missing from today's eleven among those who started the
+    previous match.
+  * `old_absent` is the same among those who did not.
+  * Each is taken home minus away. Sides with fewer than five previous matches are dropped.
+* **Two details the plan left open, fixed before computing:** ties among regulars break on the most
+  recent start, then player ID; "the placebo shows nothing" means its 95% interval includes zero.
+* **Pass:** `new_absent` r ≤ −0.10, the same sign in 2012-16 and 2016-18, `old_absent` under half its
+  size, and a placebo that gives each side another match's eleven from the same club-season shows
+  nothing.
+
+```
+                         r        95% CI               n
+new_absent, all       -0.182   [-0.222, -0.142]     2,259    bar -0.10        pass
+  2012-16             -0.189   [-0.238, -0.141]     1,509
+  2016-18             -0.168   [-0.238, -0.099]       750    same sign        pass
+old_absent, all       -0.033   [-0.074, +0.008]     2,259    < half           pass
+placebo new_absent    -0.020   [-0.061, +0.022]     2,259    includes zero    pass
+placebo old_absent    +0.021   [-0.021, +0.062]
+```
+
+**It passes on every criterion.** When a regular who started last time drops out of the eleven, the
+home-minus-away price moves against that side between Friday and kick-off. When the absence was
+already known by Friday, it does not, because the Friday price already holds it. Recorded line-ups
+carry the news the model is missing, and the split separates late news from known news.
+
+**Reported, not part of the test:** dropping sides whose previous league match was more than 120 days
+earlier, mainly promoted clubs reading a previous spell, gives `new_absent` −0.188 and `old_absent`
+−0.034.
+
+### What this does and does not establish
+
+* **It establishes:** the feature measures what moves the line, on permitted data, at nearly nine
+  standard errors.
+* **It does not establish** that it improves forecasts. That needs the gates. The plan sized the
+  realistic prize at about 0.001 RPS, against a detectable effect of 0.0007-0.00095 for a family of
+  three, and up to twice that under season clustering (see the independent review of 2026-11-18).
+* **The announced eleven exists about an hour before kick-off.** A forecast that uses it cannot be
+  part of a Thursday or Friday freeze, and its fair benchmark is the closing line.
+* **The blocker has moved, not gone.** `epldata` covers the tuning span and the whole sensitivity
+  decade from one source with recorded starters. It covers only 2016-17 and 2017-18 of the test
+  decade. **No permitted source for August 2018 onward is known.** The gates need it, and so does any
+  live use.
+
+### Next
+
+1. Write to Andrew Clark, asking whether private model use is fine and whether his data continues
+   past May 2018. If it does, one compiler and one schema span both decades.
+2. Ask Heimspiel Medien (worldfootball.net) for 2016-17 to date, so two seasons overlap for an
+   equivalence test.
+3. A written-consent request to the Premier League, ranked last.
+
+All three are drafts for the owner to send. Nothing has been sent.
+
+## 2026-11-18 — CORRECTION: a self-collected FPL archive is not free of licence questions
+
+The 2026-08-20 entry says a twice-daily FPL snapshot archive raises "no licence question about data
+the project collects itself for research". **That is wrong.** The Fantasy Premier League 2026/27
+Terms clause 28(d) forbids using "automated systems to access the Game and extract information from
+the Game", for "any user of this website whatsoever", and clause 29 reserves "any Game data" pending
+the Premier League's prior written consent. Checked against the terms text on 2026-11-18.
+
+A separate assessment the same day also put the live value of FPL availability flags at about 0.0003
+RPS (range −0.0003 to +0.0006). One live season detects roughly 0.0013-0.0027, so a credible live test
+would take about 8-18 seasons. **The archive is not started.** The only open route is a
+written-consent request.

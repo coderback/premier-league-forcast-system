@@ -88,6 +88,8 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 | More match counts on top of SoT form (total shots, corners, all counts) | **not eligible** | already seen on both evaluation decades; adding counts made the sensitivity decade worse. Reopen only on live seasons |
 | **Managerial change from Wikipedia season tables** | **withdrawn at pre-flight** | 2 of 10 spot-checked dates disagree with the clubs' own lists, both straddling a league match: the tables record announcements, not when a manager took charge |
 | **Summer net spend from Wikipedia transfer lists** | **withdrawn at pre-flight** | disclosed fees per club-season 3.33 vs 4.77, ratio 0.698 against a 0.70 bar; undisclosed share 57% → 47%; recent "Undisclosed" rows carry sort-key amounts (1,444 vs 2), a one-decade leak |
+| FBref / Sports Reference | **blocked on terms** | data-use page bars use "supporting machine learning methods used to predict ... or score inputs"; custom data from $5,000 |
+| Fantasy Premier League, live or archived (vaastav, FPL-Core-Insights) | **blocked on terms** | 2026/27 T&C 28(d) bars automated extraction; clause 29 reserves Game data; live value of flags ~0.0003 RPS anyway |
 | Transfermarkt (direct or via mirrors) | **blocked on licence** | ToS §11.1 forbids automated collection *and* use for machine learning; §44b UrhG reserved |
 
 **Referee → cards/fouls is NOT closed** — it is real and large (excess SD 0.319 cards/match after
@@ -102,6 +104,14 @@ gate 2 is permanently NOT EVALUABLE for them.
 assessment: *"it is the only one aimed at the information itself rather than at re-slicing goals."*
 A source covering both decades under one schema now appears to exist (11v11.com, verified at both
 ends) but is **blocked on a terms-of-use judgement**, not on availability. Nothing has been scraped.
+
+**Updated 2026-11-18: half unblocked.** `pssguy/epldata` (MIT) records starters and substitution
+minutes for every Premier League match from 1992-93 to 2017-18 and passes its structure check (two
+substitution records in error, accepted by the owner). A registered falsifier on 2012-18 passes:
+regulars newly missing from the eleven move the Friday-to-close line at r = −0.182, known absences do
+not (−0.033), and the placebo is null. **What still blocks the arm is August 2018 onward**, where no
+permitted source is known. FBref, Transfermarkt and FPL are closed on their own terms (see the data
+table below). worldfootball.net allows personal use but disallows AI agents in robots.txt.
 
 ---
 
