@@ -8364,3 +8364,58 @@ The unit suite passes. The real-corpus odds tests pass: gate-2 coverage is 3,800
 Lagged-odds ratings is its first candidate. The step is the half-day falsifier on the tuning span
 only, then pre-registration as a family of one. The tuning span has bet365 prices only from 2002-03,
 so the falsifier has four tuning seasons, not six. Not started.
+
+---
+
+## 2026-11-18 — PRE-REGISTRATION: lagged-odds ratings, the first market-informed candidate, tuning-span falsifier
+
+Written and committed before the falsifier's code is written or run. The arm and its evidence so far
+are the independent review's (2026-11-18), measured on the evaluation decades with a half-life read
+off those decades, so they are a reason to look, not a result:
+- test −0.0024, CI [−0.0039, −0.0009];
+- sensitivity −0.0010.
+
+### The idea
+
+Fit each team's attack and defence to the goal rates implied by bookmakers' prices for its
+**earlier** matches, never the match being forecast, then forecast with those ratings. A price is a
+near noise-free reading of strength, and it already reflects injuries, transfers and managers at the
+time. **Track: market-informed** (it reads bookmaker prices). It does not read its own match's
+prices, so its gate 2 is the Friday line like every other arm. It can never become production.
+
+### The estimator, fixed now (the review's, unchanged)
+
+1. **Prices:** bet365 pre-close where present (2002-03 on), William Hill pre-close otherwise
+   (2000-01 and 2001-02). Both are pre-close single books, de-vigged by Shin.
+2. **Implied rates:** each priced match's home and away goal rates are the pair whose independent
+   Poisson 1X2 probabilities reproduce its de-vigged home and away probabilities. The inversion must
+   reproduce them to within 1e-6.
+3. **Ratings:** weighted least squares of log implied rates on intercept, home advantage, attack and
+   defence. Only priced E0 matches **strictly before** the forecast date and within 1,500 days, with
+   exponential decay at half-life h and ridge 0.05 on the team terms.
+4. **Forecast:** independent Poisson 1X2 from the fitted rates.
+
+### The check, fixed now
+
+- **Pool:** 2002-03..2005-06, inside the tuning span, 1,520 E0 matches. Neither evaluation decade
+  is touched.
+- **Comparator:** production `dc+sot-form`, walked over the same pool with `run_arm` at
+  `tuning_min_train_matches`, as the earlier tuning checks were.
+- **Half-life:** chosen from {15, 30, 60} days, the grid the review stated in advance, by pooled RPS
+  on this pool. This is what the tuning span is for. All three are reported.
+
+**Withdraw unless BOTH hold:**
+1. **Better than production:** the chosen half-life's paired RPS delta against `dc+sot-form` is
+   below 0, with P(better) ≥ 0.5. This is the same weak bar as the earlier tuning checks.
+2. **Placebo:** permute the implied rates among matches **within each season**, keeping dates and
+   team labels, and refit at the chosen half-life. The placebo must **not** beat production
+   (delta ≥ 0). If shuffled prices do as well, the gain comes from the method, not from what the
+   prices know.
+
+Reported, not gating: the season-clustered interval (four seasons, so wide), per-season deltas, the
+gap to the same match's bet365 Friday price (the gate benchmark; expected positive, since the ratings
+cannot beat the market), and the inversion error.
+
+**If it passes:** pre-registration as a family of one, a build as a registered market-informed arm,
+then both decades through `pl compare`. **If it fails:** it is withdrawn and recorded in
+CLOSED-LINES.md.
