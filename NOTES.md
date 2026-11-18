@@ -7951,3 +7951,90 @@ A separate assessment the same day also put the live value of FPL availability f
 RPS (range −0.0003 to +0.0006). One live season detects roughly 0.0013-0.0027, so a credible live test
 would take about 8-18 seasons. **The archive is not started.** The only open route is a
 written-consent request.
+
+---
+
+## 2026-11-18 — DEFECT, PRE-STATED CHECK: the cold-start bar is measured against every club ever seen, not the current league
+
+Written before the fix is coded or any walk is run.
+
+### The defect
+
+`fit_dixon_coles` pins a club at the league average until its effective (decay-weighted) history
+reaches `min_effective_share` (0.15) of the **median club's**. The median is taken over every club
+in the training history, and that roll only grows: at 2026-08-21 it holds 51 clubs and the median
+one is a former member with 15.4 effective matches. The bar has fallen to about 2.3 effective
+matches against the ~15 the config comment intends (15% of a current member's ~105). It was 3.9-8.9
+across the sensitivity decade and 2.4-6.3 across the test decade. Found by an independent review and
+confirmed here.
+
+It reached live forecasts in 2026-27. Coventry were fitted after three scoreless matches, with attack
+at the box edge (−3.0), and given 0.4% to win at Nottingham Forest on 2026-09-19. They won.
+
+### The fix, as it will be built
+
+1. The median is taken over clubs with a match in the 365 days before the fit's reference date:
+   the current league plus anyone just relegated. If no club qualifies, every club is used as before.
+2. **Box-edge guard.** A fitted club whose attack or defence ends at the strength box edge did not
+   get an estimate; it ran out of room. Such a club is pinned with the cold-start clubs, the fit is
+   redone once, and the club is reported by name.
+3. `pl live` warns, without changing anything, when a forecast gives any outcome below 2%.
+4. A unit test: a new club with three scoreless matches among established clubs stays pinned.
+
+### The check, fixed now
+
+This restores the documented rule rather than adding something new, so it is not asked to beat
+production. It is asked to do no harm. `dc+sot-form` is re-walked on both decades under the shipped
+and corrected rules, with the same code in the same process.
+
+**It ships unless either decade's mean RPS gets worse by more than +0.0002.** That is about a third
+of the gate's minimum detectable effect, and a real cost that size would show.
+
+Reported alongside, not gating:
+- paired-bootstrap intervals, i.i.d. and season-clustered
+- log loss and the gap to the close
+- the bar's range under each rule
+- how often the box guard fires
+- 2026-27 to date (n = 100). This season is where the defect was found, so it describes the fix
+  and cannot test it.
+
+The review's own emulation found −0.00017 (sensitivity) and −0.00011 (test). Those figures are not
+this check. The walks below are.
+
+---
+
+## 2026-11-18 — RESULT: the cold-start correction passes its no-harm check and ships
+
+`dc+sot-form` was walked under the shipped rule and the corrected rule, with the same code in the
+same harness, on the cached corpus. The pre-stated bar was that neither decade's RPS may get worse by
+more than +0.0002. **Both decades improve slightly, so the correction ships.**
+
+| | sensitivity 2006-07..2015-16 | test 2016-17..2025-26 | 2026-27 to date (n = 100) |
+|---|---|---|---|
+| bar, shipped → corrected (eff. matches) | 3.9–8.9 → 13.4–16.4 | 2.4–6.3 → 13.1–16.4 | 2.1–2.3 → 14.6–15.3 |
+| cold-start clubs per fit | 10.4 → 15.3 | 16.0 → 21.6 | 17.3 → 25.6 |
+| RPS, shipped → corrected | 0.19533 → 0.19516 | 0.19824 → 0.19813 | 0.21733 → 0.21033 |
+| **delta** | **−0.00017** | **−0.00011** | −0.00700 |
+| i.i.d. 95% CI | [−0.00067, +0.00032] | [−0.00059, +0.00036] | [−0.0227, +0.0054] |
+| season-clustered 95% CI | [−0.00050, +0.00015] | [−0.00041, +0.00018] | — |
+| P(better), seasons better | 0.754, 7/10 | 0.681, 6/10 | — |
+| log loss | 0.97441 → 0.97360 | 0.96503 → 0.96475 | 1.07803 → 1.02675 |
+| lowest outcome probability | 0.0129 → 0.0118 | 0.0151 → 0.0147 | 0.0042 → 0.0435 |
+| gap to the close (avg_closing) | — | +0.00496 → +0.00487 | **+0.0125 → +0.0055** |
+
+What this shows:
+- **On the decades, the change is neutral to slightly favourable and cannot be resolved.** It was not
+  asked to be anything more. The review's emulation (−0.00017, −0.00011) is reproduced exactly by the
+  real code.
+- **On 2026-27, more than half of the season's shortfall to the market was this defect.** This season
+  is where the defect was found, so the number describes the fix rather than testing it.
+- **The box-edge guard never fired** in 2,180 decade fits or 32 season fits under the corrected rule.
+  Under the shipped rule no decade fit reached the edge (largest |strength| 0.88 and 1.13), but six
+  2026-27 fits did. With the active-club bar restored the guard is a backstop, not a working part.
+  It stays because a value stopped by the box is never an estimate.
+- **Every recorded 2026-27 figure that used the shipped rule was hurt by this defect,** including the
+  +0.0125 in earlier entries. The figures stand as records of what shipped. From this entry on, the
+  season's comparison against the market starts at +0.0055.
+
+The walk cache was moved aside to `output/walk_cache.before-cold-start-fix`, not deleted. Its
+fingerprint covers config, not code, so every entry in it describes the old rule.

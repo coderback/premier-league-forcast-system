@@ -44,6 +44,16 @@ the entire league, and the grid point scores badly for a reason that has nothing
 well a 30-day memory forecasts football. Scaling to the median makes the criterion say what it
 means — *this team has far less usable history than a normal member of this league* — at any decay
 rate.
+
+"A normal member of this league" means a club **active** in it: one with a match in the
+:data:`COLD_START_ACTIVE_DAYS` before the fit. The median used to range over every club in the
+history, and that roll only grows. By 2026 it held 51 clubs, the median one was a former member, and
+the bar had fallen from ~15 effective matches to ~2.3. A new club was then "identified" after three
+matches, and one with no goals ran its attack to the box edge (Coventry, 2026-09-19: 0.4% to win,
+and won). See NOTES.md, 2026-11-18.
+
+A club whose fitted strength ends **at the box edge** is pinned with the cold-start clubs too: a
+parameter stopped by the bound is not an estimate, only the place the optimiser ran out of room.
 """
 from __future__ import annotations
 
@@ -106,6 +116,16 @@ _WEIGHTS_ARGUMENT_POSITION = 4
 # the correction stays strictly positive rather than landing exactly on zero.
 _RHO_CLAMP_MARGIN = 0.01
 
+# The cold-start bar is a share of the median ACTIVE club's effective history: a club counts as
+# active if it played within this many days before the fit. A year covers a whole season plus a
+# summer, so the current league and the clubs just relegated are in and long-gone members are out.
+COLD_START_ACTIVE_DAYS = 365.0
+
+# How close to the strength box a fitted value must sit to count as stopped by it. L-BFGS-B
+# returns a bound-active coordinate exactly on the bound; the derived last club (minus the sum of
+# the others) can land fractionally inside it, hence a tolerance rather than equality.
+_BOX_EDGE_TOL = 1e-6
+
 
 @dataclass(frozen=True)
 class DixonColesFit:
@@ -126,6 +146,10 @@ class DixonColesFit:
     converged: bool
     n_iterations: int
     cold_start_teams: tuple[str, ...] = ()
+    # Clubs that cleared the cold-start bar but whose fitted strength ended at the box edge, and
+    # were therefore pinned with the cold-start clubs and the fit redone. A subset of
+    # `cold_start_teams`, kept apart so the report can say why each club is pinned.
+    boxed_teams: tuple[str, ...] = ()
     # Structural home-advantage terms (empty under the production `global` mode).
     ha_names: tuple[str, ...] = ()
     ha_params: tuple[float, ...] = ()
@@ -323,6 +347,7 @@ class DixonColesFit:
             "n_iterations": self.n_iterations,
             "n_cold_start": len(self.cold_start_teams),
             "cold_start_teams": list(self.cold_start_teams),
+            "boxed_teams": list(self.boxed_teams),
             "home_advantage_terms": dict(zip(self.ha_names, self.ha_params)),
             "covariates": None if self.cov_spec is None else self.cov_spec.label(),
             "covariate_terms": dict(zip(self.cov_names, self.cov_params)),
@@ -720,6 +745,49 @@ def _starting_point(
     return theta
 
 
+def cold_start_bar(
+    history: pd.DataFrame,
+    weights: np.ndarray,
+    ref_date: pd.Timestamp,
+    min_effective_share: float,
+    *,
+    active_days: float | None = COLD_START_ACTIVE_DAYS,
+) -> tuple[tuple[str, ...], np.ndarray, float, float]:
+    """Every club in ``history``, its effective history, the median it is judged against, and the bar.
+
+    The median ranges over clubs with a match in the ``active_days`` before ``ref_date``. If none
+    qualifies, which only a history ending more than that long before the fit can produce, it falls
+    back to every club. ``active_days=None`` is the rule as shipped before 2026-11-18 (every club
+    ever seen). It is kept only so that comparison can be reproduced.
+    """
+    teams_all = tuple(sorted(set(history["home_team"]) | set(history["away_team"])))
+    idx_all = {t: i for i, t in enumerate(teams_all)}
+    home_all = history["home_team"].map(idx_all).to_numpy()
+    away_all = history["away_team"].map(idx_all).to_numpy()
+    effective = (
+        np.bincount(home_all, weights=weights, minlength=len(teams_all))
+        + np.bincount(away_all, weights=weights, minlength=len(teams_all))
+    )
+    reference = effective
+    if active_days is not None:
+        recent = (history["date"] >= pd.Timestamp(ref_date) - pd.Timedelta(days=active_days)).to_numpy()
+        active = (
+            np.bincount(home_all[recent], minlength=len(teams_all))
+            + np.bincount(away_all[recent], minlength=len(teams_all))
+        ) > 0
+        if active.any():
+            reference = effective[active]
+    median = float(np.median(reference))
+    return teams_all, effective, median, median * min_effective_share
+
+
+def _boxed(attack: np.ndarray, defence: np.ndarray, bounds: tuple[float, float]) -> np.ndarray:
+    """Mask of clubs whose attack or defence was stopped by the strength box."""
+    lo, hi = bounds
+    at_edge = lambda v: (v <= lo + _BOX_EDGE_TOL) | (v >= hi - _BOX_EDGE_TOL)  # noqa: E731
+    return at_edge(attack) | at_edge(defence)
+
+
 def fit_dixon_coles(
     history: pd.DataFrame,
     *,
@@ -738,13 +806,21 @@ def fit_dixon_coles(
     decay: DecaySpec | None = None,
     promotion: PromotionSpec | None = None,
     shrinkage: ShrinkageSpec | None = None,
+    active_days: float | None = COLD_START_ACTIVE_DAYS,
+    pin_boxed: bool = True,
+    _boxed_clubs: tuple[str, ...] = (),
 ) -> DixonColesFit:
     """Fit the model on a training frame, weighted toward ``ref_date``.
 
     ``history`` must already be restricted to matches strictly before the barrier — the splitter
     owns that, and this function deliberately does not re-filter, so a caller cannot accidentally
     pass unfiltered data and have it silently corrected.
+
+    ``active_days`` and ``pin_boxed`` exist so the 2026-11-18 correction can be compared against the
+    rule it replaced (``active_days=None, pin_boxed=False``). Production never passes them.
+    ``_boxed_clubs`` is internal: the clubs the box guard pinned on the first pass.
     """
+    call = dict(locals())   # every argument, for the one re-fit the box guard may ask for
     if len(history) == 0:
         raise ValueError("cannot fit on an empty history")
     required = {"date", "home_team", "away_team", "home_goals", "away_goals"}
@@ -767,20 +843,16 @@ def fit_dixon_coles(
     # seed does not bias where they land.
     strength_half_life = float(half_life_days if decay is None else decay.team)
     weights = decay_weights(history["date"], ref_date, strength_half_life)
-    teams_all = sorted(set(history["home_team"]) | set(history["away_team"]))
 
     # Effective, not raw, sample size per team: under a short half-life a club returning after
-    # years away has a healthy match count and almost no usable information.
-    idx_all = {t: i for i, t in enumerate(teams_all)}
-    home_all = history["home_team"].map(idx_all).to_numpy()
-    away_all = history["away_team"].map(idx_all).to_numpy()
-    effective = (
-        np.bincount(home_all, weights=weights, minlength=len(teams_all))
-        + np.bincount(away_all, weights=weights, minlength=len(teams_all))
+    # years away has a healthy match count and almost no usable information. Relative to the median
+    # ACTIVE club, so the criterion means the same thing at every decay rate and does not drift
+    # down as the roll of former members grows.
+    teams_all, effective, _, threshold = cold_start_bar(
+        history, weights, ref_date, min_effective_share, active_days=active_days
     )
-    # Relative to the median team, so the criterion means the same thing at every decay rate.
-    threshold = float(np.median(effective)) * min_effective_share
-    cold = tuple(t for t, e in zip(teams_all, effective) if e < threshold)
+    boxed_set = set(_boxed_clubs)
+    cold = tuple(t for t, e in zip(teams_all, effective) if e < threshold or t in boxed_set)
     teams = tuple(t for t in teams_all if t not in set(cold))
     if len(teams) < 2:
         raise ValueError(
@@ -953,6 +1025,13 @@ def fit_dixon_coles(
     c, h, rho, attack, defence, ha, cov_params = _unpack(
         result.x, n_teams, len(ha_names), n_family, cov.n_params
     )
+    if pin_boxed and not _boxed_clubs:
+        # A strength stopped by the box is not an estimate. Pin those clubs at the league average
+        # with the cold-start clubs and fit once more without them. Once only: a second pass that
+        # boxes someone else is reported by the strengths themselves, not chased.
+        boxed = tuple(t for t, b in zip(teams, _boxed(attack, defence, (lo_s, hi_s))) if b)
+        if boxed:
+            return fit_dixon_coles(**{**call, "_boxed_clubs": boxed})
     shape, kappa = (
         (UNIT_SHAPE, INDEPENDENT_KAPPA) if family is None
         else _family_globals(result.x, family, n_family)
@@ -989,6 +1068,7 @@ def fit_dixon_coles(
         converged=bool(result.success),
         n_iterations=int(result.nit),
         cold_start_teams=cold,
+        boxed_teams=tuple(sorted(_boxed_clubs)),
         promotion=promotion,
         promotion_prior=prior,
         ha_names=tuple(ha_names),

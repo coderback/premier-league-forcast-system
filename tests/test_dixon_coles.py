@@ -17,7 +17,7 @@ from scipy.special import gammaln
 
 from plmodel.config import load_config
 from plmodel.model.dixon_coles import (
-    _N_GLOBAL, _objective, _unpack, decay_weights, fit_dixon_coles, fit_summary,
+    _N_GLOBAL, _objective, _unpack, cold_start_bar, decay_weights, fit_dixon_coles, fit_summary,
 )
 from plmodel.model.scoreline import (
     collapse_three_class, poisson_pmf_grid, scoreline_matrix, tau_is_valid, three_class_from_rates,
@@ -252,6 +252,89 @@ def test_effective_not_raw_history_decides_a_cold_start() -> None:
     history = pd.concat([old, recent], ignore_index=True)
     fit = _fit(history, half_life_days=200.0, ref_date=history["date"].max() + pd.Timedelta(days=1))
     assert "A" in fit.cold_start_teams   # only appears in the distant past
+
+
+def _league_with_a_newcomer(newcomer_goals_for: list[float], *, former_clubs: int = 0) -> pd.DataFrame:
+    """Six established clubs over four seasons, a newcomer's recent matches against them (scoring
+    ``newcomer_goals_for``, conceding two each time), and optionally a roll of former members who
+    each played two matches years earlier. The former members are what wore the old bar down."""
+    league = _simulate(
+        n_seasons=4,
+        attack={"A": 0.3, "B": 0.1, "C": 0.0, "D": 0.0, "E": -0.1, "F": -0.3},
+        defence={"A": 0.2, "B": 0.1, "C": 0.0, "D": 0.0, "E": -0.1, "F": -0.2},
+    )
+    start = league["date"].max() + pd.Timedelta(days=3)
+    opponents = ["A", "B", "C", "D", "E", "F"]
+    newcomer = pd.DataFrame({
+        "date": [start + pd.Timedelta(days=3 * i) for i in range(len(newcomer_goals_for))],
+        "home_team": ["Ark"] * len(newcomer_goals_for),
+        "away_team": [opponents[i % 6] for i in range(len(newcomer_goals_for))],
+        "home_goals": newcomer_goals_for,
+        "away_goals": [2.0] * len(newcomer_goals_for),
+    })
+    rng = np.random.default_rng(5)
+    former = pd.DataFrame([
+        {"date": pd.Timestamp("2004-08-01") + pd.Timedelta(days=7 * (2 * k + j)),
+         "home_team": f"Former {k:02d}", "away_team": opponents[(k + j) % 6],
+         "home_goals": float(1 + rng.poisson(1.0)), "away_goals": float(rng.poisson(1.3))}
+        for k in range(former_clubs) for j in range(2)
+    ], columns=["date", "home_team", "away_team", "home_goals", "away_goals"])
+    return pd.concat([former, league, newcomer], ignore_index=True)
+
+
+def test_a_scoreless_newcomer_stays_pinned_however_many_former_clubs_the_history_holds() -> None:
+    """The 2026 defect. Former members with a couple of old matches each drag the all-club median
+    down, the bar falls to almost nothing, and a newcomer with three scoreless matches is
+    'identified' with its attack run to the box edge. Measured against active clubs, it is pinned."""
+    history = _league_with_a_newcomer([0.0, 0.0, 0.0], former_clubs=20)
+
+    shipped = _fit(history, active_days=None, pin_boxed=False)
+    assert "Ark" in shipped.teams                                   # the defect, reproduced
+    assert shipped.attack[shipped.teams.index("Ark")] <= BOUNDS["strength"][0] + 1e-6
+
+    fit = _fit(history)
+    assert "Ark" in fit.cold_start_teams and "Ark" not in fit.teams
+    assert fit.boxed_teams == ()                                    # pinned by the bar, not the guard
+
+
+def test_the_bar_ignores_former_clubs_and_falls_back_when_nobody_is_active() -> None:
+    history = _league_with_a_newcomer([1.0, 1.0, 1.0], former_clubs=20)
+    ref = history["date"].max() + pd.Timedelta(days=1)
+    clubs, effective, median, bar = cold_start_bar(history, np.ones(len(history)), ref, 0.15)
+    active = [e for c, e in zip(clubs, effective) if not c.startswith("Former")]
+    assert median == pytest.approx(float(np.median(active)))        # former members are not counted
+    assert bar == pytest.approx(0.15 * median)
+    assert cold_start_bar(history, np.ones(len(history)), ref, 0.15, active_days=None)[3] < bar / 5
+
+    long_after = ref + pd.Timedelta(days=5000)
+    _, effective, median, _ = cold_start_bar(history, np.ones(len(history)), long_after, 0.15)
+    assert median == pytest.approx(float(np.median(effective)))     # nobody active: every club
+
+
+def test_a_club_stopped_by_the_box_is_pinned_and_named() -> None:
+    """Twelve matches clears the bar, but twelve without a goal has no finite attack estimate:
+    the optimiser stops at the box. That number is not an estimate, so the club is pinned."""
+    history = _league_with_a_newcomer([0.0] * 12)
+
+    unguarded = _fit(history, pin_boxed=False)
+    assert "Ark" in unguarded.teams
+    assert unguarded.attack[unguarded.teams.index("Ark")] <= BOUNDS["strength"][0] + 1e-6
+
+    fit = _fit(history)
+    assert fit.boxed_teams == ("Ark",)
+    assert "Ark" in fit.cold_start_teams and "Ark" not in fit.teams
+    lo, hi = BOUNDS["strength"]
+    assert np.all((fit.attack > lo + 1e-6) & (fit.attack < hi - 1e-6))
+    assert np.all((fit.defence > lo + 1e-6) & (fit.defence < hi - 1e-6))
+    assert fit.as_dict()["boxed_teams"] == ["Ark"]
+
+
+def test_the_guard_leaves_an_ordinary_fit_untouched() -> None:
+    history = _league_with_a_newcomer([1.0, 0.0, 2.0, 1.0, 1.0, 0.0, 1.0, 2.0, 0.0, 1.0, 1.0, 1.0])
+    guarded, unguarded = _fit(history), _fit(history, pin_boxed=False)
+    assert guarded.boxed_teams == ()
+    assert guarded.teams == unguarded.teams
+    np.testing.assert_array_equal(guarded.attack, unguarded.attack)
 
 
 def test_empty_history_raises() -> None:

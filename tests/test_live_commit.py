@@ -232,3 +232,18 @@ def test_a_second_run_on_the_same_barrier_is_a_no_op(repo: Path, monkeypatch) ->
 
     assert (repo / "output" / "live" / "2026-08-29.json").read_text(encoding="utf-8") == first
     assert git(repo, "rev-parse", "HEAD") == head, "a repeat run must not add a commit"
+
+
+def test_a_near_impossible_outcome_is_flagged_and_an_ordinary_one_is_not() -> None:
+    """The warning that would have put Coventry's 0.4% in front of a person before kickoff."""
+    from plmodel.cli import _low_probability_warnings
+
+    fixtures = [
+        {"home_team": "Nott'm Forest", "away_team": "Coventry",
+         "forecasts": {"dc+sot-form": [0.885, 0.111, 0.004]}},
+        {"home_team": "Arsenal", "away_team": "Brighton",
+         "forecasts": {"dc+sot-form": [0.55, 0.25, 0.20]}},
+    ]
+    lines = _low_probability_warnings(fixtures)
+    assert len(lines) == 1
+    assert "Coventry" in lines[0] and "away 0.004" in lines[0]

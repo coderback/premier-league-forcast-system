@@ -176,12 +176,16 @@ model:
   # See NOTES.md for the full grid.
   decay_half_life_days: 730
 
-  # A team needs this share of the MEDIAN team's effective (decay-weighted) history before its own
-  # attack and defence are identified; below it the team is pinned at league average and reported
-  # by name. Relative rather than absolute because an absolute bar does not survive a half-life
-  # sweep: at a 30-day half-life a regular team accumulates only ~4.6 effective matches in total,
-  # so a fixed bar of 5 would pin the entire league and score that grid point badly for a reason
-  # unrelated to the model. See NOTES.md.
+  # A team needs this share of the MEDIAN ACTIVE team's effective (decay-weighted) history before
+  # its own attack and defence are identified; below it the team is pinned at league average and
+  # reported by name. "Active" means a match in the 365 days before the fit (COLD_START_ACTIVE_DAYS
+  # in dixon_coles.py). Until 2026-11-18 the median ranged over every club ever seen, which wore the
+  # bar down to ~2.3 effective matches by 2026 (NOTES.md, 2026-11-18). A club whose fitted strength
+  # ends at the strength box edge is pinned too.
+  # Relative rather than absolute because an absolute bar does not survive a half-life sweep: at a
+  # 30-day half-life a regular team accumulates only ~4.6 effective matches in total, so a fixed
+  # bar of 5 would pin the entire league and score that grid point badly for a reason unrelated to
+  # the model. See NOTES.md.
   # WEAK-EVIDENCE: not tuned. 15% of a normal league member's history is a wide margin for
   # "this club is effectively new here".
   min_effective_share: 0.15

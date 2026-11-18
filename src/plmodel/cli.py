@@ -35,6 +35,10 @@ _PREDICT_RHO_MARGIN = 0.01
 # confident and are not. Hull's 2017 rating is the case this exists to surface.
 _STALE_MULTIPLE = 3.0
 
+# `pl live` flags any frozen outcome below this probability. A warning only; the forecast is
+# frozen as fitted.
+_LOW_PROBABILITY = 0.02
+
 # External claims this project has re-run on its own data, by paper id.
 _REPRODUCIBLE: tuple[str, ...] = ("pitcan2026",)
 
@@ -597,6 +601,8 @@ def cmd_live(args: argparse.Namespace) -> int:
             f"{arm}: {p[0]:.3f}/{p[1]:.3f}/{p[2]:.3f}" for arm, p in row["forecasts"].items()
         )
         print(f"  {row['home_team']} v {row['away_team']}   {probs}")
+    for line in _low_probability_warnings(block["fixtures"]):
+        print(line, file=sys.stderr)
     print(f"\nledger    : {path}")
 
     # Committing is part of freezing rather than an afterthought: an untracked file in a
@@ -944,6 +950,25 @@ def _parse_fixtures(args: argparse.Namespace) -> list[tuple[str, str]]:
     return pairs
 
 
+def _low_probability_warnings(fixtures) -> list[str]:
+    """One line per frozen outcome below :data:`_LOW_PROBABILITY`. Nothing is changed.
+
+    An outcome the model calls nearly impossible is either a real mismatch or a fit that ran out of
+    evidence. In 2026-27 one did (Coventry, 0.4% to win at Forest, and won). The warning puts the
+    fixture in front of a person before kickoff, not in a post-mortem.
+    """
+    lines = []
+    for row in fixtures:
+        for arm, p in row["forecasts"].items():
+            low = [f"{name} {q:.3f}" for name, q in zip(("home", "draw", "away"), p)
+                   if q < _LOW_PROBABILITY]
+            if low:
+                lines.append(f"  ! {row['home_team']} v {row['away_team']} ({arm}): "
+                             f"{', '.join(low)} - below {_LOW_PROBABILITY:.0%}; check the clubs' "
+                             f"evidence before kickoff")
+    return lines
+
+
 def _team_history(train, fit, ref, cfg) -> dict[str, str]:
     """A warning per club whose parameters rest on little or old evidence, keyed by club.
 
@@ -952,26 +977,32 @@ def _team_history(train, fit, ref, cfg) -> dict[str, str]:
     at the league average -- but the club whose last top-flight match was years ago and which
     therefore carries a confident-looking number fitted to almost nothing.
     """
-    import numpy as np
-
-    from plmodel.model.dixon_coles import decay_weights
+    from plmodel.model.dixon_coles import cold_start_bar, decay_weights
 
     weights = decay_weights(train["date"], ref, cfg.model.decay_half_life_days)
-    effective: dict[str, float] = {}
     last_seen: dict[str, object] = {}
     for side in ("home_team", "away_team"):
-        for club, w, when in zip(train[side], weights, train["date"]):
-            effective[club] = effective.get(club, 0.0) + float(w)
+        for club, when in zip(train[side], train["date"]):
             if club not in last_seen or when > last_seen[club]:
                 last_seen[club] = when
-    median = float(np.median(list(effective.values()))) if effective else 0.0
-    floor = median * cfg.model.min_effective_share
+    effective: dict[str, float] = {}
+    median = floor = 0.0
+    if len(train):
+        # The same bar the fit uses, so a club this report calls cold is one the fit pinned.
+        clubs, values, median, floor = cold_start_bar(
+            train, weights, ref, cfg.model.min_effective_share
+        )
+        effective = dict(zip(clubs, (float(v) for v in values)))
 
     notes: dict[str, str] = {}
     for club in set(fit.teams) | set(effective) | set(fit.cold_start_teams):
         share = effective.get(club, 0.0)
         seen = last_seen.get(club)
-        if share == 0.0:
+        if club in set(getattr(fit, "boxed_teams", ())):
+            notes[club] = (f"pinned at the league average: its fitted strength hit the edge of "
+                           f"the allowed range on {share:.1f} effective matches, which is no "
+                           f"estimate at all")
+        elif share == 0.0:
             notes[club] = ("never seen in this division — pinned at the league average, which "
                            "rates it as a typical club of this tier")
         elif share < floor:
