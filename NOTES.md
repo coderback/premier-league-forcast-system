@@ -8038,3 +8038,94 @@ What this shows:
 
 The walk cache was moved aside to `output/walk_cache.before-cold-start-fix`, not deleted. Its
 fingerprint covers config, not code, so every entry in it describes the old rule.
+
+---
+
+## 2026-11-18 — RECORDED: three evaluation caveats from the independent review (season clustering, the 2013-14 shots break, the 2025-26 benchmark)
+
+None of these changes a forecast or overturns an accepted result. Each changes how earlier numbers
+should be read.
+
+### 1. Gate 1's interval is about half as wide as it should be (review F2, checked here)
+
+Gate 1's paired bootstrap (`metrics.paired_delta`) resamples matches. `dc+sot-form`'s gain over
+`dixon-coles` does not arrive match by match. It arrives in team-season blocks: a club whose level
+moves between seasons (Forest, Leicester, Southampton and Tottenham 2024-25; Chelsea, Brighton and
+Newcastle 2022-23). Match-to-match autocorrelation is nil at short lags, so resampling by date or by
+week agrees with the i.i.d. figure. Resampling by season does not.
+
+| test decade, `dc+sot-form` − `dixon-coles` | SE | 95% interval |
+|---|---|---|
+| resample matches (as reported at acceptance) | 0.00051 | [−0.0032, −0.0012] |
+| resample seasons | 0.00106 | [−0.0045, −0.0004] |
+
+Per season: +0.0008, −0.0001, −0.0001, −0.0009, −0.0020, −0.0001, −0.0066, −0.0001, −0.0099, −0.0036.
+The t statistic on season means is −2.02 on 9 df. The sensitivity decade is uniform (10 of 10
+seasons negative, season SE 0.00030 against 0.00039 by match).
+
+- **`dc+sot-form`'s acceptance stands.** The season-clustered interval still excludes zero, the
+  sensitivity decade is uniform, and the tuning span was 6 of 6.
+- **The headline interval was too narrow by about 2x.** With ten clusters even the percentile
+  season bootstrap is a little narrow, and a t interval on season means is the conservative reading.
+- **The MDE table is optimistic for effects that come in team-season blocks.** It was calibrated by
+  injecting independent per-match noise. For such an arm, the effect detectable on the test decade
+  is up to twice the 0.0007 (p50) / 0.00095 (p80) recorded. Every closed line whose falsifier used
+  that MDE was judged against a bar that was, if anything, too easy to clear, so none reopens.
+- Gate 3's Diebold-Mariano p-value inherits this through its HAC lag: 0.00003 at lag 8, 0.0011 at
+  100, 0.013 at 380.
+- The gap to the market is barely affected: [+0.0024, +0.0074] clustered against [+0.0028, +0.0071].
+
+**From now on**, every gate-1 reading in this ledger quotes the season-clustered interval beside the
+by-match one. `metrics.paired_delta_clustered` already exists but is not wired into gate 1.
+
+### 2. Shots on target change definition in 2013-14 (review F3, the break checked here)
+
+Mean shots on target per Premier League match falls from 14.24 (2012-13) to 8.92 (2013-14), while
+total shots stay flat (25.1 → 26.9). Goals per shot on target rise from 0.196 to 0.310. The break
+is source-wide, at different sizes:
+
+| | factor 2012-13 → 2013-14 |
+|---|---|
+| E0 | ×0.63 |
+| E1 | ×0.77 |
+| E2 | ×0.84 |
+
+The E0 differential's SD falls from 5.5 to 3.8. The trailing differential in `dc+sot-form` reads raw
+counts, so for most of 2013-14 a club's 20-match window mixed two scales. From 2013 to about 2020 the
+term was under-weighted by 15-45%, measured by its fitted coefficient with and without rescaling.
+
+The review's full walks (not re-run here), with pre-2013-14 shots on target ×0.608:
+- sensitivity −0.00026, CI [−0.00050, −0.00003], almost all of it 2013-14 to 2015-16;
+- test −0.00012, CI [−0.00031, +0.00007].
+
+That is real, below the gate's floor, and long since decayed out of live forecasts. Four things it
+touches:
+- **Gate 4 for `dc+sot-form`** was read on a decade containing the break. The effect is to
+  understate the term slightly.
+- **`dc+sot-form+e1`'s promotion map** regressed E0 form on E1 form across promotions from 2001.
+  The E0/E1 scale ratio changed in 2013-14, so that regression pooled two regimes. This plausibly
+  blurred a null that was already small; it does not reopen the line.
+- **The tuning span** (2000-01..2005-06) is entirely old-definition.
+- **The coefficient box `cov_sot_form: [-0.1, 0.1]`** was sized for a ±6 differential. The coefficient
+  has doubled since 2022 (0.033 → 0.061) and has room left, but should be watched.
+
+If shots work resumes, the differential should be expressed in units of the trailing league mean,
+computed behind the barrier, so the term is scale-free. That is not worth a gate run on its own.
+
+### 3. The market benchmark is redefined by its publisher (review F5, checked here)
+
+Gate 2 benchmarks against `avg_closing` (football-data's `AvgC*`). The bookmakers behind it change:
+- **2024-25:** VC, IW and V closing columns end; 1XB, BF and BFE appear.
+- **2025-26:** BFD, BMGM, BV, CL and LB appear.
+
+The average's margin is 0.039-0.042 from 2019-20 to 2024-25, then **0.057 in 2025-26 and 0.061 in
+2026-27 to date**. `MaxC`'s summed implied probability goes from about −0.01 to +0.019.
+
+**After Shin de-vigging, nothing has moved yet.** On the 2,490 rows from 2019-20 where all four have
+closing odds, RPS is 0.19566 for `AvgC`, 0.19563 for `B365C`, 0.19557 for `MaxC` and 0.19573 for
+Pinnacle. In 2025-26, `AvgC` scores 0.20470 and `B365C` 0.20484. Every gap to the close in this ledger
+therefore stands.
+
+It belongs beside the Pinnacle termination as a known discontinuity: a benchmark whose membership
+changes is no longer quite the same benchmark. If the de-vigged average and bet365 ever separate by
+more than 0.0005 in a season, gate 2 should be read against bet365 too.
