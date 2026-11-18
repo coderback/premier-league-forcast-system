@@ -8477,3 +8477,60 @@ with:
 
 Then build it as a registered arm (`track=market-informed`, `reads_match_prices=False`) with tests,
 and put it through `pl compare` on both decades against `dc+sot-form`.
+
+---
+
+## 2026-11-18 — PRE-REGISTRATION: `odds-ratings`, a family of one on the market-informed track
+
+Written and committed before the arm is built or either decade is walked with it.
+
+### The arm
+
+`odds-ratings` is the estimator that passed the tuning-span falsifier, unchanged:
+1. **Prices:** bet365 pre-close, with William Hill pre-close where bet365 is absent, de-vigged by
+   Shin.
+2. **Implied rates:** each priced match is inverted to the independent-Poisson goal rates that
+   reproduce its home and away probabilities.
+3. **Ratings:** weighted least squares of log implied rates on intercept, home advantage, attack and
+   defence. Only priced matches strictly before the barrier and within 1,500 days, with half-life
+   **30 days** (chosen on the tuning span) and ridge 0.05 on team terms.
+4. **Forecast:** independent Poisson 1X2.
+
+All four settings go into `config.yaml` with these values and are not tuned again.
+
+**Track:** market-informed, `reads_match_prices=False`. It reads earlier matches' prices only, never
+the forecast match's own, so gate 2 is the Friday line as for every arm.
+
+### The run, fixed now
+
+- **Comparator:** `dc+sot-form`, independent production.
+- **Family size:** 1.
+- **Commands:**
+
+```
+pl compare --arms dc+sot-form,odds-ratings --family-size 1 --sensitivity --out gate_odds_sens.json
+pl compare --arms dc+sot-form,odds-ratings --family-size 1 --against-span output/gate_odds_sens.json --out gate_odds_test.json
+```
+
+**Accepted onto the market-informed track iff all four gates pass** on the test decade, with the
+sensitivity decade supplying gate 4. Gate 2 is now evaluable on both decades (bet365 Friday covers
+them at 100%).
+
+The season-clustered interval is quoted beside gate 1, as the ledger now requires.
+
+**What acceptance means here.** `odds-ratings` becomes the market-informed track's model: frozen live
+beside production and reported under that name. **It does not become production.** Production stays
+`dc+sot-form`.
+
+### Expectations, stated so they can be wrong
+
+| span | estimate | source |
+|---|---|---|
+| test decade | about −0.0024 | the review, evaluation-span half-life |
+| sensitivity decade | about −0.0010 | the review, evaluation-span half-life |
+| tuning span | −0.0016 | measured, P 0.931 |
+
+The per-match SD of this differential is large (the review measured about 0.047). The by-match MDE
+for a family of one is therefore about 0.0017, and the season-clustered one can be up to twice that.
+**The test decade may clear gate 1; the sensitivity decade is expected to lean the right way without
+resolving**, which is all gate 4 asks.
