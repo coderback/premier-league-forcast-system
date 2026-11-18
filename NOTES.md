@@ -8606,3 +8606,33 @@ means adding the arm to `pl live`'s frozen set. Two settings were not tuned:
 
 The retune is a tuning-span grid on ridge and half-life, with interior optima required, run before
 the arm is frozen live. Not started.
+
+---
+
+## 2026-11-18 — PRE-REGISTRATION: the retune `odds-ratings` earned by acceptance
+
+The rule: "an accepted variant earns a hyperparameter retune BEFORE production wiring". For this
+track, wiring means joining `pl live`'s frozen set. The protocol is `dc+sot-form`'s retune
+(2026-09-23), unchanged. Written and committed before the grid runs.
+
+- **Pool:** 2002-03..2005-06, the tuning-span seasons where the ratings exist: 1,520 matches over
+  398 barriers at `tuning_min_train_matches`. No evaluation season is read.
+- **Axes and grids:**
+  - half-life: {10, 15, 20, 30, 45, 60, 90} days;
+  - ridge: {0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5}.
+  - The lookback is not an axis: at 30 days, a match 1,500 days old already weighs 2^-50.
+- **Search:** coordinate descent from the incumbent (30 days, 0.05):
+  1. half-life at the current ridge;
+  2. ridge at the winning half-life;
+  3. repeat until neither moves.
+  Point estimates of pooled RPS. A winner on a grid edge extends that edge by one step before it can
+  stand.
+- **Rule 1, the verdict:** the final winner against the incumbent through `selection_is_resolved`,
+  clustered by season. Four clusters make resolution hard, and that is the honest consequence of the
+  window's size. **Resolved** means the values move and both registered gate runs are repeated with
+  the new values. **Unresolved** means the incumbent stands, as it did for `dc+sot-form`.
+- **Rule 2, stationarity:** team strength demonstrably moves on this window (the falsifier's ratings
+  spread to ±0.8), so a half-life is selectable here.
+
+Whatever the verdict, the arm then joins `pl live`'s frozen set beside production, under its track's
+name.
