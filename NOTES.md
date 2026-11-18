@@ -7931,7 +7931,7 @@ earlier, mainly promoted clubs reading a previous spell, gives `new_absent` −0
 
 ### Next
 
-1. Write to Andrew Clark, asking whether private model use is fine and whether his data continues
+1. Write to Andrew Clark, asking whether private model use is fine and whether the data continues
    past May 2018. If it does, one compiler and one schema span both decades.
 2. Ask Heimspiel Medien (worldfootball.net) for 2016-17 to date, so two seasons overlap for an
    equivalence test.
