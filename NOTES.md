@@ -8172,3 +8172,45 @@ source on 2026-11-18 both end 2026-11-08, so the corpus is current.
 **Still open from F4:**
 - each run still freezes only the earliest matchday date;
 - frozen fixtures that never resolve (postponements) are not yet counted at scoring.
+
+---
+
+## 2026-11-18 — BUILT: `pl live` freezes the whole coming round in one run, and scoring accounts for every frozen fixture (rest of review F4)
+
+### One run, the whole round
+
+`pl live` used to freeze only the earliest unplayed date. A Friday run froze Saturday, and Sunday's
+and Monday's fixtures were lost unless someone ran it again on each of those days. It now freezes
+**every date of the coming round**, one file and one commit per date, as before.
+
+A round runs from the earliest unplayed date through each following date, stopping before the first
+date that would bring back a club already in the round. Friday to Monday is one round; a Tuesday on
+which Friday's club plays again starts the next.
+
+**What this costs, stated plainly.** A Sunday forecast frozen on Friday lacks Saturday's results,
+which the backtest at the same barrier would have had. The rule bounds that cost: none of the missing
+results is the Sunday club's own previous match, only other clubs' matches that move its rating
+indirectly through the fit. Each frozen file records the count as `n_pending_before_barrier`.
+
+A later run on Sunday finds that date already frozen and leaves it, because a frozen forecast is
+never rewritten. Missing a weekend run is now the larger risk, and this removes it.
+
+### Every frozen fixture accounted for at scoring
+
+A frozen fixture is scored only on the date it was frozen for. A postponed match never matches that
+key and used to drop out of scoring without trace. `pl live --score` now reports four counts:
+- fixtures frozen;
+- fixtures scored;
+- fixtures still to come;
+- fixtures past their date with no result.
+
+Each unresolved fixture is named with its status:
+- **rescheduled:** the same pairing was played on a later date. It is not scored, because the
+  forecast was for a different date and different information.
+- **no result yet:** postponed and not yet replayed, or played and not yet ingested.
+
+### What is left of F4
+
+Nothing. The review's three F4 items, the currency check (f793da3), freezing the whole round, and
+counting unresolved fixtures, are all done. The first freeze itself still has not happened. It needs
+the feed to publish the next round, `pl ingest`, then `pl live --dry-run` and `pl live`.

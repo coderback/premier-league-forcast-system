@@ -526,13 +526,13 @@ def cmd_reproduce(args: argparse.Namespace) -> int:
 
 
 def cmd_live(args: argparse.Namespace) -> int:
-    """Freeze a matchday's forecasts before kickoff, or score previously frozen ones."""
+    """Freeze the coming round's forecasts before kickoff, or score previously frozen ones."""
     import pandas as pd
 
     from plmodel.data.football_data import upcoming_fixtures
     from plmodel.data.teams import TeamNameError
     from plmodel.eval.live import (
-        commit_frozen, freeze_matchday, next_barrier, score_ledger, split_past_fixtures,
+        ledger_resolution, round_dates, score_ledger, split_past_fixtures,
     )
 
     cfg = load_config(args.config)
@@ -543,8 +543,14 @@ def cmd_live(args: argparse.Namespace) -> int:
         scored = score_ledger(ledger_dir, played)
         if scored.empty:
             print("nothing to score yet: no frozen forecast has a result.")
-            return 0
-        print(scored.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+        else:
+            print(scored.to_string(index=False, float_format=lambda v: f"{v:.4f}"))
+        fate = ledger_resolution(ledger_dir, played, _today())
+        print(f"\nfrozen fixtures: {fate['n_frozen']}   scored: {fate['n_scored']}   "
+              f"still to come: {fate['n_to_come']}   past their date, unresolved: "
+              f"{len(fate['unresolved'])}")
+        for row in fate["unresolved"]:
+            print(f"  {row['date']}  {row['home_team']} v {row['away_team']}: {row['status']}")
         return 0
 
     try:
@@ -572,19 +578,20 @@ def cmd_live(args: argparse.Namespace) -> int:
         print("  re-run closer to kickoff, or check https://www.football-data.co.uk/fixtures.csv")
         return 0
 
-    barrier = next_barrier(fixtures)
-    day = fixtures[fixtures["date"] == barrier]
+    dates = round_dates(fixtures)
     check, stale = _corpus_check(cfg, played, offline=args.no_feed)
     if args.dry_run:
-        print(f"next barrier : {pd.Timestamp(barrier).date()}   {len(day)} fixture(s)")
+        print(f"coming round : {len(dates)} date(s), "
+              f"{int(fixtures['date'].isin(dates).sum())} fixture(s)")
         print(f"source       : {'season file only' if args.no_feed else 'season file + feed'}")
-        for row in day.itertuples(index=False):
-            print(f"  {row.home_team} v {row.away_team}")
-        target = ledger_dir / f"{pd.Timestamp(barrier).date()}.json"
-        print(f"\nwould write  : {target}")
-        print("would commit : yes, that file alone")
-        if target.exists():
-            print("  ! that file already exists and would NOT be overwritten")
+        for date in dates:
+            target = ledger_dir / f"{pd.Timestamp(date).date()}.json"
+            day = fixtures[fixtures["date"] == date]
+            note = "   ! already frozen, would NOT be overwritten" if target.exists() else ""
+            print(f"\n  {pd.Timestamp(date).date()}  -> {target.name}{note}")
+            for row in day.itertuples(index=False):
+                print(f"    {row.home_team} v {row.away_team}")
+        print("\nwould commit : yes, each file alone")
         print(f"corpus check : {check['summary']}")
         if stale:
             print(f"  ! would REFUSE to freeze: {stale}")
@@ -597,26 +604,33 @@ def cmd_live(args: argparse.Namespace) -> int:
               "backtest validated.", file=sys.stderr)
         return 2
 
+    arms = [a.strip() for a in args.arms.split(",") if a.strip()]
+    for date in dates:
+        _freeze_one_date(fixtures, played, cfg, ledger_dir, arms, check, date)
+    return 0
+
+
+def _freeze_one_date(fixtures, played, cfg, ledger_dir, arms, check, date) -> None:
+    """Freeze and commit one date of the round, reporting as it goes. Never raises on a date that
+    is already frozen: most runs of a daily cadence meet some of those."""
+    import pandas as pd
+
+    from plmodel.eval.live import commit_frozen, freeze_matchday
+
     try:
-        frozen = freeze_matchday(
-            fixtures, played, cfg, ledger_dir,
-            arm_names=[a.strip() for a in args.arms.split(",") if a.strip()],
-            staleness_check=check,
+        path, block = freeze_matchday(
+            fixtures, played, cfg, ledger_dir, arm_names=arms, staleness_check=check,
+            barrier=date,
         )
     except FileExistsError:
-        # Already frozen for this barrier. The refusal to overwrite is the whole guarantee and
-        # stays, but it is a normal outcome rather than a fault: this command is meant to be run
-        # on a daily cadence, and most days the next matchday is one somebody already froze.
-        print(f"already frozen for {pd.Timestamp(barrier).date()} - nothing to do.")
-        print(f"  {ledger_dir / f'{pd.Timestamp(barrier).date()}.json'}")
-        print("  a frozen forecast is never rewritten; delete it deliberately if it was wrong, "
-              "and record why.")
-        return 0
-    if frozen is None:
-        print("no unplayed fixtures in the corpus - nothing to freeze.")
-        return 0
-    path, block = frozen
-    print(f"froze {block['n_fixtures']} fixture(s) for {block['barrier']}")
+        # The refusal to overwrite is the whole guarantee and stays, but it is a normal outcome
+        # rather than a fault.
+        print(f"already frozen for {pd.Timestamp(date).date()} - left as it is "
+              "(a frozen forecast is never rewritten).")
+        return
+    pending = block["n_pending_before_barrier"]
+    print(f"\nfroze {block['n_fixtures']} fixture(s) for {block['barrier']}"
+          + (f"  ({pending} earlier fixture(s) of the round still unplayed)" if pending else ""))
     for row in block["fixtures"]:
         probs = "  ".join(
             f"{arm}: {p[0]:.3f}/{p[1]:.3f}/{p[2]:.3f}" for arm, p in row["forecasts"].items()
@@ -624,7 +638,7 @@ def cmd_live(args: argparse.Namespace) -> int:
         print(f"  {row['home_team']} v {row['away_team']}   {probs}")
     for line in _low_probability_warnings(block["fixtures"]):
         print(line, file=sys.stderr)
-    print(f"\nledger    : {path}")
+    print(f"ledger    : {path}")
 
     # Committing is part of freezing rather than an afterthought: an untracked file in a
     # gitignored directory cannot support the claim that it existed before the result did.
@@ -635,7 +649,7 @@ def cmd_live(args: argparse.Namespace) -> int:
               "written.", file=sys.stderr)
         print("  commit it by hand before kickoff if the ledger is to mean what it claims.",
               file=sys.stderr)
-        return 0
+        return
 
     print(f"committed : {receipt['commit']}  {receipt['message']}")
     unpushed = receipt["unpushed_commits"]
@@ -645,7 +659,6 @@ def cmd_live(args: argparse.Namespace) -> int:
     elif unpushed:
         print(f"  {unpushed} commit(s) unpushed. A local commit date can be set to anything, so "
               "pushing is what records when a third party first saw this.")
-    return 0
 
 
 def cmd_simulate(args: argparse.Namespace) -> int:
@@ -1130,7 +1143,7 @@ def build_parser() -> argparse.ArgumentParser:
     pa.add_argument("--arm", default="uniform", help="arm to audit")
     pa.set_defaults(func=cmd_audit)
 
-    pl_ = sub.add_parser("live", help="freeze a matchday's forecasts, or score frozen ones")
+    pl_ = sub.add_parser("live", help="freeze the coming round's forecasts, or score frozen ones")
     # The production model leads the list. The model-free arms cost nothing and are kept as the
     # floor every frozen block is read against, but the reason this ledger exists at all is that a
     # FITTED model's belief before kickoff cannot be reconstructed afterwards.

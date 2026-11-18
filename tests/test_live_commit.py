@@ -322,3 +322,24 @@ def test_a_current_corpus_freezes_and_the_file_records_the_check(repo: Path, mon
     assert block["train_last_date"] == "2026-08-08"
     assert not (repo / "output" / "live" / "2026-08-15.json").exists()
     assert "Fulham v Brentford" in capsys.readouterr().err
+
+
+def test_one_run_freezes_and_commits_every_date_of_the_round(repo: Path, monkeypatch) -> None:
+    """Review finding F4: a Friday run that froze Saturday only would lose Sunday to a missed run."""
+    import pandas as pd
+
+    cli, args = _live_setup(repo, monkeypatch, latest_published=pd.Timestamp("2026-08-08"))
+    two_days = pd.DataFrame({
+        "date": pd.to_datetime(["2026-08-29", "2026-08-30"]), "season": "2026-27",
+        "division": "E0", "home_team": ["Everton", "Fulham"], "away_team": ["Arsenal", "Chelsea"],
+        "home_goals": [pd.NA, pd.NA], "away_goals": [pd.NA, pd.NA], "result": [None, None],
+        "played": [False, False],
+    })
+    monkeypatch.setattr("plmodel.data.football_data.upcoming_fixtures", lambda *a, **k: two_days)
+    assert cli.cmd_live(args) == 0
+    live = repo / "output" / "live"
+    assert sorted(p.name for p in live.glob("*.json")) == ["2026-08-29.json", "2026-08-30.json"]
+    subjects = git(repo, "log", "-2", "--format=%s").splitlines()
+    assert subjects == ["chore: freeze live forecasts for 2026-08-30",
+                        "chore: freeze live forecasts for 2026-08-29"]
+    assert cli.cmd_live(args) == 0                      # a second run leaves both as they are

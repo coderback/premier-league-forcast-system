@@ -69,6 +69,28 @@ def corpus_staleness(
     return None
 
 
+def round_dates(fixtures: pd.DataFrame) -> list[pd.Timestamp]:
+    """The dates of the coming round: from the earliest unplayed date, every following date until
+    one would bring back a club already in the round.
+
+    One run freezes all of them, so a round spread over Friday to Monday is not lost to a missed
+    Sunday run. Stopping where a club reappears keeps the cost of freezing early small and
+    bounded: a Sunday forecast made on Friday lacks Saturday's results, but none of them is the
+    Sunday club's own previous match. Each frozen file records how many such fixtures were pending.
+    """
+    if len(fixtures) == 0:
+        return []
+    dates: list[pd.Timestamp] = []
+    clubs: set[str] = set()
+    for date, day in fixtures.groupby("date", sort=True):
+        playing = set(day["home_team"]) | set(day["away_team"])
+        if clubs & playing:
+            break
+        dates.append(pd.Timestamp(date))
+        clubs |= playing
+    return dates
+
+
 def next_barrier(fixtures: pd.DataFrame) -> pd.Timestamp | None:
     """The earliest unplayed match date, or None when the fixture list is empty."""
     if len(fixtures) == 0:
@@ -84,6 +106,7 @@ def freeze_matchday(
     *,
     arm_names: list[str],
     staleness_check: dict | None = None,
+    barrier: pd.Timestamp | None = None,
 ) -> tuple[Path, dict] | None:
     """Write the next unplayed matchday's forecasts to a dated file.
 
@@ -98,9 +121,12 @@ def freeze_matchday(
     from plmodel.eval.backtest import Split
     from plmodel.eval.compare import ArmContext, ArmSpec, _REGISTRY
 
-    barrier = next_barrier(fixtures)
+    barrier = next_barrier(fixtures) if barrier is None else pd.Timestamp(barrier)
     if barrier is None:
         return None
+    # Fixtures of this division dated before this barrier and not yet played: results this
+    # forecast could not know, which the backtest at the same barrier would have had.
+    n_pending = int((fixtures["date"] < barrier).sum())
 
     day = fixtures[fixtures["date"] == barrier].sort_values("home_team", kind="stable")
     # Strictly before the barrier, exactly as the backtest splits. Same-day results are excluded
@@ -136,6 +162,7 @@ def freeze_matchday(
         "n_fixtures": int(len(day)),
         "n_train_matches": int(len(train)),
         "n_excluded_same_day": n_excluded_same_day,
+        "n_pending_before_barrier": n_pending,
         "train_last_date": str(pd.Timestamp(train["date"].max()).date()) if len(train) else None,
         "staleness_check": staleness_check,
         "arms": list(forecasts),
@@ -279,3 +306,51 @@ def score_ledger(ledger_dir: Path, results: pd.DataFrame) -> pd.DataFrame:
         .agg(n=("rps", "size"), rps=("rps", "mean"))
         .reset_index()
     )
+
+
+def ledger_resolution(
+    ledger_dir: Path, results: pd.DataFrame, today: pd.Timestamp
+) -> dict[str, object]:
+    """What became of every frozen fixture: scored, still to come, or past its date unresolved.
+
+    A frozen fixture is scored only on the date it was frozen for. A postponed match never meets
+    its key, so without this count it would vanish from the ledger in silence, and a ledger that
+    loses its awkward entries quietly is not one. For each fixture past its date with no result,
+    it says whether the same pairing was played later (rescheduled) or has no result at all yet
+    (postponed and not yet replayed, or played and not yet ingested).
+    """
+    on_date = {
+        (str(pd.Timestamp(r.date).date()), r.home_team, r.away_team)
+        for r in results.itertuples(index=False)
+    }
+    by_pair: dict[tuple[str, str], list[pd.Timestamp]] = {}
+    for r in results.itertuples(index=False):
+        by_pair.setdefault((r.home_team, r.away_team), []).append(pd.Timestamp(r.date))
+
+    today = pd.Timestamp(today).normalize()
+    n_frozen = n_scored = n_to_come = 0
+    unresolved: list[dict[str, object]] = []
+    for block in load_ledger(ledger_dir):
+        for fixture in block["fixtures"]:
+            n_frozen += 1
+            date = pd.Timestamp(fixture["date"])
+            if (fixture["date"], fixture["home_team"], fixture["away_team"]) in on_date:
+                n_scored += 1
+            elif date >= today:
+                n_to_come += 1
+            else:
+                later = sorted(d for d in by_pair.get((fixture["home_team"], fixture["away_team"]), [])
+                               if d > date)
+                unresolved.append({
+                    "date": fixture["date"],
+                    "home_team": fixture["home_team"],
+                    "away_team": fixture["away_team"],
+                    "status": (f"rescheduled: played {later[0].date()}, not scored" if later
+                               else "no result yet: postponed, or played and not yet ingested"),
+                })
+    return {
+        "n_frozen": n_frozen,
+        "n_scored": n_scored,
+        "n_to_come": n_to_come,
+        "unresolved": unresolved,
+    }

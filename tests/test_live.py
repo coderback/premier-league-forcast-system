@@ -136,3 +136,56 @@ def test_ledger_round_trips(cfg, tmp_path: Path) -> None:
 
 def test_load_ledger_on_a_missing_directory(tmp_path: Path) -> None:
     assert load_ledger(tmp_path / "nope") == []
+
+
+# --- the round, and what became of each frozen fixture ----------------------------------------
+
+def _round() -> pd.DataFrame:
+    """Friday to Monday with eight different clubs, then a Tuesday that brings Arsenal back."""
+    rows = [
+        ("2026-08-21", "Arsenal", "Chelsea"), ("2026-08-22", "Everton", "Fulham"),
+        ("2026-08-22", "Brentford", "Burnley"), ("2026-08-23", "Leeds", "Wolves"),
+        ("2026-08-24", "Spurs", "Hull"), ("2026-08-25", "Arsenal", "Everton"),
+    ]
+    return pd.DataFrame({
+        "date": pd.to_datetime([r[0] for r in rows]), "season": "2026-27", "division": "E0",
+        "home_team": [r[1] for r in rows], "away_team": [r[2] for r in rows],
+        "result": [None] * len(rows),
+    })
+
+
+def test_the_round_runs_until_a_club_would_play_twice() -> None:
+    from plmodel.eval.live import round_dates
+
+    assert round_dates(_round()) == [pd.Timestamp(d) for d in
+                                     ("2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24")]
+    assert round_dates(_round().iloc[:0]) == []
+
+
+def test_a_later_date_of_the_round_records_what_it_could_not_know(cfg, tmp_path: Path) -> None:
+    _, block = freeze_matchday(_round(), _history(), cfg, tmp_path, arm_names=["uniform"],
+                               barrier=pd.Timestamp("2026-08-23"))
+    assert block["barrier"] == "2026-08-23" and block["n_fixtures"] == 1
+    assert block["n_pending_before_barrier"] == 3       # Friday's and Saturday's three fixtures
+    first = freeze_matchday(_round(), _history(), cfg, tmp_path / "f", arm_names=["uniform"])[1]
+    assert first["n_pending_before_barrier"] == 0
+
+
+def test_every_frozen_fixture_is_accounted_for(cfg, tmp_path: Path) -> None:
+    """Scored, still to come, or past its date with a reason: a postponed match must not vanish."""
+    from plmodel.eval.live import ledger_resolution
+
+    for date in ("2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24"):
+        freeze_matchday(_round(), _history(), cfg, tmp_path, arm_names=["uniform"],
+                        barrier=pd.Timestamp(date))
+    results = pd.DataFrame({
+        "date": pd.to_datetime(["2026-08-21", "2026-08-22", "2026-10-01"]),
+        "home_team": ["Arsenal", "Everton", "Brentford"],
+        "away_team": ["Chelsea", "Fulham", "Burnley"],
+        "result": ["H", "D", "A"],
+    })
+    fate = ledger_resolution(tmp_path, results, today=pd.Timestamp("2026-08-24"))
+    assert (fate["n_frozen"], fate["n_scored"], fate["n_to_come"]) == (5, 2, 1)
+    status = {(u["home_team"], u["away_team"]): u["status"] for u in fate["unresolved"]}
+    assert status[("Brentford", "Burnley")].startswith("rescheduled: played 2026-10-01")
+    assert status[("Leeds", "Wolves")].startswith("no result yet")
