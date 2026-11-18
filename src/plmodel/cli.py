@@ -647,6 +647,8 @@ def _freeze_one_date(fixtures, played, cfg, ledger_dir, arms, check, date) -> No
         print(f"already frozen for {pd.Timestamp(date).date()} - left as it is "
               "(a frozen forecast is never rewritten).")
         return
+    for arm, error in (block.get("arm_errors") or {}).items():
+        print(f"  ! {arm} (market-informed) not frozen: {error}", file=sys.stderr)
     pending = block["n_pending_before_barrier"]
     print(f"\nfroze {block['n_fixtures']} fixture(s) for {block['barrier']}"
           + (f"  ({pending} earlier fixture(s) of the round still unplayed)" if pending else ""))
@@ -1168,7 +1170,9 @@ def build_parser() -> argparse.ArgumentParser:
     # FITTED model's belief before kickoff cannot be reconstructed afterwards.
     # `dixon-coles` stays on the list after `dc+sot-form` replaced it in production, so the frozen
     # ledger carries the old and new production models head to head on matches neither has seen.
-    pl_.add_argument("--arms", default="dc+sot-form,dixon-coles,home-rate,uniform",
+    # `odds-ratings` is the market-informed track's model (accepted 2026-11-18): frozen beside
+    # production under its own name, never in its place.
+    pl_.add_argument("--arms", default="dc+sot-form,odds-ratings,dixon-coles,home-rate,uniform",
                      help="comma-separated arms to freeze")
     pl_.add_argument("--score", action="store_true",
                      help="score previously frozen forecasts instead of freezing")

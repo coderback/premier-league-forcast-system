@@ -211,3 +211,21 @@ def test_the_friday_market_is_frozen_beside_the_forecasts_and_scored(cfg, tmp_pa
     scored = score_ledger(tmp_path, results).set_index("arm")
     assert scored.loc["uniform", "n"] == 2
     assert scored.loc["market:bet365 (at freeze)", "n"] == 1
+
+
+def test_a_failing_market_informed_arm_never_costs_the_production_freeze(cfg, tmp_path: Path) -> None:
+    """No prices in the history: `odds-ratings` cannot fit. Production must still freeze, and the
+    file must say why the market-informed arm is missing."""
+    _, block = freeze_matchday(_fixtures(), _history(), cfg, tmp_path,
+                               arm_names=["uniform", "odds-ratings"])
+    assert block["arms"] == ["uniform"]
+    assert "odds-ratings" in block["arm_errors"]
+    assert "no priced match" in block["arm_errors"]["odds-ratings"]
+
+
+def test_the_market_informed_model_is_frozen_by_default() -> None:
+    from plmodel.cli import build_parser
+
+    args = build_parser().parse_args(["live"])
+    arms = args.arms.split(",")
+    assert arms[0] == "dc+sot-form" and "odds-ratings" in arms

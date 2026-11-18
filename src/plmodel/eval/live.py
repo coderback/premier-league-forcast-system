@@ -148,11 +148,21 @@ def freeze_matchday(
     )
     specs = [ArmSpec.parse(name) for name in arm_names]
     forecasts: dict[str, np.ndarray] = {}
+    arm_errors: dict[str, str] = {}
     state: dict = {}
     for spec in specs:
-        probs = np.asarray(
-            _REGISTRY[spec.forecaster](ArmContext(split, day, train, cfg, state)), dtype=float
-        )
+        try:
+            probs = np.asarray(
+                _REGISTRY[spec.forecaster](ArmContext(split, day, train, cfg, state)), dtype=float
+            )
+        except Exception as exc:  # noqa: BLE001 -- recorded, and re-raised for independent arms
+            # A market-informed arm depends on prices the source may not have published yet. Its
+            # failure is written into the file and the freeze goes on: it must never cost the
+            # production forecast. An independent arm failing is a real fault and still stops it.
+            if arm_track(spec.name).track == "independent":
+                raise
+            arm_errors[spec.name] = f"{type(exc).__name__}: {exc}"
+            continue
         forecasts[spec.name] = probs
     markets = _markets_at_freeze(day, cfg)
 
@@ -168,6 +178,7 @@ def freeze_matchday(
         "staleness_check": staleness_check,
         "arms": list(forecasts),
         "tracks": {name: arm_track(name).track for name in forecasts},
+        "arm_errors": arm_errors,
         "acceptance_rule": cfg.acceptance_rule,
         "fixtures": [
             {

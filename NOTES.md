@@ -8636,3 +8636,69 @@ track, wiring means joining `pl live`'s frozen set. The protocol is `dc+sot-form
 
 Whatever the verdict, the arm then joins `pl live`'s frozen set beside production, under its track's
 name.
+
+---
+
+## 2026-11-18 — RETUNE: `odds-ratings` — the search did not converge, nothing it found is resolved, and the incumbent stands; WIRED into `pl live`
+
+Run as pre-registered (bde4819) on 2002-03..2005-06 (1,520 matches). The script and log are in
+`docs/plans/2026-11-18-lagged-odds/` (git-ignored). The incumbent reproduced the gate's arm exactly
+(RPS 0.198589) before the search began.
+
+### What the surface looks like
+
+```
+HL at ridge 0.05        10 0.20068  15 0.19932  20 0.19872  30 0.19859  45 0.19866  60 0.19875  90 0.19900
+ridge at HL 30          ... 7.8e-5 0.19849  0.005 0.19854  0.02 0.19855  0.05 0.19859  0.1 0.19866  0.5 0.19932
+HL at ridge ~0          10 0.19847  15 0.19837  20 0.19841  30 0.19836  45 0.19849  60 0.19862  90 0.19892
+```
+
+- **The half-life is flat between 15 and 30 days and interior at every ridge.** Shorter than 15 or
+  longer than 45 costs real accuracy.
+- **The ridge has no interior optimum.** Less ridge is better at every half-life, all the way to
+  zero, and the edge extension followed it down to 6e-10. The ridge buys nothing on this window.
+
+### What went wrong with the protocol, stated plainly
+
+- **The descent never satisfied its stopping rule.** It alternated between (15 days, ridge ≈ 0) and
+  (30 days, ridge 7.8e-5) until a five-cycle cap that I wrote into the script, and **that cap was
+  not in the pre-registration.** So there is no registered winner.
+- **The pre-registered verdict function was given the cycle-5 point anyway** and reported
+  "resolved" (−0.00010, clustered CI [−0.00014, −0.00005]). With four clusters a percentile
+  bootstrap is nearly degenerate, so the ledger's own conservative reading, a t interval on the
+  season means, was computed beside it:
+
+| candidate vs incumbent (30 d, 0.05) | delta | t interval on 4 season means |
+|---|---|---|
+| 30 d, ridge 7.8e-5 (the cycle-5 point) | −0.00010 | [−0.00018, −0.00002] |
+| 30 d, ridge ≈ 0 (the lowest RPS seen) | −0.00023 | [−0.00065, +0.00020] |
+| 15 d, ridge ≈ 0 | −0.00021 | [−0.00057, +0.00014] |
+| 30 d, ridge 0.005 | −0.00005 | [−0.00011, +0.00001] |
+
+### Verdict: the incumbent stands (30 days, ridge 0.05)
+
+- **No registered winner exists,** because the search never stopped.
+- **The best points it found are not resolved** on the conservative reading.
+- **Even the one narrow interval excluding zero is worth 0.0001,** a tenth of what the gates can
+  detect.
+
+The ledger's rule is that post-hoc reading may only withdraw, never advance. Moving a value here
+would advance on a reading the pre-registration did not make, so nothing moves and the gate results
+stand as run.
+
+**Recorded and not acted on:** the ridge is doing nothing useful. A future build might drop it.
+That would be a change of estimator, and it needs its own registration.
+
+**For the next retune:** the cycle cap goes into the pre-registration, and so does what happens when
+the descent oscillates.
+
+### Wired into `pl live`
+
+- **The default frozen set** is now `dc+sot-form, odds-ratings, dixon-coles, home-rate, uniform`.
+  Production leads; the market-informed model sits beside it under its own name.
+- **A market-informed arm that fails** (for example, prices not yet published) is recorded in the
+  frozen file's `arm_errors` and skipped, so it never costs the production freeze. An independent
+  arm failing still stops the freeze.
+- **Rehearsed on the real corpus** with a made-up fixture list in a scratch folder: all five arms
+  froze in 11 s, with no errors and the Friday prices recorded. Nothing was committed.
+- Two unit tests cover the skip and the default set. The unit suite passes.
