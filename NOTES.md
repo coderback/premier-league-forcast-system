@@ -8419,3 +8419,61 @@ cannot beat the market), and the inversion error.
 **If it passes:** pre-registration as a family of one, a build as a registered market-informed arm,
 then both decades through `pl compare`. **If it fails:** it is withdrawn and recorded in
 CLOSED-LINES.md.
+
+---
+
+## 2026-11-18 — RESULT: lagged-odds ratings pass the tuning-span falsifier
+
+Run exactly as pre-registered (commit 6f8491b). The script and outputs are in
+`docs/plans/2026-11-18-lagged-odds/` (git-ignored).
+
+### Setup checks
+- **Prices:** 2,274 priced E0 matches from 2000-08-19 were used, 754 of them from William Hill
+  (before bet365 starts in 2002-03).
+- **Inversion:** reproduces every de-vigged price to within 1.1e-13.
+- **Production walk:** 398 barriers over 1,520 matches, 2002-03..2005-06.
+
+### Result
+
+| half-life | RPS | vs `dc+sot-form` | 95% CI (by match) | P(better) |
+|---|---|---|---|---|
+| production | 0.20016 | | | |
+| 15 d | 0.19932 | −0.00084 | [−0.00308, +0.00138] | 0.774 |
+| **30 d (chosen)** | **0.19859** | **−0.00157** | [−0.00373, +0.00050] | **0.931** |
+| 60 d | 0.19875 | −0.00141 | [−0.00349, +0.00060] | 0.918 |
+
+- **Per season at 30 days:** −0.00114, −0.00219, −0.00289, −0.00008. All four favour the ratings.
+  The season-clustered interval [−0.00254, −0.00061] rests on four clusters and is not to be leaned
+  on.
+- **Placebo** (implied rates permuted within each season, 30 days): RPS 0.23051, **+0.03035** worse
+  than production, CI [+0.02353, +0.03701], P(better) 0.000. With the prices attached to the wrong
+  matches the ratings are useless, so the gain comes from what the prices say about these teams, not
+  from the method.
+- **Gap to the same match's bet365 Friday price** (the gate benchmark), all 1,520 matches: ratings
+  **+0.00074**, production +0.00232. The ratings close two-thirds of production's gap to the Friday
+  line on these seasons, and still do not beat it, as expected.
+
+### Verdict: PASSES both registered conditions
+
+1. Better than production: delta −0.00157 < 0, P(better) 0.931 ≥ 0.5.
+2. The placebo does not beat production: +0.03035 ≥ 0.
+
+The chosen half-life (30 days) is the one the review read off the evaluation decades. Here it was
+chosen on the tuning span alone, from a grid fixed in advance, so it is now a legitimate selection.
+The size on the tuning span (−0.0016) sits between the review's two decade figures (−0.0024 test,
+−0.0010 sensitivity).
+
+### What this does not establish
+
+The bar was deliberately weak, and P(better) 0.931 on 1,520 matches is not a gate result. Nothing is
+accepted.
+
+### Next, as registered
+
+Pre-register `dc-odds-ratings` (name provisional) as a family of one on the market-informed track,
+with:
+- the estimator above, half-life fixed at 30 days;
+- ridge 0.05 and a 1,500-day lookback.
+
+Then build it as a registered arm (`track=market-informed`, `reads_match_prices=False`) with tests,
+and put it through `pl compare` on both decades against `dc+sot-form`.
