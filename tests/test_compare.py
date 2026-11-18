@@ -483,12 +483,20 @@ def test_the_season_clustered_interval_is_wider_when_the_gain_comes_in_season_bl
 
 # --- the two tracks and the Friday benchmark ------------------------------------------------------
 
-def test_every_arm_registered_so_far_is_independent() -> None:
-    """Every arm to date reads match facts only. A market-informed arm must say so where it is
-    registered; production must always be an independent arm."""
-    from plmodel.eval.compare import TRACK_INDEPENDENT, arm_track
+# The arms that read bookmaker prices. Anything else registering on the market-informed track, or
+# anything here drifting off it, is a change to this list made on purpose.
+MARKET_INFORMED_ARMS = {"odds-ratings"}
 
-    assert all(arm_track(name).track == TRACK_INDEPENDENT for name in registered_arms())
+
+def test_only_the_named_arms_are_market_informed() -> None:
+    """A market-informed arm must say so where it is registered; production must always be an
+    independent arm."""
+    from plmodel.eval.compare import TRACK_INDEPENDENT, TRACK_MARKET_INFORMED, arm_track
+
+    for name in registered_arms():
+        expected = TRACK_MARKET_INFORMED if name in MARKET_INFORMED_ARMS else TRACK_INDEPENDENT
+        assert arm_track(name).track == expected, name
+    assert arm_track("dc+sot-form").track == TRACK_INDEPENDENT        # production
 
 
 def test_an_arm_reading_its_own_match_prices_cannot_be_independent() -> None:

@@ -757,6 +757,46 @@ def _dc_sot_form(ctx: ArmContext) -> np.ndarray:
     return _context_arm(ctx, terms=("sot_form",), mode="diff")
 
 
+@register("odds-ratings", track=TRACK_MARKET_INFORMED)
+def _odds_ratings(ctx: ArmContext) -> np.ndarray:
+    """Ratings fitted to the goal rates implied by EARLIER matches' prices (market-informed track).
+
+    The forecast match's own price is never read, so ``reads_match_prices`` stays False and gate 2
+    is the Friday line as for every arm. Prices are de-vigged and inverted once per walk, over the
+    walk's whole frame, because de-vigging every barrier would cost 12 s x 1,153; each barrier then
+    reads only the rows of its own training prefix, and the fit itself refuses any row dated on or
+    after the barrier. In the live path there is no walk frame and the training rows are used.
+    """
+    from plmodel.model.odds_ratings import fit_odds_ratings, implied_rates, price_table
+
+    oc = ctx.cfg.odds_ratings
+    if oc is None:
+        raise ValueError("config.yaml has no odds_ratings section")
+    source = ctx.state.get("matches")
+    if source is None or len(source) < len(ctx.train) or not source.index[: len(ctx.train)].equals(
+        ctx.train.index
+    ):
+        source = ctx.train                                  # live path: the training rows only
+    cache = ctx.state.setdefault("odds_rates", {})
+    key = (id(source), len(source))
+    if key not in cache:
+        prices = price_table(source, oc.families)
+        rates = np.full((len(source), 2), np.nan)
+        priced = ~np.isnan(prices).any(axis=1)
+        rates[priced] = implied_rates(
+            prices[priced], max_goals=ctx.cfg.model.max_goals,
+            tolerance=oc.inversion_tolerance, max_iter=oc.inversion_max_iter,
+        )
+        cache[key] = rates
+    rates = cache[key][: len(ctx.train)]                    # the training prefix, nothing after it
+    ratings = fit_odds_ratings(
+        ctx.train, rates, ref_date=ctx.split.barrier, half_life_days=oc.half_life_days,
+        ridge=oc.ridge, lookback_days=oc.lookback_days,
+    )
+    ctx.state.setdefault("odds_fits", []).append(ratings)
+    return ratings.predict_proba(ctx.test, ctx.cfg.model.max_goals)
+
+
 @register("dc+sot-form-recent")
 def _dc_sot_form_recent(ctx: ArmContext) -> np.ndarray:
     """`dc+sot-form` with the form window bounded to matches in the last year.
@@ -1292,6 +1332,26 @@ def _fit_summary(state: dict) -> dict[str, object] | None:
     """
     if state.get("from_cache"):
         return state.get("fit_summary")
+    odds_fits = state.get("odds_fits")
+    if odds_fits:
+        # The market-informed ratings carry no rho or optimiser; what they carry is how many
+        # priced matches each fit rested on and how far the strengths spread.
+        return {
+            "kind": "odds-ratings",
+            "n_fits": len(odds_fits),
+            "priced_matches_per_fit": {
+                "mean": float(np.mean([f.n_obs for f in odds_fits])),
+                "min": int(min(f.n_obs for f in odds_fits)),
+            },
+            "home_advantage": {
+                "mean": float(np.mean([f.home_advantage for f in odds_fits])),
+                "first": odds_fits[0].home_advantage,
+                "last": odds_fits[-1].home_advantage,
+            },
+            "max_abs_strength": float(max(
+                max(np.abs(f.attack).max(), np.abs(f.defence).max()) for f in odds_fits
+            )),
+        }
     fits = state.get("fits")
     if not fits:
         # A pooled arm keeps its own state shape; its weight trajectory is the whole diagnostic,

@@ -214,6 +214,18 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class OddsRatingsConfig:
+    """The market-informed `odds-ratings` arm: ratings fitted to earlier matches' prices."""
+
+    families: tuple[str, ...]
+    half_life_days: float
+    ridge: float
+    lookback_days: float
+    inversion_tolerance: float
+    inversion_max_iter: int
+
+
+@dataclass(frozen=True)
 class EloRatingConfig:
     """Elo scheme parameters. Used by the elo-dc comparison arm only, never by production."""
 
@@ -318,6 +330,9 @@ class Config:
     # file, so this one string identifies the whole specification — which is what lets a cached
     # walk prove it was produced by the same configuration rather than merely claim it.
     digest: str = ""
+    # The market-informed track's model. Defaulted only so hand-built configs in tests need not
+    # name it; load_config always sets it from config.yaml and refuses a file without it.
+    odds_ratings: OddsRatingsConfig | None = None
 
 
 def _require(raw: dict[str, Any], key: str) -> Any:
@@ -417,6 +432,12 @@ def load_config(path: Path | str | None = None) -> Config:
     if missing_drift:
         raise ConfigError(f"config.yaml season.drift missing: {missing_drift}")
 
+    orr = _section(raw, "odds_ratings")
+    missing_orr = [k for k in ("families", "half_life_days", "ridge", "lookback_days",
+                                         "inversion_tolerance", "inversion_max_iter") if k not in orr]
+    if missing_orr:
+        raise ConfigError(f"config.yaml odds_ratings section missing: {missing_orr}")
+
     e = _section(raw, "elo")
     elo_keys = ("initial_rating", "k", "home_advantage", "gd_two_goal", "gd_slope_offset",
                 "gd_slope_divisor", "decay_half_life_days")
@@ -490,4 +511,12 @@ def load_config(path: Path | str | None = None) -> Config:
             },
         ),
         digest=hashlib.sha256(source.encode("utf-8")).hexdigest(),
+        odds_ratings=OddsRatingsConfig(
+            families=tuple(str(f) for f in orr["families"]),
+            half_life_days=float(orr["half_life_days"]),
+            ridge=float(orr["ridge"]),
+            lookback_days=float(orr["lookback_days"]),
+            inversion_tolerance=float(orr["inversion_tolerance"]),
+            inversion_max_iter=int(orr["inversion_max_iter"]),
+        ),
     )

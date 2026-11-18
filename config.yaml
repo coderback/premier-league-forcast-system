@@ -696,8 +696,37 @@ model:
 # use DIFFERENT pools — the acceptance rule scopes gate 2 to "the odds-covered subset", so gate 1
 # keeps full-decade statistical power while gate 2 uses the only live closing-market benchmark:
 #   gate 1 (vs baseline): 2016-17..2025-26, 3,800 matches over 1,153 barriers
-#   gate 2 (vs market):   the avg_closing-covered subset, 2019/20+, 2,660 matches
+#   gate 2 (vs market):   the bet365 Friday line, 3,800 matches on each decade (since 2026-11-18;
+#                         before that the avg_closing subset, 2019/20+, 2,660 matches)
 # ---------------------------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------------------------
+# ODDS RATINGS: the market-informed track's model (arm `odds-ratings`), never production.
+#
+# Team attack and defence fitted to the goal rates implied by bookmakers' prices of EARLIER
+# matches only; the forecast match's own price is never read. A price is a near noise-free reading
+# of strength that already reflects injuries, transfers and managers at the time.
+# Pre-registered 2026-11-18 (NOTES.md); every value below was fixed before either decade was walked.
+# ---------------------------------------------------------------------------------------------
+odds_ratings:
+  # Price families, in order of preference per match: bet365 pre-close (2002/03 on), then William
+  # Hill pre-close (2000/01 on) where bet365 is absent. Both are pre-close single books.
+  families: [bet365, william_hill]
+  # SELECTED on the tuning span (2002-03..2005-06) from {15, 30, 60}, a grid fixed in advance:
+  # RPS 0.19932 / 0.19859 / 0.19875. Interior. See NOTES.md, 2026-11-18.
+  half_life_days: 30
+  # Not tuned: the independent review's value, kept as the falsifier ran it. Penalises team terms
+  # only, so a club with few priced matches sits near the league average rather than wherever its
+  # two or three prices put it.
+  ridge: 0.05
+  # Not tuned. At a 30-day half-life a match 1,500 days old carries a weight of 2^-50, so this
+  # bounds the solve's size without changing what it fits.
+  lookback_days: 1500
+  # Price inversion: Newton on log rates stops when the home and away probabilities are reproduced
+  # to this tolerance. The falsifier's per-row solver reached 1.1e-13; anything slower than the cap
+  # raises rather than fitting a rate to the wrong price.
+  inversion_tolerance: 1.0e-12
+  inversion_max_iter: 100
 
 # ---------------------------------------------------------------------------------------------
 # ELO — the single-strength-scalar alternative, used by the elo-dc comparison arm only.
