@@ -8214,3 +8214,71 @@ Each unresolved fixture is named with its status:
 Nothing. The review's three F4 items, the currency check (f793da3), freezing the whole round, and
 counting unresolved fixtures, are all done. The first freeze itself still has not happened. It needs
 the feed to publish the next round, `pl ingest`, then `pl live --dry-run` and `pl live`.
+
+---
+
+## 2026-11-18 — CLOSED: the independent review's remaining items (F6, F7, the market findings, CLOSED-LINES)
+
+### The walk cache now keys on what the data says, not only which matches it is (review F6)
+
+The fingerprint hashed the arm, the splits, the configuration and the pool's identity columns.
+football-data.co.uk revises published rows, so a re-ingest that corrected a score, a shot count or a
+price left every key unchanged, and a cached walk was served as if current.
+- **The fix:** it now also hashes every column of every match the walk reads, training rows
+  included, and the full contents of any multi-division frame. That takes 0.2 s for the E0 corpus.
+- **Checked for real:** an identical re-run is served from the cache; a corrected shot count or score
+  in a 2001 training row forces a fresh walk.
+- `pl compare` never passed the cache, so no gate result was exposed. The scratch analyses were.
+  Every key made before this entry is now unreachable, which is right.
+
+### Partial shots windows (review F7): a design note, recorded rather than changed
+
+A side with 1-19 recorded matches enters the form term with the mean of what it has, at full weight.
+When either side is undefined, the whole term is zeroed. On the evaluation pools this affects 94 test
+and 204 sensitivity matches, and the review's measurement is inside the noise, so nothing changes.
+
+It does change how one closed line reads. `dc+sot-form-recent` replaced stale 20-match windows with
+windows of one to three matches at full weight. Its +0.00003 tested stale form against very noisy
+form, not against no form. CLOSED-LINES.md now says so.
+
+### The market findings, re-checked on corrected production before recording
+
+Re-run here on the test-decade walk of `dc+sot-form` under the corrected cold-start rule (n = 2,660
+priced matches; my own script, not the review's):
+
+| check | result |
+|---|---|
+| log pool of production with the close, weight fitted with each season held out | weight on the model 0.00-0.13; pool minus line +0.00017 |
+| the same with the Friday line | weight 0.02-0.19; pool minus line +0.00014 |
+| does model − Friday predict the Friday-to-close move? | slope −0.0002 |
+| does model − close predict the home result beyond the close? | 0.024 ± 0.122 |
+
+These match the review's figures. **The model holds no information the market lacks.** Mixing it into
+the line makes the line worse, and its disagreements with the market predict nothing.
+
+Totals and Asian handicap are not softer targets for this model: on over/under 2.5 it has 55% of the
+market's skill against 86% on 1X2. That figure is the review's and was not re-run. All three are now
+closed lines.
+
+### CLOSED-LINES.md updated
+
+- **The resolution floor** says the MDE table assumes evenly spread gains and is up to 2x optimistic
+  for gains that arrive in team-season blocks. No closed line reopens, because each failed the easier
+  bar.
+- **Three closed lines added:** the log pool, the model's disagreement with the market as a signal,
+  and totals as a softer target.
+- **Two traps added:** the source redefining its own series (the shots break, the bookmaker set),
+  and caches keyed on identity.
+- **The standing conclusion** carries the review's split of the +0.0050 gap (≈0.0015 strength, ≈0.0022
+  Friday news, ≈0.0013 after Friday), the +0.0036 gap to the Friday line, and the two open owner
+  decisions.
+
+### What remains from the review
+
+- **The first freeze:** waiting on the feed to publish the next round.
+- **Two owner decisions:**
+  - lagged-odds ratings: a form of the market as input. If yes, a half-day tuning-span falsifier,
+    then pre-registration as a family of one;
+  - whether the stated target becomes the Friday line, with the close kept as a reported diagnostic.
+
+Every finding (F1-F7) is now fixed or recorded.

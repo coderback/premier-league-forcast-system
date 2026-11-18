@@ -22,6 +22,16 @@ The gap to the de-vigged closing line was **+0.00824 RPS** for plain Dixon-Coles
 +0.01074], n=2,660, `avg_closing`, test decade) and is **+0.0050** for `dc+sot-form`. Everything
 below was measured against the plain model and is read in that light.
 
+**Updated 2026-11-18.** The independent review splits the +0.0050 three ways:
+- about **0.0015** is strength knowledge the market's prices of earlier matches carry and goals and
+  shots do not;
+- about **0.0022** is match news already in Friday's price;
+- about **0.0013** arrives after Friday.
+
+The gap to the Friday line is +0.0036. Whether the target should be the Friday line rather than the
+close is an open owner decision, as is using lagged odds (a form of the market as input). 2026-27 to
+date sits at +0.0055 after the cold-start correction (+0.0125 as shipped).
+
 The original gap was approximately the documented floor for a goals-only public-data
 model — Pitcan (2026) gets +0.0067 on Serie A with an overlapping interval, and this project
 reproduced that paper on its own corpus on 2026-08-17 (`pl reproduce --paper pitcan2026`).
@@ -52,6 +62,16 @@ do not enter it. An arm that moves forecasts a lot per match needs a proportiona
 entire remaining headroom in a single arm.** Arms 11 and 12 died here with real, mechanistically
 clean effects of −0.00059 and −0.00030.
 
+**Updated 2026-11-18: these figures assume the gain is spread evenly across matches.** They were
+calibrated by injecting independent per-match noise. A gain that arrives in team-season blocks
+(a club whose level moves between seasons, which is how `dc+sot-form` earns its keep) is up to
+**twice** as hard to detect on the test decade: resampling seasons instead of matches doubles
+`dc+sot-form`'s standard error (0.00051 → 0.00106).
+- `dc+sot-form`'s interval is [−0.0032, −0.0012] by match and [−0.0045, −0.0004] by season; it still
+  excludes zero, so its acceptance stands.
+- No closed line reopens. Every one failed the easier, by-match bar.
+- `pl compare` now prints the season-clustered interval beside gate 1. Quote both.
+
 Switching the gate metric to the log score does **not** help: as a share of the gap, RPS asks 9.7%
 and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 
@@ -71,7 +91,9 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 | **General hierarchical shrinkage of team parameters** | **CLOSED** | gain concentrates entirely in promoted fixtures; "there is no general shrinkage effect on this corpus" |
 | **Promoted-club mispricing as strength estimation** | **CLOSED** | 4 mechanisms failed. "The mean can be fixed. The ordering cannot" — it needs information the project does not have |
 | **Promoted clubs' own Championship shots as form** (`dc+sot-form+e1`) | rejected, null | orders promoted clubs the right way on both decades (−0.00036 / −0.00017 on their fixtures) but −0.0001 pooled, P 0.70 / 0.84. The ordering CAN be moved; this source moves it a tenth of the detectable amount |
-| **Dropping promoted clubs' stale E0 form** (`dc+sot-form-recent`) | withdrawn at tuning check | +0.00003: stale Premier League form is a weak but real prior on a returning club's level |
+| **Dropping promoted clubs' stale E0 form** (`dc+sot-form-recent`) | withdrawn at tuning check | +0.00003: stale Premier League form is a weak but real prior on a returning club's level. Read narrowly: it replaced stale 20-match windows with 1-3 match windows at full weight, so it tested stale form against very noisy form, not against none |
+| **Mixing production with the market line** (log pool) | **CLOSED** | weight on the model 0.00-0.13 against the close and 0.02-0.19 against the Friday line, season held out; the pool is *worse* than the line alone (+0.00017, +0.00014). Re-checked 2026-11-18 on corrected production |
+| **The model's disagreement with the market as a signal** | **CLOSED** | it does not predict the Friday-to-close move (slope −0.0002) or the result beyond the close (0.024 ± 0.122). The model holds no information the market lacks |
 | **Recalibration of our own probabilities** | **CLOSED** | temperature and vector scaling both degrade out-of-sample on both decades, intervals excluding zero on the worse side |
 
 ---
@@ -82,6 +104,7 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 |---|---|---|
 | **Half-time goals** | **CLOSED** | team-specific 1H/2H variance measured at **zero** — excess variance negative, p = 0.881. Disattenuated 1H/2H correlation 1.03: one parameter with noise |
 | **Referee as a 1X2 feature** | **CLOSED** | between-referee variance in home-win residual is *below* the permutation null, p = 0.850. Largest effect the corpus could hide ≈ 0.00027 RPS, half the floor |
+| **Totals (over/under 2.5) and Asian handicap as softer targets** | **not softer** | over/under 2.5 Brier: model 0.24352, closing market 0.24032. The model has 55% of the market's skill on totals against 86% on 1X2, and it under-predicts goals. Independent review's measurement, 2026-11-18, not re-run here |
 | Asian-handicap / over-under odds as a market family | no gain | reach back less far than the 1X2 families already parsed; add no sensitivity-span coverage; de-vigged AH+OU is *less* sharp than the direct 1X2 (0.17970 vs 0.17937) |
 | **Backward xG (2006–2016)** | **CLOSED** | no free per-match xG or shot-location series exists. Earliest free shot coordinates are 2014-15, which only overlaps the Understat mirror already held |
 | **Opponent-adjusted shots-on-target form** | **withdrawn at pre-flight** | correlates 0.986 with the raw term once the 2000-01 warm-up is excluded (0.990 on full windows); 0.949 pooled only because of that warm-up |
@@ -133,6 +156,19 @@ checked, stopped in 2019.
 inside this corpus's grid noise. Standing rule: *a reliability or resolution difference is not
 evidence until it survives a second decade.*
 
+**The source redefines its own series.**
+- **Shots on target change definition in 2013-14:** E0 14.24 → 8.92 a match while total shots stay
+  flat, and by different factors in each division (E1 ×0.77, E2 ×0.84). Any raw-count shots term
+  pools two scales across the break, and E0/E1 comparisons pool two regimes.
+- **The market average changes its bookmakers in 2024-26:** its margin goes 0.04 → 0.057 → 0.061.
+  It still agrees with bet365 once de-vigged.
+
+Both are in `KNOWN_DISCONTINUITIES`. Check that list before reading a series across seasons.
+
+**A cache keyed on identity serves corrected data stale.** The walk cache's fingerprint now hashes
+the content of every match a walk reads, not only which matches they were. A cache made before
+2026-11-18 must not be trusted.
+
 **Never select a hyperparameter on an evaluation span.** Dixon-Coles at a 365-day half-life scores
 0.00107 better on the test decade — and 0.00001 better on the sensitivity decade. The tuning span
 returned UNRESOLVED and 730 stands.
@@ -146,7 +182,7 @@ run cannot accept anything. Apply this before any other test:
 
 ```
 goals, teams, dates          1993 →   both decades
-shots/SoT/corners/cards      2000 →   both decades
+shots/SoT/corners/cards      2000 →   both decades  (SoT redefined 2013-14: E0 x0.63)
 referee                      2000 →   both decades
 half-time goals              1995 →   both decades  (but closed above)
 bet365 1X2 odds              2002 →   both decades  (100% / 100%)

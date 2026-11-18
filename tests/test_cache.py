@@ -174,3 +174,17 @@ def test_a_cached_walk_reproduces_an_uncached_one_exactly(cfg, tmp_path) -> None
     assert digest(fresh) == digest(cached)
     # The fit summary has to survive too: a cached run must be able to report on itself.
     assert cached_state["fit_summary"]["n_fits"] == len(fresh_state["fits"])
+
+
+def test_a_corrected_score_or_shot_count_changes_the_fingerprint(cfg) -> None:
+    """Review finding F6. The source revises published rows; a re-ingest that corrects one must
+    retire every cached walk that read it, even though the pool's identity is unchanged."""
+    matches = _pool().assign(home_goals=[1.0, 2.0, 0.0], home_sot=[4.0, 6.0, 2.0])
+    corrected_score = matches.assign(home_goals=[1.0, 3.0, 0.0])
+    corrected_shots = matches.assign(home_sot=[4.0, 6.0, 3.0])
+    keys = {cache.fingerprint("dixon-coles", _pool(), _splits(), cfg, matches=m)
+            for m in (matches, corrected_score, corrected_shots)}
+    assert len(keys) == 3
+    assert (cache.fingerprint("dixon-coles", _pool(), _splits(), cfg, matches=matches)
+            == cache.fingerprint("dixon-coles", _pool(), _splits(), cfg,
+                                 matches=matches[sorted(matches.columns, reverse=True)]))

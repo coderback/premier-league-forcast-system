@@ -1003,7 +1003,7 @@ def run_arm(
 
         key = cache.fingerprint(
             spec.name, build_pool(matches, splits), splits, cfg,
-            extra=_tier_identity(tiers),
+            extra=_tier_identity(tiers), matches=matches,
         )
         hit = cache.load(cache_dir, spec.name, key)
         if hit is not None:
@@ -1041,12 +1041,17 @@ def _tier_identity(tiers: pd.DataFrame | None) -> str:
 
     Two runs of the same arm on the same splits can still differ if one was given a wider corpus,
     and a cache that could not tell them apart would serve one run's forecasts under the other's
-    name. Divisions, row count and last date pin it without hashing thirty thousand rows.
+    name. Divisions, row count and last date say which frame it was; the content digest says what
+    was in it, so a re-ingest that corrects a row also retires the walks that read it.
     """
     if tiers is None:
         return "no-tiers"
+    from plmodel.eval import cache
+
     divisions = ",".join(sorted(tiers["division"].unique()))
-    return f"{divisions}|{len(tiers)}|{tiers['date'].max()}"
+    # Contents, not just shape: a corrected Championship row must change the key as surely as a
+    # corrected Premier League one.
+    return f"{divisions}|{len(tiers)}|{tiers['date'].max()}|{cache.content_digest(tiers)}"
 
 
 def build_pool(matches: pd.DataFrame, splits: Sequence[Split]) -> pd.DataFrame:

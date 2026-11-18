@@ -12,6 +12,10 @@ So an entry is keyed by a digest of everything that determines those numbers:
 * the arm's name;
 * the exact split boundaries, barrier by barrier;
 * the identity of every match in the pool, in order;
+* the **contents** of every match the walk reads, training rows included -- every column, so a
+  re-ingest that corrects a score, a shot count or a price changes the key (added 2026-11-18;
+  before that only the pool's identity columns were hashed, and a corrected row was served the
+  old walk);
 * the **effective** configuration — every field of the :class:`~plmodel.config.Config` actually in
   force, not merely the file it was loaded from.
 
@@ -64,8 +68,31 @@ def config_identity(cfg: Config) -> str:
     return json.dumps(dataclasses.asdict(cfg), sort_keys=True, default=str)
 
 
+def content_digest(frame: pd.DataFrame | None) -> str:
+    """Digest of a frame's contents: every column, by name, every row, in order.
+
+    Columns are taken in sorted name order so the digest does not depend on how a reader happened
+    to order them; rows keep their order because the walk does.
+    """
+    if frame is None:
+        return "none"
+    digest = hashlib.sha256()
+    digest.update(f"{len(frame)}|{','.join(sorted(map(str, frame.columns)))}".encode("utf-8"))
+    for column in sorted(frame.columns, key=str):
+        values = frame[column]
+        try:
+            hashed = pd.util.hash_pandas_object(values, index=False)
+        except TypeError:
+            # Unhashable cells (lists, dicts) are rare here; their text form identifies them.
+            hashed = pd.util.hash_pandas_object(values.astype(str), index=False)
+        digest.update(f"{column}|{values.dtype}".encode("utf-8"))
+        digest.update(hashed.to_numpy().tobytes())
+    return digest.hexdigest()
+
+
 def fingerprint(
-    arm: str, pool: pd.DataFrame, splits, cfg: Config, *, extra: str = ""
+    arm: str, pool: pd.DataFrame, splits, cfg: Config, *, extra: str = "",
+    matches: pd.DataFrame | None = None,
 ) -> str:
     """Identity of one arm's walk: the arm, the barriers, the matches, the configuration.
 
@@ -85,6 +112,7 @@ def fingerprint(
         )
     identity = pool[list(_IDENTITY)].astype(str).agg("|".join, axis=1)
     digest.update(pd.util.hash_pandas_object(identity, index=False).to_numpy().tobytes())
+    digest.update(content_digest(matches).encode("utf-8"))
     return digest.hexdigest()
 
 
