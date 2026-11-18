@@ -38,6 +38,30 @@ KNOWN_DISCONTINUITIES: tuple[dict[str, str], ...] = (
                        "Pinnacle is reported as a historical diagnostic only",
     },
     {
+        "source": "football-data.co.uk",
+        "field": "shots on target (HST/AST), every division",
+        "date": "2013-08",
+        "effect": "definition changes at the start of 2013-14: E0 mean per match 14.24 -> 8.92 "
+                  "(x0.63) while total shots stay flat; E1 x0.77, E2 x0.84",
+        "consequence": "the dc+sot-form trailing differential reads raw counts, so windows "
+                       "spanning the break mix two scales and the term was under-weighted until "
+                       "about 2020; E0/E1 comparisons pool two regimes. Below the gate's floor "
+                       "(-0.00026 sensitivity, -0.00012 test when harmonised) and out of live "
+                       "forecasts. See NOTES.md, 2026-11-18",
+    },
+    {
+        "source": "football-data.co.uk",
+        "field": "market-average closing odds (AvgCH/AvgCD/AvgCA)",
+        "date": "2024-08",
+        "effect": "the bookmakers behind the average change: VC, IW and V end in 2024-25; "
+                  "BFD, BMGM, BV, CL and LB appear in 2025-26. Margin 0.039-0.042 through "
+                  "2024-25, 0.057 in 2025-26, 0.061 in 2026-27 to date",
+        "consequence": "gate 2's benchmark is not quite the same benchmark either side of the "
+                       "change. After Shin de-vigging it agrees with bet365 within 0.0002 RPS, so "
+                       "no recorded gap moves; if the two separate by more than 0.0005 in a "
+                       "season, read gate 2 against bet365 too. See NOTES.md, 2026-11-18",
+    },
+    {
         "source": "FBref",
         "field": "Opta advanced stats (incl. xG)",
         "date": "2026-01",

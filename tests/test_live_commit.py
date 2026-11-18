@@ -170,6 +170,7 @@ def test_pl_live_freezes_and_commits_in_one_go(repo: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "plmodel.data.football_data.upcoming_fixtures", lambda *a, **k: fixtures
     )
+    monkeypatch.setattr(cli, "_today", lambda: pd.Timestamp("2026-08-28"))
 
     args = argparse.Namespace(
         config=None, arms="uniform,home-rate", score=False, dry_run=False, no_feed=True
@@ -220,6 +221,7 @@ def test_a_second_run_on_the_same_barrier_is_a_no_op(repo: Path, monkeypatch) ->
     monkeypatch.setattr(
         "plmodel.data.football_data.upcoming_fixtures", lambda *a, **k: fixtures
     )
+    monkeypatch.setattr(cli, "_today", lambda: pd.Timestamp("2026-08-28"))
     args = argparse.Namespace(
         config=None, arms="uniform", score=False, dry_run=False, no_feed=True
     )
@@ -247,3 +249,76 @@ def test_a_near_impossible_outcome_is_flagged_and_an_ordinary_one_is_not() -> No
     lines = _low_probability_warnings(fixtures)
     assert len(lines) == 1
     assert "Coventry" in lines[0] and "away 0.004" in lines[0]
+
+
+def _live_setup(repo: Path, monkeypatch, *, latest_published):
+    """`cmd_live` with a two-match corpus, one fixture on 2026-08-29, and a stubbed source."""
+    import argparse
+    import dataclasses
+
+    import pandas as pd
+
+    from plmodel import cli
+    from plmodel.config import load_config
+
+    cfg = dataclasses.replace(load_config(), output_dir=repo / "output")
+    history = pd.DataFrame({
+        "date": pd.to_datetime(["2026-08-01", "2026-08-08"]), "season": "2026-27",
+        "division": "E0", "home_team": ["Arsenal", "Chelsea"], "away_team": ["Chelsea", "Everton"],
+        "home_goals": [2.0, 1.0], "away_goals": [1.0, 1.0], "result": ["H", "D"],
+        "played": [True, True],
+    })
+    fixtures = pd.DataFrame({
+        "date": pd.to_datetime(["2026-08-15", "2026-08-29"]), "season": "2026-27",
+        "division": "E0", "home_team": ["Fulham", "Everton"], "away_team": ["Brentford", "Arsenal"],
+        "home_goals": [pd.NA, pd.NA], "away_goals": [pd.NA, pd.NA], "result": [None, None],
+        "played": [False, False],
+    })
+    monkeypatch.setattr(cli, "load_config", lambda *a, **k: cfg)
+    monkeypatch.setattr(cli, "_load_corpus", lambda c: (history, history))
+    monkeypatch.setattr("plmodel.data.football_data.upcoming_fixtures", lambda *a, **k: fixtures)
+    monkeypatch.setattr(cli, "_today", lambda: pd.Timestamp("2026-08-28"))
+
+    def source(*a, **k):
+        if isinstance(latest_published, Exception):
+            raise latest_published
+        return latest_published
+
+    monkeypatch.setattr("plmodel.data.football_data.latest_published_result", source)
+    args = argparse.Namespace(
+        config=None, arms="uniform,home-rate", score=False, dry_run=False, no_feed=False
+    )
+    return cli, args
+
+
+def test_pl_live_refuses_when_the_source_has_results_the_corpus_lacks(repo: Path, monkeypatch, capsys) -> None:
+    """Review finding F4: run without `pl ingest`, a freeze would train without the last round."""
+    import pandas as pd
+
+    cli, args = _live_setup(repo, monkeypatch, latest_published=pd.Timestamp("2026-08-22"))
+    assert cli.cmd_live(args) == 2
+    assert not (repo / "output" / "live").exists() or not any((repo / "output" / "live").iterdir())
+    assert "pl ingest" in capsys.readouterr().err
+
+
+def test_pl_live_refuses_when_the_source_cannot_be_reached(repo: Path, monkeypatch) -> None:
+    from plmodel.data.football_data import IngestError
+
+    cli, args = _live_setup(repo, monkeypatch, latest_published=IngestError("offline"))
+    assert cli.cmd_live(args) == 2
+
+
+def test_a_current_corpus_freezes_and_the_file_records_the_check(repo: Path, monkeypatch, capsys) -> None:
+    """The fixture dated before today is set aside, not frozen: a forecast after kickoff is not one."""
+    import json
+
+    import pandas as pd
+
+    cli, args = _live_setup(repo, monkeypatch, latest_published=pd.Timestamp("2026-08-08"))
+    assert cli.cmd_live(args) == 0
+    block = json.loads((repo / "output" / "live" / "2026-08-29.json").read_text(encoding="utf-8"))
+    assert block["staleness_check"]["checked"] is True
+    assert block["staleness_check"]["source_last_result"] == "2026-08-08"
+    assert block["train_last_date"] == "2026-08-08"
+    assert not (repo / "output" / "live" / "2026-08-15.json").exists()
+    assert "Fulham v Brentford" in capsys.readouterr().err

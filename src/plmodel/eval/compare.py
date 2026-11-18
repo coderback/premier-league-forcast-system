@@ -953,6 +953,9 @@ class ArmResult:
     vs_baseline: dict[str, float] | None = None
     vs_baseline_dm: dict[str, float] | None = None
     vs_baseline_logloss: dict[str, float] | None = None
+    # Gate 1's comparison with whole seasons resampled. Reported beside the gate, never gated on:
+    # the acceptance rule is stated in config.yaml and only its owner changes it.
+    vs_baseline_by_season: dict[str, object] | None = None
     vs_market: dict[str, float] | None = None
 
 
@@ -1170,6 +1173,11 @@ def run_compare(
             metrics.log_loss(arm.probs, outcomes), metrics.log_loss(baseline.probs, outcomes),
             n_boot=cfg.backtest.n_boot, seed=cfg.seed,
         )
+        if "season" in rows.columns:
+            arm.vs_baseline_by_season = season_clustered_delta(
+                metrics.rps(arm.probs, outcomes), metrics.rps(baseline.probs, outcomes),
+                rows["season"].to_numpy(), n_boot=cfg.backtest.n_boot, seed=cfg.seed,
+            )
 
     market_block = _market_block(results, market_probs, covered, outcomes, cfg)
     fdr = _fdr_block(results, cfg, family_size=family_size)
@@ -1189,6 +1197,36 @@ def run_compare(
         market=market_block,
         fdr=fdr,
     )
+
+
+def season_clustered_delta(
+    loss_a: np.ndarray, loss_b: np.ndarray, seasons: np.ndarray, *, n_boot: int, seed: int
+) -> dict[str, object]:
+    """Gate 1's paired comparison with whole seasons resampled, plus a t interval on season means.
+
+    Gate 1 resamples matches, which assumes they are independent. A model change that pays off when
+    a club's level shifts between seasons gains in team-season blocks, and a decade holds few of
+    them: for `dc+sot-form` the season bootstrap's standard error is twice the by-match one
+    (NOTES.md, 2026-11-18). With ten clusters the percentile bootstrap is itself a little narrow,
+    so the t interval on the season means (unweighted, n_seasons - 1 df) is the conservative one.
+    """
+    from scipy import stats
+
+    block: dict[str, object] = dict(
+        metrics.paired_delta_clustered(loss_a, loss_b, seasons, n_boot=n_boot, seed=seed)
+    )
+    diffs = np.asarray(loss_a, dtype=float) - np.asarray(loss_b, dtype=float)
+    keys, codes = np.unique(np.asarray(seasons), return_inverse=True)
+    means = np.bincount(codes, weights=diffs) / np.bincount(codes)
+    block["season_means"] = {str(k): float(v) for k, v in zip(keys, means)}
+    block["seasons_favouring_a"] = int((means < 0).sum())
+    if len(means) >= 2:
+        quantile = float(stats.t.ppf(0.975, len(means) - 1))  # MATH: two-sided 95%, as every CI here
+        half = quantile * float(means.std(ddof=1)) / float(np.sqrt(len(means)))
+        block["t_ci_low"], block["t_ci_high"] = float(means.mean() - half), float(means.mean() + half)
+    else:
+        block["t_ci_low"] = block["t_ci_high"] = float("nan")
+    return block
 
 
 def _fit_summary(state: dict) -> dict[str, object] | None:
@@ -1579,6 +1617,8 @@ def gate_verdicts(
                 "95% CI excludes 0" if ci_excludes_zero
                 else f"P(better) = {p_better:.3f}"
             ),
+            # Beside gate 1, not part of it: the same comparison with whole seasons resampled.
+            "gate1_by_season": _by_season_line(arm.vs_baseline_by_season),
             "gate2_vs_market": gate2,
             "gate2_reason": (
                 None if gate2 is None else
@@ -1622,6 +1662,18 @@ def gate_verdicts(
     return verdicts
 
 
+def _by_season_line(block: dict[str, object] | None) -> str | None:
+    """One line for the console and the verdict: gate 1's comparison with seasons resampled."""
+    if not block:
+        return None
+    n_groups = int(block["n_groups"])
+    return (
+        f"by season (reported, not gated): 95% CI [{block['ci_low']:+.5f}, {block['ci_high']:+.5f}]"
+        f", t on season means [{block['t_ci_low']:+.5f}, {block['t_ci_high']:+.5f}]"
+        f", {block['seasons_favouring_a']}/{n_groups} seasons favour the arm"
+    )
+
+
 # The sensitivity span is asked only to lean the same way, not to reach significance: the two
 # evaluation decades are different eras and a real effect can be genuinely smaller on one.
 _SENSITIVITY_LEAN_BAR = 0.5
@@ -1647,6 +1699,7 @@ def report_json(
                 "vs_baseline": arm.vs_baseline,
                 "vs_baseline_dm": arm.vs_baseline_dm,
                 "vs_baseline_logloss": arm.vs_baseline_logloss,
+                "vs_baseline_by_season": arm.vs_baseline_by_season,
                 "vs_market": arm.vs_market,
                 "calibration": {
                     outcome: block["decomposition"]

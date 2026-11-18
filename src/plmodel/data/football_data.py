@@ -171,6 +171,18 @@ def fetch_season(cfg: Config, division: str, code: str, *, refresh: bool = False
     dest = cache_path(cfg, division, code)
     if dest.exists() and not refresh:
         return dest, True
+    raw, _ = _download_season(cfg, division, code)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(raw)
+    return dest, False
+
+
+def _download_season(cfg: Config, division: str, code: str) -> tuple[bytes, str]:
+    """One season file from the source, checked to be that file, and never written anywhere.
+
+    Returns (raw bytes, decoded text). Raises MissingSeasonError for anything that is not the
+    requested division's season CSV.
+    """
     url = f"{cfg.data.base_url}/{code}/{division}.csv"
     try:
         resp = requests.get(url, timeout=_DOWNLOAD_TIMEOUT)
@@ -187,17 +199,36 @@ def fetch_season(cfg: Config, division: str, code: str, *, refresh: bool = False
             f"{url} did not return a season CSV (body starts {text.lstrip()[:40]!r}); "
             "the source serves an HTML page for seasons it has not published"
         )
-    # Check the division before writing, so a substituted file never reaches the cache. Verified
-    # necessary on 2026-08-17: `2627/E0.csv` answered 200 with a valid National League CSV.
+    # Check the division before handing the file on, so a substituted file never reaches the cache.
+    # Verified necessary on 2026-08-17: `2627/E0.csv` answered 200 with a valid National League CSV.
     served = _first_division(text)
     if served is not None and served != division:
         raise MissingSeasonError(
             f"{url} served division {served!r}, not {division!r} — the source substitutes another "
             "competition's file for a season it has not published"
         )
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    dest.write_bytes(resp.content)
-    return dest, False
+    return resp.content, text
+
+
+def latest_published_result(
+    cfg: Config, division: str, *, today: pd.Timestamp | None = None
+) -> pd.Timestamp | None:
+    """The date of the last result the source has published for the current season, or None.
+
+    Fetched fresh and never cached: this answers "has the source moved on since the last
+    `pl ingest`?", which a cached copy cannot. Same file `pl ingest` reads, one request.
+    """
+    now = today if today is not None else pd.Timestamp.today().normalize()
+    code = season_code(latest_started_season(now))
+    _, text = _download_season(cfg, division, code)
+    header, body = _rows_from_text(text, f"{division} {code}")
+    raw = pd.DataFrame(body, columns=header, dtype=str)
+    if "FTR" not in raw.columns or "Date" not in raw.columns:
+        return None
+    played = raw[_result_codes(raw["FTR"]).notna() & raw["Date"].str.strip().ne("")]
+    if played.empty:
+        return None
+    return pd.Timestamp(parse_dates(played["Date"], f"{division} {code}").max())
 
 
 def _first_division(text: str) -> str | None:

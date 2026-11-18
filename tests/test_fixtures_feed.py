@@ -153,3 +153,26 @@ def test_a_played_fixture_is_never_resurrected_by_the_feed(cfg, serve) -> None:
 def test_the_feed_can_be_switched_off(cfg, serve) -> None:
     serve(_feed("E0,22/08/2026,15:00,Arsenal,Chelsea,2.10,3.40,3.50\n"))
     assert fd.upcoming_fixtures(cfg, _corpus([]), use_feed=False).empty
+
+
+# --- how current the source is: the check `pl live` makes before freezing -----------------------
+
+SEASON_HEADER = "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR"
+
+
+def test_the_latest_published_result_is_read_from_the_current_season_file(cfg, serve, tmp_path) -> None:
+    import dataclasses
+
+    serve((SEASON_HEADER + "\n"
+           "E0,15/08/2026,15:00,Arsenal,Chelsea,2,1,H\n"
+           "E0,08/11/2026,16:30,Everton,Fulham,0,0,D\n").encode("utf-8"))
+    local = dataclasses.replace(cfg, cache_dir=tmp_path)
+    got = fd.latest_published_result(local, "E0", today=pd.Timestamp("2026-11-18"))
+    assert got == pd.Timestamp("2026-11-08")
+    assert not any(tmp_path.rglob("*.csv"))       # checked, never cached: ingest owns the cache
+
+
+def test_a_substituted_division_is_refused_by_the_currency_check(cfg, serve) -> None:
+    serve((SEASON_HEADER + "\nEC,15/08/2026,15:00,Arsenal,Chelsea,2,1,H\n").encode("utf-8"))
+    with pytest.raises(fd.MissingSeasonError):
+        fd.latest_published_result(cfg, "E0", today=pd.Timestamp("2026-11-18"))

@@ -8129,3 +8129,46 @@ therefore stands.
 It belongs beside the Pinnacle termination as a known discontinuity: a benchmark whose membership
 changes is no longer quite the same benchmark. If the de-vigged average and bet365 ever separate by
 more than 0.0005 in a season, gate 2 should be read against bet365 too.
+
+---
+
+## 2026-11-18 — BUILT: the three code follow-ups to the review's evaluation and live findings
+
+### Gate 1 now prints its season-clustered interval beside it
+
+`pl compare` now prints a second line under each gate-1 verdict, and the JSON report carries the same
+result as `vs_baseline_by_season`. The line gives:
+- the season bootstrap interval;
+- a t interval on season means (n − 1 df), the conservative reading with ten clusters;
+- how many seasons favour the arm.
+
+**It is reported, not gated on.** The acceptance rule in `config.yaml` is unchanged; changing it is
+the owner's decision. Every gate-1 reading in this ledger quotes the line from now on, as the earlier
+entry today says.
+
+### Two entries added to `KNOWN_DISCONTINUITIES`
+
+Both are now listed in every coverage report:
+- the 2013-14 shots-on-target definition change, in every division;
+- the 2024-26 change in the bookmakers behind `AvgC*`.
+
+### `pl live` checks the corpus is current before freezing (review F4)
+
+Before this, `pl live` read the cached corpus and fetched only the fixture feed. Run without
+`pl ingest` first, it would have frozen on a history missing the last round. It now:
+
+1. **Fetches the current season file** (one request, the same file `pl ingest` reads, never cached).
+   It refuses to freeze if the source has a result dated after the corpus's last one, or if the
+   source cannot be reached. `--no-feed` remains the explicit way to freeze offline, and the frozen
+   file then records that the check was not made.
+2. **Sets aside fixtures dated before today** that the corpus still has as unplayed (postponed, or
+   played and not ingested), and names them. Left in, the earliest would have become the barrier and
+   the freeze would have gone back in time.
+3. **Writes into each frozen file** the corpus's last training date and what the check found.
+
+`pl live --dry-run` shows the check's result and whether a real run would refuse. Against the
+source on 2026-11-18 both end 2026-11-08, so the corpus is current.
+
+**Still open from F4:**
+- each run still freezes only the earliest matchday date;
+- frozen fixtures that never resolve (postponements) are not yet counted at scoring.

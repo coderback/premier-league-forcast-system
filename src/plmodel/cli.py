@@ -259,6 +259,8 @@ def _print_compare(payload: dict, report) -> None:
             mark = "ACCEPT" if verdict["accepted"] else "reject"
             print(f"  {mark:7} {name:16} "
                   f"gate1 {label[verdict['gate1_vs_baseline']]} ({verdict['gate1_reason']})")
+            if verdict.get("gate1_by_season"):
+                print(f"  {'':7} {'':16}   {verdict['gate1_by_season']}")
             print(f"  {'':7} {'':16} gate2 {label[verdict['gate2_vs_market']]}"
                   f"   gate3 {label[verdict['gate3_family_wise']]}"
                   f"   gate4 {label[verdict['gate4_sensitivity']]}")
@@ -530,7 +532,7 @@ def cmd_live(args: argparse.Namespace) -> int:
     from plmodel.data.football_data import upcoming_fixtures
     from plmodel.data.teams import TeamNameError
     from plmodel.eval.live import (
-        commit_frozen, freeze_matchday, next_barrier, score_ledger,
+        commit_frozen, freeze_matchday, next_barrier, score_ledger, split_past_fixtures,
     )
 
     cfg = load_config(args.config)
@@ -555,6 +557,14 @@ def cmd_live(args: argparse.Namespace) -> int:
               "--no-feed to freeze only from the season file.", file=sys.stderr)
         return 2
 
+    fixtures, past = split_past_fixtures(fixtures, _today())
+    if not past.empty:
+        print(f"set aside {len(past)} fixture(s) dated before today and still unplayed in the "
+              "corpus (postponed, or played and not yet ingested):", file=sys.stderr)
+        for row in past.itertuples(index=False):
+            print(f"  {pd.Timestamp(row.date).date()}  {row.home_team} v {row.away_team}",
+                  file=sys.stderr)
+
     if fixtures.empty:
         print(f"no unplayed {cfg.backtest.prediction_division} fixtures known.")
         print("  the season file carries fixtures only once it has results in it, and the "
@@ -564,6 +574,7 @@ def cmd_live(args: argparse.Namespace) -> int:
 
     barrier = next_barrier(fixtures)
     day = fixtures[fixtures["date"] == barrier]
+    check, stale = _corpus_check(cfg, played, offline=args.no_feed)
     if args.dry_run:
         print(f"next barrier : {pd.Timestamp(barrier).date()}   {len(day)} fixture(s)")
         print(f"source       : {'season file only' if args.no_feed else 'season file + feed'}")
@@ -574,13 +585,23 @@ def cmd_live(args: argparse.Namespace) -> int:
         print("would commit : yes, that file alone")
         if target.exists():
             print("  ! that file already exists and would NOT be overwritten")
+        print(f"corpus check : {check['summary']}")
+        if stale:
+            print(f"  ! would REFUSE to freeze: {stale}")
         print("nothing was written (--dry-run).")
         return 0
+
+    if stale:
+        print(f"refusing to freeze: {stale}", file=sys.stderr)
+        print("  a forecast trained on a corpus behind the source is not the forecast the "
+              "backtest validated.", file=sys.stderr)
+        return 2
 
     try:
         frozen = freeze_matchday(
             fixtures, played, cfg, ledger_dir,
             arm_names=[a.strip() for a in args.arms.split(",") if a.strip()],
+            staleness_check=check,
         )
     except FileExistsError:
         # Already frozen for this barrier. The refusal to overwrite is the whole guarantee and
@@ -948,6 +969,44 @@ def _parse_fixtures(args: argparse.Namespace) -> list[tuple[str, str]]:
             raise ValueError(f"{args.file} is missing columns {sorted(missing)}")
         pairs.extend((str(r.home_team), str(r.away_team)) for r in frame.itertuples(index=False))
     return pairs
+
+
+def _today():
+    """Today's date, as a function so tests can fix it."""
+    import pandas as pd
+
+    return pd.Timestamp.today().normalize()
+
+
+def _corpus_check(cfg, played, *, offline: bool) -> tuple[dict, str | None]:
+    """Whether the cached corpus is as current as the source: (record for the ledger, refusal).
+
+    `pl live` reads the cached corpus and fetches only the fixture feed, so a run without `pl
+    ingest` first would freeze on a history missing the last round. One request to the season file
+    `pl ingest` reads settles it. If the source cannot be reached, it refuses rather than assumes:
+    `--no-feed` is the explicit way to freeze offline, and the file then says it was not checked.
+    """
+    import pandas as pd
+
+    from plmodel.data.football_data import IngestError, latest_published_result
+    from plmodel.eval.live import corpus_staleness
+
+    corpus_last = str(pd.Timestamp(played["date"].max()).date()) if len(played) else None
+    if offline:
+        return {"checked": False, "corpus_last_result": corpus_last,
+                "summary": f"NOT checked against the source (--no-feed); corpus ends {corpus_last}"}, None
+    try:
+        latest = latest_published_result(cfg, cfg.backtest.prediction_division, today=_today())
+    except IngestError as exc:
+        return {"checked": False, "corpus_last_result": corpus_last, "error": str(exc),
+                "summary": f"could not reach the source: {exc}"}, (
+            f"could not confirm the corpus is current ({exc}); run `pl ingest`, or pass "
+            "--no-feed to freeze offline without the check")
+    stale = corpus_staleness(played, latest)
+    published = None if latest is None else str(pd.Timestamp(latest).date())
+    return {"checked": True, "corpus_last_result": corpus_last, "source_last_result": published,
+            "summary": (f"source has results through {published}, corpus through {corpus_last}"
+                        + ("" if stale else " - current"))}, stale
 
 
 def _low_probability_warnings(fixtures) -> list[str]:

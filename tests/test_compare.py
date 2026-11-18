@@ -458,3 +458,23 @@ def test_a_gate_three_rejection_says_which_way_it_ran(cfg) -> None:
     # A non-rejection cannot be misread as an endorsement, so it says only what it means.
     report.fdr["rejected"]["home-rate"] = False
     assert "favours" not in gate_verdicts(report, sensitivity=sens)["home-rate"]["gate3_reason"]
+
+
+def test_the_season_clustered_interval_is_wider_when_the_gain_comes_in_season_blocks() -> None:
+    """Review finding F2. The same mean gain, delivered by a few seasons rather than spread evenly,
+    should look far less certain once whole seasons are resampled."""
+    import numpy as np
+
+    from plmodel.eval.compare import season_clustered_delta
+
+    rng = np.random.default_rng(0)
+    seasons = np.repeat([f"s{i}" for i in range(10)], 380)
+    base = rng.uniform(0.1, 0.3, seasons.size)
+    noise = rng.normal(0, 0.03, seasons.size)
+    block_gain = np.where(np.isin(seasons, ["s2", "s6"]), -0.01, 0.0)
+    out = season_clustered_delta(base + noise + block_gain, base, seasons, n_boot=4000, seed=1)
+    by_match = out["delta"] + np.array([-1.96, 1.96]) * noise.std() / np.sqrt(seasons.size)
+    assert out["n_groups"] == 10
+    assert (out["ci_high"] - out["ci_low"]) > 1.5 * (by_match[1] - by_match[0])
+    assert out["t_ci_low"] < out["delta"] < out["t_ci_high"]
+    assert out["seasons_favouring_a"] == sum(v < 0 for v in out["season_means"].values())

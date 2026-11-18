@@ -34,6 +34,41 @@ LEDGER_SUFFIX = ".json"
 _GIT_TIMEOUT = 30
 
 
+def split_past_fixtures(
+    fixtures: pd.DataFrame, today: pd.Timestamp
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(fixtures dated today or later, fixtures dated before today).
+
+    A fixture still unplayed in the corpus after its date has either been postponed or been played
+    without the corpus knowing. Neither can be frozen: a forecast written after kickoff is not a
+    forecast. Left in, the earliest of them would become the barrier and the freeze would go back in
+    time, so they are set aside and named instead.
+    """
+    past = fixtures["date"] < pd.Timestamp(today).normalize()
+    return fixtures[~past], fixtures[past]
+
+
+def corpus_staleness(
+    history: pd.DataFrame, latest_published: pd.Timestamp | None
+) -> str | None:
+    """Why the corpus is behind the source, or None when it is not.
+
+    ``latest_published`` is the last result date in the source's current season file. Any result
+    after the corpus's last one means a freeze now would train without it, while the backtest it is
+    validated by always had every earlier result. That asymmetry is the defect, so it refuses.
+    """
+    if latest_published is None:
+        return None
+    corpus_last = pd.Timestamp(history["date"].max()) if len(history) else None
+    if corpus_last is None or pd.Timestamp(latest_published) > corpus_last:
+        return (
+            f"the source has results through {pd.Timestamp(latest_published).date()} but the "
+            f"corpus ends {corpus_last.date() if corpus_last is not None else '(empty)'}; "
+            "run `pl ingest` first"
+        )
+    return None
+
+
 def next_barrier(fixtures: pd.DataFrame) -> pd.Timestamp | None:
     """The earliest unplayed match date, or None when the fixture list is empty."""
     if len(fixtures) == 0:
@@ -48,8 +83,13 @@ def freeze_matchday(
     ledger_dir: Path,
     *,
     arm_names: list[str],
+    staleness_check: dict | None = None,
 ) -> tuple[Path, dict] | None:
     """Write the next unplayed matchday's forecasts to a dated file.
+
+    ``staleness_check`` is what the caller verified about the corpus before freezing (the source's
+    last result date, or why it was not checked). It is written into the file so the ledger says
+    what the forecast knew, not only when it was made.
 
     Returns ``(path, block)``, or None when there is nothing to freeze. Refuses to overwrite an
     existing file for the same barrier: a frozen forecast that can be rewritten after the fact is
@@ -96,6 +136,8 @@ def freeze_matchday(
         "n_fixtures": int(len(day)),
         "n_train_matches": int(len(train)),
         "n_excluded_same_day": n_excluded_same_day,
+        "train_last_date": str(pd.Timestamp(train["date"].max()).date()) if len(train) else None,
+        "staleness_check": staleness_check,
         "arms": list(forecasts),
         "acceptance_rule": cfg.acceptance_rule,
         "fixtures": [
