@@ -75,17 +75,53 @@ Forecaster = Callable[[ArmContext], np.ndarray]
 
 _REGISTRY: dict[str, Forecaster] = {}
 
+# The two tracks of the acceptance rule (config.yaml). INDEPENDENT arms read match facts only;
+# MARKET-INFORMED arms read bookmaker prices of any kind. Production is always independent.
+TRACK_INDEPENDENT = "independent"
+TRACK_MARKET_INFORMED = "market-informed"
 
-def register(name: str) -> Callable[[Forecaster], Forecaster]:
-    """Register a forecaster under an arm name."""
+
+@dataclass(frozen=True)
+class ArmTrack:
+    """Which track an arm is on, and whether it reads the forecast match's own pre-close prices
+    (which moves its gate 2 to the closing market: an input cannot also be the yardstick)."""
+
+    track: str = TRACK_INDEPENDENT
+    reads_match_prices: bool = False
+
+
+_TRACKS: dict[str, ArmTrack] = {}
+
+
+def register(
+    name: str, *, track: str = TRACK_INDEPENDENT, reads_match_prices: bool = False
+) -> Callable[[Forecaster], Forecaster]:
+    """Register a forecaster under an arm name, on a track.
+
+    Every arm registered so far reads goals, shots, dates and other match facts only, so the
+    default is independent. An arm that reads any bookmaker price must say so here: the track is
+    stated where the arm is defined, not inferred later from what it happened to do.
+    """
+    if track not in (TRACK_INDEPENDENT, TRACK_MARKET_INFORMED):
+        raise ValueError(f"unknown track {track!r} for arm {name!r}")
+    if reads_match_prices and track != TRACK_MARKET_INFORMED:
+        raise ValueError(f"arm {name!r} reads match prices, so it cannot be on the independent track")
 
     def deco(fn: Forecaster) -> Forecaster:
         if name in _REGISTRY:
             raise ValueError(f"forecaster {name!r} already registered")
         _REGISTRY[name] = fn
+        _TRACKS[name] = ArmTrack(track=track, reads_match_prices=reads_match_prices)
         return fn
 
     return deco
+
+
+def arm_track(name: str) -> ArmTrack:
+    """The track an arm was registered on."""
+    if name not in _TRACKS:
+        raise ValueError(f"unknown arm {name!r}; registered: {registered_arms()}")
+    return _TRACKS[name]
 
 
 def registered_arms() -> tuple[str, ...]:
@@ -957,6 +993,12 @@ class ArmResult:
     # the acceptance rule is stated in config.yaml and only its owner changes it.
     vs_baseline_by_season: dict[str, object] | None = None
     vs_market: dict[str, float] | None = None
+    # The same comparison against every diagnostic market (odds.diagnostic_benchmarks and the
+    # informed gate benchmark), each on its own priced rows. Reported for every arm, and gate 2
+    # for an arm that reads its own match's prices.
+    vs_market_diagnostics: dict[str, dict[str, float]] = field(default_factory=dict)
+    track: str = TRACK_INDEPENDENT
+    reads_match_prices: bool = False
 
 
 @dataclass
@@ -1158,6 +1200,8 @@ def run_compare(
                 calibration=calibration_report(probs, outcomes, n_bins=n_bins),
                 slices=all_slices(rows, probs, outcomes, n_bins=n_bins),
                 fit_summary=_fit_summary(state),
+                track=arm_track(spec.name).track,
+                reads_match_prices=arm_track(spec.name).reads_match_prices,
             )
         )
     assert_arms_differ(results)
@@ -1185,6 +1229,9 @@ def run_compare(
             )
 
     market_block = _market_block(results, market_probs, covered, outcomes, cfg)
+    if market_block is not None:
+        market_block["informed_benchmark"] = cfg.odds.informed_gate_benchmark
+        market_block["diagnostics"] = _diagnostic_markets(results, rows, outcomes, cfg)
     fdr = _fdr_block(results, cfg, family_size=family_size)
 
     return CompareReport(
@@ -1548,6 +1595,48 @@ def _market_block(
     return block
 
 
+def _diagnostic_markets(
+    results: Sequence[ArmResult], rows: pd.DataFrame, outcomes: np.ndarray, cfg: Config
+) -> dict[str, dict[str, object]]:
+    """Every arm against each diagnostic market, each on its own priced rows.
+
+    The closing line stays reported after the gate moved to the Friday line, so the earlier
+    headline (+0.0050 to the close) remains comparable with every later one. The informed gate
+    benchmark is always included, because a market-informed arm that reads its own match's prices
+    is gated on it. A family whose columns the frame does not carry is reported as absent.
+    """
+    from plmodel.data.odds import OddsError, get_family
+    from plmodel.model.baselines import market
+
+    names = list(dict.fromkeys(
+        [*cfg.odds.diagnostic_benchmarks, cfg.odds.informed_gate_benchmark]
+    ))
+    out: dict[str, dict[str, object]] = {}
+    for name in names:
+        if name == cfg.odds.gate_benchmark:
+            continue
+        try:
+            probs = market(rows, family=name, method=cfg.odds.devig_primary,
+                           sum_tolerance=cfg.odds.sum_tolerance)
+        except OddsError:
+            out[name] = {"n_covered": 0, "absent": True}
+            continue
+        covered = ~np.isnan(probs).any(axis=1)
+        block: dict[str, object] = {
+            "settlement": get_family(name).settlement,
+            "n_covered": int(covered.sum()),
+        }
+        if covered.any():
+            block["rps_market"] = metrics.mean_rps(probs[covered], outcomes[covered])
+            for arm in results:
+                arm.vs_market_diagnostics[name] = metrics.paired_delta(
+                    arm.probs[covered], probs[covered], outcomes[covered],
+                    n_boot=cfg.backtest.n_boot, seed=cfg.seed,
+                )
+        out[name] = block
+    return out
+
+
 def _fdr_block(
     results: Sequence[ArmResult], cfg: Config, *, family_size: int | None = None
 ) -> dict[str, object] | None:
@@ -1601,9 +1690,18 @@ def gate_verdicts(
         p_better = float(delta.get("p_a_better", 0.0))
         gate1 = ci_excludes_zero or p_better >= _P_BETTER_BAR
 
+        # Gate 2 on the Friday market, or -- for an arm that reads its own match's prices -- on
+        # the closing market, which that input does not contain.
         gate2 = None
-        if arm.vs_market is not None and baseline.vs_market is not None:
-            gate2 = bool(arm.vs_market["delta_rps"] <= baseline.vs_market["delta_rps"])
+        if arm.reads_match_prices:
+            gate2_benchmark = (report.market or {}).get("informed_benchmark")
+            arm_gap = arm.vs_market_diagnostics.get(gate2_benchmark)
+            base_gap = baseline.vs_market_diagnostics.get(gate2_benchmark)
+        else:
+            gate2_benchmark = (report.market or {}).get("benchmark")
+            arm_gap, base_gap = arm.vs_market, baseline.vs_market
+        if arm_gap is not None and base_gap is not None:
+            gate2 = bool(arm_gap["delta_rps"] <= base_gap["delta_rps"])
 
         gate3 = bool(rejected.get(arm.name, False)) if report.fdr else None
         # Which way a gate-3 rejection ran. Read off the DM's own loss differential rather than
@@ -1627,9 +1725,10 @@ def gate_verdicts(
             "gate2_vs_market": gate2,
             "gate2_reason": (
                 None if gate2 is None else
-                f"arm gap {arm.vs_market['delta_rps']:+.5f} vs baseline gap "
-                f"{baseline.vs_market['delta_rps']:+.5f}"
+                f"arm gap {arm_gap['delta_rps']:+.5f} vs baseline gap "
+                f"{base_gap['delta_rps']:+.5f} to {gate2_benchmark}"
             ),
+            "track": arm.track,
             "gate3_family_wise": gate3,
             "gate3_reason": (
                 None if gate3 is None else
@@ -1706,6 +1805,9 @@ def report_json(
                 "vs_baseline_logloss": arm.vs_baseline_logloss,
                 "vs_baseline_by_season": arm.vs_baseline_by_season,
                 "vs_market": arm.vs_market,
+                "vs_market_diagnostics": arm.vs_market_diagnostics,
+                "track": arm.track,
+                "reads_match_prices": arm.reads_match_prices,
                 "calibration": {
                     outcome: block["decomposition"]
                     for outcome, block in arm.calibration.items()

@@ -189,3 +189,25 @@ def test_every_frozen_fixture_is_accounted_for(cfg, tmp_path: Path) -> None:
     status = {(u["home_team"], u["away_team"]): u["status"] for u in fate["unresolved"]}
     assert status[("Brentford", "Burnley")].startswith("rescheduled: played 2026-10-01")
     assert status[("Leeds", "Wolves")].startswith("no result yet")
+
+
+def test_the_friday_market_is_frozen_beside_the_forecasts_and_scored(cfg, tmp_path: Path) -> None:
+    """The gate is the Friday line, and the only Friday line that matches a live forecast exactly
+    is the one the feed carried at the freeze. A fixture the feed did not price is left out."""
+    fixtures = _fixtures().assign(B365H=[2.0, None, 2.5], B365D=[3.4, None, 3.3],
+                                  B365A=[3.8, None, 2.9])
+    _, block = freeze_matchday(fixtures, _history(), cfg, tmp_path, arm_names=["uniform"])
+    assert block["tracks"] == {"uniform": "independent"}
+    priced, unpriced = block["fixtures"]                  # Everton v Arsenal, Fulham v Chelsea
+    assert priced["market_at_freeze"]["bet365"]["odds"] == [2.0, 3.4, 3.8]
+    assert sum(priced["market_at_freeze"]["bet365"]["probs"]) == pytest.approx(1.0)
+    assert unpriced["market_at_freeze"] == {}
+
+    results = pd.DataFrame({
+        "date": pd.to_datetime(["2026-08-22", "2026-08-22"]),
+        "home_team": ["Everton", "Fulham"], "away_team": ["Arsenal", "Chelsea"],
+        "result": ["H", "D"],
+    })
+    scored = score_ledger(tmp_path, results).set_index("arm")
+    assert scored.loc["uniform", "n"] == 2
+    assert scored.loc["market:bet365 (at freeze)", "n"] == 1

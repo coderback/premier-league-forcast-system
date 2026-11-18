@@ -40,6 +40,7 @@ def _corpus(n_days: int = 12, *, season: str = "2024-25") -> pd.DataFrame:
             "date": dates, "season": season, "division": "E0",
             "home_team": home, "away_team": away, "result": results,
             "AvgCH": 2.10, "AvgCD": 3.40, "AvgCA": 3.60,
+            "B365H": 2.05, "B365D": 3.50, "B365A": 3.70,
         }
     ).sort_values("date", kind="stable").reset_index(drop=True)
 
@@ -126,7 +127,7 @@ def test_report_embeds_the_acceptance_rule_verbatim(cfg) -> None:
     """The brief's requirement: a report can never claim a rule the config does not state."""
     payload = report_json(_run(cfg, ["uniform", "home-rate"]))
     assert payload["acceptance_rule"] == cfg.acceptance_rule
-    assert "Shin de-vigged market" in payload["acceptance_rule"]
+    assert "Shin de-vigged FRIDAY market" in payload["acceptance_rule"]
 
 
 def test_report_carries_the_required_blocks(cfg) -> None:
@@ -478,3 +479,43 @@ def test_the_season_clustered_interval_is_wider_when_the_gain_comes_in_season_bl
     assert (out["ci_high"] - out["ci_low"]) > 1.5 * (by_match[1] - by_match[0])
     assert out["t_ci_low"] < out["delta"] < out["t_ci_high"]
     assert out["seasons_favouring_a"] == sum(v < 0 for v in out["season_means"].values())
+
+
+# --- the two tracks and the Friday benchmark ------------------------------------------------------
+
+def test_every_arm_registered_so_far_is_independent() -> None:
+    """Every arm to date reads match facts only. A market-informed arm must say so where it is
+    registered; production must always be an independent arm."""
+    from plmodel.eval.compare import TRACK_INDEPENDENT, arm_track
+
+    assert all(arm_track(name).track == TRACK_INDEPENDENT for name in registered_arms())
+
+
+def test_an_arm_reading_its_own_match_prices_cannot_be_independent() -> None:
+    with pytest.raises(ValueError, match="cannot be on the independent track"):
+        register("bad-arm-reads-prices", reads_match_prices=True)
+    with pytest.raises(ValueError, match="unknown track"):
+        register("bad-arm-track", track="semi-informed")
+
+
+def test_gate2_is_the_friday_line_and_the_close_is_still_reported(cfg) -> None:
+    report = _run(cfg, ["uniform", "home-rate"])
+    payload = report_json(report)
+    assert payload["market"]["benchmark"] == cfg.odds.gate_benchmark == "bet365"
+    assert "avg_closing" in payload["market"]["diagnostics"]
+    assert "avg_closing" in payload["arms"]["home-rate"]["vs_market_diagnostics"]
+    assert payload["arms"]["home-rate"]["track"] == "independent"
+    assert "to bet365" in gate_verdicts(report)["home-rate"]["gate2_reason"]
+
+
+def test_an_arm_reading_its_own_prices_is_gated_on_the_close(cfg) -> None:
+    """Its input cannot also be its yardstick: gate 2 moves to the closing market."""
+    report, sens = _passing(cfg)
+    arm = report.arms[1]
+    arm.reads_match_prices, arm.track = True, "market-informed"
+    report.arms[0].vs_market_diagnostics["avg_closing"] = {"delta_rps": +0.0050}
+    arm.vs_market_diagnostics["avg_closing"] = {"delta_rps": +0.0062}   # worse against the close
+    verdict = gate_verdicts(report, sensitivity=sens)["home-rate"]
+    assert verdict["gate2_vs_market"] is False                           # though it beat bet365
+    assert "to avg_closing" in verdict["gate2_reason"]
+    assert verdict["track"] == "market-informed"

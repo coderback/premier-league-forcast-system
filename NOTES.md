@@ -8282,3 +8282,85 @@ closed lines.
   - whether the stated target becomes the Friday line, with the close kept as a reported diagnostic.
 
 Every finding (F1-F7) is now fixed or recorded.
+
+---
+
+## 2026-11-18 — DECISION: two tracks, and the Friday line as the target
+
+The owner answered two open questions:
+- **Market prices as an input** (parked since 2026-09-23) and **lagged-odds ratings** (from the
+  independent review): **both tracks**. The project keeps an independent model and adds a separately
+  named market-informed one, with the bookmakers as the yardstick for both.
+- **The target** (from the review): **the Friday line**, with the close kept as a reported
+  diagnostic.
+
+### The two tracks, as now written into the acceptance rule
+
+| | independent | market-informed |
+|---|---|---|
+| reads | goals, shots, dates and other match facts only | any bookmaker price, past or this match's own |
+| production | always the best independent arm | never |
+| adopted if | it beats independent production under the four gates | it beats independent production under the four gates |
+| gate 2 against | the Friday line | the Friday line; **the close** if it reads its own match's pre-close prices |
+
+The last cell is the guard against a circular comparison: a model fed this match's Friday odds
+cannot be credited for matching the Friday odds. Every arm declares its track where it is registered
+(`register(name, track=..., reads_match_prices=...)`), and a test pins every arm registered so far as
+independent.
+
+### The Friday target
+
+football-data.co.uk collects its pre-close prices on Friday afternoon (Tuesday for midweek rounds).
+The model forecasts before kickoff without team news, so the Friday line is the information-matched
+market. The close adds news the model can never see.
+
+`odds.gate_benchmark` is now `bet365`'s pre-close line, chosen over the Friday market average
+because it covers both decades. Measured on corrected production (the walks from the cold-start
+check):
+
+| market | test decade | sensitivity decade |
+|---|---|---|
+| bet365 Friday (**the gate**) | +0.0041 (3,800 matches) | **+0.0019** (3,800) |
+| Friday market average | +0.0035 (2,660) | not published |
+| the close, market average (the old gate) | +0.0049 (2,660) | not published |
+
+**What changed and what did not:**
+- **The verdicts did not change.** Gate 2 compares an arm's gap with the baseline's on the same rows,
+  so the benchmark cancels out of the verdict. `dc+sot-form` beat `dixon-coles` on the full test
+  decade, so it passes gate 2 on the new benchmark too.
+- **Coverage did change.** Gate 2 is evaluable on the sensitivity decade for the first time, and on
+  all 3,800 test-decade matches rather than 2,660.
+- **The headline moved, and that is not progress.** The gap reads +0.0041 instead of +0.0049 because
+  the stick is fairer, not because the model improved.
+- **The sensitivity decade's gap is less than half the test decade's.** That is new information:
+  either the market has sharpened or the model has lost ground since 2016. Not yet explained.
+
+### What was built
+
+- **`config.yaml`:**
+  - the rule text: gate 2 on the Friday line, the close for arms reading their own match's prices,
+    and the two-track paragraph;
+  - `gate_benchmark: bet365`, `informed_gate_benchmark: avg_closing`;
+  - diagnostics `[avg_preclose, avg_closing, pinnacle_closing]`.
+- **`pl compare`:**
+  - scores every arm against each diagnostic market and prints them under "other markets";
+  - prints gate 2's benchmark in its reason line;
+  - names any market-informed arm.
+- **`pl live`:**
+  - each frozen file records every arm's track;
+  - each file records the Friday prices the feed carried at the freeze, raw and de-vigged. That is
+    the only Friday line that matches a live forecast exactly;
+  - `pl live --score` scores that frozen market beside the arms.
+- **Tests:**
+  - the rule text is pinned anew;
+  - an arm reading its own prices cannot register as independent, and is gated on the close;
+  - the Friday market is frozen and scored.
+
+The unit suite passes. The real-corpus odds tests pass: gate-2 coverage is 3,800 on the test decade.
+`pl compare` was smoke-run on both decades.
+
+### Next on the market-informed track
+
+Lagged-odds ratings is its first candidate. The step is the half-day falsifier on the tuning span
+only, then pre-registration as a family of one. The tuning span has bet365 prices only from 2002-03,
+so the falsifier has four tuning seasons, not six. Not started.

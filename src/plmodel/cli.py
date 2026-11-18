@@ -249,6 +249,25 @@ def _print_compare(payload: dict, report) -> None:
         print(f"{name:16}{pooled['rps']:>9.4f}{pooled['log_loss']:>10.4f}"
               f"{pooled['skill']:>8.1%}{draw:>10.5f}{vs_mkt:>11}   {vs_base}")
 
+    # The other markets, reported for every arm and never gated on (except the closing one for an
+    # arm that reads its own match's prices). Keeps the old close-based headline comparable.
+    diagnostics = {k: v for k, v in (market.get("diagnostics") or {}).items()
+                   if v.get("n_covered")}
+    if diagnostics:
+        print("\nother markets (reported; gap = arm RPS - market RPS on that market's rows):")
+        for family, info in diagnostics.items():
+            gaps = "   ".join(
+                f"{name} {block['vs_market_diagnostics'][family]['delta_rps']:+.4f}"
+                for name, block in payload["arms"].items()
+                if family in (block.get("vs_market_diagnostics") or {})
+            )
+            settled = f"({info['settlement']})"
+            print(f"  {family:17} n={info['n_covered']:>5,} {settled:11}   {gaps}")
+    tracks = {name: block.get("track") for name, block in payload["arms"].items()}
+    informed = [name for name, track in tracks.items() if track != "independent"]
+    if informed:
+        print(f"\nMARKET-INFORMED (reads bookmaker prices; never production): {', '.join(informed)}")
+
     if payload["verdicts"]:
         print("\nacceptance rule:")
         for line in payload["acceptance_rule"].splitlines():
@@ -264,7 +283,7 @@ def _print_compare(payload: dict, report) -> None:
             print(f"  {'':7} {'':16} gate2 {label[verdict['gate2_vs_market']]}"
                   f"   gate3 {label[verdict['gate3_family_wise']]}"
                   f"   gate4 {label[verdict['gate4_sensitivity']]}")
-            for key in ("gate3_reason", "gate4_reason"):
+            for key in ("gate2_reason", "gate3_reason", "gate4_reason"):
                 if verdict.get(key):
                     print(f"  {'':7} {'':16}   {verdict[key]}")
 

@@ -51,6 +51,8 @@ class OddsConfig:
     gate_benchmark: str
     diagnostic_benchmarks: tuple[str, ...]
     sum_tolerance: float
+    # Gate 2's benchmark for a market-informed arm that reads the forecast match's own prices.
+    informed_gate_benchmark: str = "avg_closing"
 
 
 @dataclass(frozen=True)
@@ -372,7 +374,8 @@ def load_config(path: Path | str | None = None) -> Config:
         raise ConfigError(f"config.yaml data section missing: {missing_data}")
 
     o = _section(raw, "odds")
-    odds_keys = ("devig_primary", "devig_sensitivity", "gate_benchmark", "sum_tolerance")
+    odds_keys = ("devig_primary", "devig_sensitivity", "gate_benchmark", "sum_tolerance",
+                 "informed_gate_benchmark")
     missing_odds = [k for k in odds_keys if k not in o]
     if missing_odds:
         raise ConfigError(f"config.yaml odds section missing: {missing_odds}")
@@ -439,6 +442,7 @@ def load_config(path: Path | str | None = None) -> Config:
             gate_benchmark=str(o["gate_benchmark"]),
             diagnostic_benchmarks=tuple(str(x) for x in (o.get("diagnostic_benchmarks") or ())),
             sum_tolerance=float(o["sum_tolerance"]),
+            informed_gate_benchmark=str(o["informed_gate_benchmark"]),
         ),
         backtest=BacktestConfig(
             prediction_division=str(b["prediction_division"]),

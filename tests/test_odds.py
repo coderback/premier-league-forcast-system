@@ -187,21 +187,19 @@ def corpus() -> pd.DataFrame:
 
 @pytest.mark.integration
 def test_gate_benchmark_coverage_on_the_real_corpus(corpus: pd.DataFrame) -> None:
-    """The gate-2 pool is 2,660 E0 matches from 2019/20 — the figure the plan committed to.
+    """The gate-2 pool is the whole test decade, 3,800 E0 matches.
 
-    Scoped to the test span, which is what 2,660 was always a statement about. It happened to
-    equal whole-corpus coverage only while the corpus stopped where the span does: `avg_closing`
-    starts in 2019/20 and the span ended in 2025/26, so every priced match fell inside it. The
-    first ingest of a live season parted them and the count became 2,710.
+    Since 2026-11-18 the gate benchmark is bet365's Friday line, priced from 2002/03, where the
+    previous one (`avg_closing`) covered 2,660 matches from 2019/20.
     """
     cfg = load_config()
     e0 = corpus[corpus["division"] == "E0"]
     span = cfg.backtest.test_span
     e0 = e0[e0["season"].between(span.first_season, span.last_season)]
     _, covered, n_invalid = resolve_family(e0, cfg.odds.gate_benchmark)
-    assert int(covered.sum()) == 2660
+    assert int(covered.sum()) == 3800
     assert n_invalid == 0
-    assert e0.loc[covered, "season"].min() == "2019-20"
+    assert e0.loc[covered, "season"].min() == span.first_season
 
 
 @pytest.mark.integration
@@ -278,6 +276,6 @@ def test_ingest_report_names_the_benchmark(corpus: pd.DataFrame) -> None:
     assert block["devig_primary"] == cfg.odds.devig_primary
     assert block["devig_sensitivity"] == cfg.odds.devig_sensitivity
     gate = block["families"][cfg.odds.gate_benchmark]
-    assert gate["settlement"] == "closing" and gate["n_priced"] > 0
+    assert gate["settlement"] == "pre-close" and gate["n_priced"] > 0
     # The discontinuity that disqualified Pinnacle shows up as a date, not just as prose.
     assert block["families"]["pinnacle_closing"]["last_priced"] == "2026-01-08"

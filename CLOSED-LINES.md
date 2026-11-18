@@ -28,9 +28,28 @@ below was measured against the plain model and is read in that light.
 - about **0.0022** is match news already in Friday's price;
 - about **0.0013** arrives after Friday.
 
-The gap to the Friday line is +0.0036. Whether the target should be the Friday line rather than the
-close is an open owner decision, as is using lagged odds (a form of the market as input). 2026-27 to
-date sits at +0.0055 after the cold-start correction (+0.0125 as shipped).
+2026-27 to date sits at +0.0055 after the cold-start correction (+0.0125 as shipped).
+
+**Decided 2026-11-18 by the owner: two tracks, and the Friday line as the target.**
+- **The independent track** reads match facts only, and production is always its best arm.
+- **The market-informed track** reads bookmaker prices. It must beat independent production under
+  the same four gates and never replaces it.
+- **Gate 2 is scored against bet365's Friday line**, which covers both decades.
+  - The model forecasts without team news, so this is the information-matched market.
+  - The close stays reported for every arm.
+  - The close is gate 2 for an arm that reads its own match's pre-close prices, because its input
+    cannot also be its yardstick.
+
+Corrected production's gaps, test decade:
+
+| market | gap |
+|---|---|
+| bet365 Friday (the gate) | +0.0041 |
+| Friday market average | +0.0035 |
+| the close | +0.0049 |
+
+On the sensitivity decade the gap to bet365 Friday is +0.0019, the first market comparison that
+decade has had. **A smaller headline is a fairer stick, not a better model.**
 
 The original gap was approximately the documented floor for a goals-only public-data
 model — Pitcan (2026) gets +0.0067 on Serie A with an overlapping interval, and this project
@@ -191,6 +210,8 @@ kickoff time              2019/20 →   TEST ONLY
 xG                     2015–2024 →   NEITHER decade fully; un-gateable
 ```
 
-**Note for gate 2:** `avg_closing` covers the sensitivity decade at 0%, but `bet365` and
-`betbrain_avg` cover it at 100%. Gate 2 there is a *policy* question about mixing settlement
-timings, not a coverage one.
+**Note for gate 2:** since 2026-11-18 gate 2 is scored against `bet365`'s Friday line, which covers
+both decades at 100%, so it is evaluable on the sensitivity decade for the first time. `avg_closing`
+(0% on that decade) is reported, not gated. Gate 2 compares an arm's gap with the baseline's on the
+same rows, so the benchmark cancels out of the verdict. Changing it changed coverage, not which arms
+pass.

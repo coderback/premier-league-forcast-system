@@ -119,7 +119,7 @@ def freeze_matchday(
     not frozen, and silently replacing one would destroy the only thing this file is for.
     """
     from plmodel.eval.backtest import Split
-    from plmodel.eval.compare import ArmContext, ArmSpec, _REGISTRY
+    from plmodel.eval.compare import ArmContext, ArmSpec, _REGISTRY, arm_track
 
     barrier = next_barrier(fixtures) if barrier is None else pd.Timestamp(barrier)
     if barrier is None:
@@ -154,6 +154,7 @@ def freeze_matchday(
             _REGISTRY[spec.forecaster](ArmContext(split, day, train, cfg, state)), dtype=float
         )
         forecasts[spec.name] = probs
+    markets = _markets_at_freeze(day, cfg)
 
     block = {
         "barrier": str(barrier.date()),
@@ -166,6 +167,7 @@ def freeze_matchday(
         "train_last_date": str(pd.Timestamp(train["date"].max()).date()) if len(train) else None,
         "staleness_check": staleness_check,
         "arms": list(forecasts),
+        "tracks": {name: arm_track(name).track for name in forecasts},
         "acceptance_rule": cfg.acceptance_rule,
         "fixtures": [
             {
@@ -174,6 +176,9 @@ def freeze_matchday(
                 "away_team": row.away_team,
                 "forecasts": {
                     arm: [float(x) for x in probs[i]] for arm, probs in forecasts.items()
+                },
+                "market_at_freeze": {
+                    family: value[i] for family, value in markets.items() if value[i] is not None
                 },
             }
             for i, row in enumerate(day.itertuples(index=False))
@@ -189,6 +194,39 @@ def freeze_matchday(
         )
     path.write_text(json.dumps(block, indent=2), encoding="utf-8")
     return path, block
+
+
+def _markets_at_freeze(day: pd.DataFrame, cfg: Config) -> dict[str, list[dict | None]]:
+    """The pre-close prices the feed carried for each fixture when it was frozen, de-vigged.
+
+    The gate benchmark is the Friday line, and the only Friday line that matches a live forecast
+    exactly is the one that existed when the forecast was frozen: the season file is published
+    later and its pre-close columns may be a different snapshot. So the prices are written into the
+    frozen file beside the forecasts, raw and de-vigged, and the ledger is scored against them.
+    Families the feed does not carry, or did not price, are left out rather than filled.
+    """
+    from plmodel.data.odds import FAMILIES, OddsError, market_probabilities
+
+    names = [cfg.odds.gate_benchmark, *cfg.odds.diagnostic_benchmarks]
+    out: dict[str, list[dict | None]] = {}
+    for name in dict.fromkeys(names):
+        family = FAMILIES.get(name)
+        if family is None or family.is_closing or not set(family.columns) <= set(day.columns):
+            continue
+        try:
+            probs = market_probabilities(day, name, cfg.odds.devig_primary,
+                                         sum_tolerance=cfg.odds.sum_tolerance)
+        except OddsError:
+            continue
+        raw = day.loc[:, list(family.columns)].to_numpy(dtype=float)
+        out[name] = [
+            None if np.isnan(probs["p_home"].iloc[i]) else {
+                "odds": [float(x) for x in raw[i]],
+                "probs": [float(probs[c].iloc[i]) for c in ("p_home", "p_draw", "p_away")],
+            }
+            for i in range(len(day))
+        ]
+    return out
 
 
 def commit_frozen(path: Path) -> dict[str, object]:
@@ -294,6 +332,20 @@ def score_ledger(ledger_dir: Path, results: pd.DataFrame) -> pd.DataFrame:
                         "away_team": fixture["away_team"],
                         "result": played[key],
                         "arm": arm,
+                        "rps": float(metrics.rps(p, outcome)[0]),
+                    }
+                )
+            # The Friday market as it stood at the freeze, scored on the same footing: the
+            # information-matched yardstick for every arm in the file.
+            for family, priced in (fixture.get("market_at_freeze") or {}).items():
+                p = np.asarray([priced["probs"]], dtype=float)
+                rows.append(
+                    {
+                        "barrier": block["barrier"],
+                        "home_team": fixture["home_team"],
+                        "away_team": fixture["away_team"],
+                        "result": played[key],
+                        "arm": f"market:{family} (at freeze)",
                         "rps": float(metrics.rps(p, outcome)[0]),
                     }
                 )

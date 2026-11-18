@@ -44,14 +44,21 @@ acceptance_rule: |
   Accept a candidate change iff ALL FOUR:
     (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable
         (95% CI excludes 0, OR P(better) >= 0.95), AND
-    (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade
-        (where the market covers no match, this gate is NOT EVALUABLE, which is not a pass
-        and not a failure), AND
+    (2) its delta vs the Shin de-vigged FRIDAY market (odds.gate_benchmark, priced when the
+        model forecasts) on the odds-covered subset does not degrade (where the market covers
+        no match, this gate is NOT EVALUABLE, which is not a pass and not a failure). An arm
+        that reads the forecast match's own pre-close prices is gated against the CLOSING
+        market (odds.informed_gate_benchmark) instead, because its input cannot be its
+        yardstick. The closing market is reported for every arm, AND
     (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at
         backtest.fdr_alpha, on the Diebold-Mariano p-values, AND
     (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.
         A single-span run therefore cannot accept anything.
   An accepted variant earns a hyperparameter retune BEFORE production wiring.
+  TWO TRACKS. An arm is INDEPENDENT (goals, shots, dates and other match facts only) or
+  MARKET-INFORMED (it reads any bookmaker price). Production is always the best independent
+  arm. A market-informed arm must beat independent production under these same four gates, is
+  always reported under its track's name, and never becomes production.
 
 # Explicit seed for every stochastic step (bootstrap resampling, Monte Carlo season sim).
 # Value = the 2026/27 Premier League opening date, chosen only to be memorable and fixed.
@@ -114,16 +121,27 @@ odds:
   devig_primary: shin
   devig_sensitivity: proportional
 
-  # The acceptance rule's gate 2 is scored against this family. Chosen over the sharper Pinnacle
-  # closing line because Pinnacle's feed stops after 2026-01-08: a benchmark that dies mid-season
-  # cannot judge a model that has to score the 2026/27 season. Gate 1 keeps the full decade; the
-  # rule scopes gate 2 to "the odds-covered subset", so the two pools differ by design.
-  gate_benchmark: avg_closing
+  # The acceptance rule's gate 2 is scored against this family: bet365's pre-close price, which
+  # football-data.co.uk collects on Friday afternoon (Tuesday for midweek rounds). Changed from
+  # avg_closing on 2026-11-18 by the owner's decision (NOTES.md):
+  #   - it is INFORMATION-MATCHED: the model forecasts before kickoff without team news, and the
+  #     closing line holds news that arrives after Friday (about 0.0013 of the 0.0050 gap);
+  #   - it covers BOTH decades at 100% (2002/03 onward), where avg_closing starts in 2019/20, so
+  #     gate 2 becomes evaluable on the sensitivity decade for the first time.
+  # Gate 2 compares an arm's gap with the baseline's on the same rows, so the benchmark cancels
+  # out of the verdict; what changes is how many seasons it covers and the headline gap
+  # (test decade +0.0041 to this line, +0.0049 to the close: a fairer stick, not a better model).
+  gate_benchmark: bet365
 
-  # Reported alongside the gate, never as it. Pinnacle reaches back to 2012/13 (3,630 of the 3,800
-  # test-decade matches vs avg_closing's 2,660) and is the sharper line, so a disagreement between
-  # the two is worth seeing rather than hiding.
-  diagnostic_benchmarks: [pinnacle_closing]
+  # Gate 2's benchmark for an arm that reads the forecast match's own pre-close prices: its input
+  # cannot also be its yardstick, so it is judged against the market's last word instead.
+  informed_gate_benchmark: avg_closing
+
+  # Reported alongside the gate, never as it, for every arm:
+  #   avg_preclose      the Friday market average, 2019/20 on (+0.0035 on the test decade)
+  #   avg_closing       the close, the previous gate benchmark, kept so the old headline survives
+  #   pinnacle_closing  the sharpest single book, 2012/13 to 2026-01-08
+  diagnostic_benchmarks: [avg_preclose, avg_closing, pinnacle_closing]
 
   # De-vigged probabilities must sum to 1. Tight because the de-vig is exact arithmetic followed by
   # an explicit renormalisation, not an approximation — anything above float noise is a bug.

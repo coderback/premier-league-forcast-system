@@ -17,14 +17,21 @@ from plmodel.config import DEFAULT_CONFIG_PATH, Config, ConfigError, load_config
 EXPECTED_ACCEPTANCE_RULE = """Accept a candidate change iff ALL FOUR:
   (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable
       (95% CI excludes 0, OR P(better) >= 0.95), AND
-  (2) its delta vs the Shin de-vigged market on the odds-covered subset does not degrade
-      (where the market covers no match, this gate is NOT EVALUABLE, which is not a pass
-      and not a failure), AND
+  (2) its delta vs the Shin de-vigged FRIDAY market (odds.gate_benchmark, priced when the
+      model forecasts) on the odds-covered subset does not degrade (where the market covers
+      no match, this gate is NOT EVALUABLE, which is not a pass and not a failure). An arm
+      that reads the forecast match's own pre-close prices is gated against the CLOSING
+      market (odds.informed_gate_benchmark) instead, because its input cannot be its
+      yardstick. The closing market is reported for every arm, AND
   (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at
       backtest.fdr_alpha, on the Diebold-Mariano p-values, AND
   (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.
       A single-span run therefore cannot accept anything.
-An accepted variant earns a hyperparameter retune BEFORE production wiring."""
+An accepted variant earns a hyperparameter retune BEFORE production wiring.
+TWO TRACKS. An arm is INDEPENDENT (goals, shots, dates and other match facts only) or
+MARKET-INFORMED (it reads any bookmaker price). Production is always the best independent
+arm. A market-informed arm must beat independent production under these same four gates, is
+always reported under its track's name, and never becomes production."""
 
 
 @pytest.fixture(scope="module")
@@ -44,7 +51,8 @@ def test_acceptance_rule_states_every_gate(cfg: Config) -> None:
     """A rule that lost a gate would still load; these assert it still says what it must."""
     rule = cfg.acceptance_rule
     assert "paired-bootstrap RPS delta vs baseline" in rule      # gate 1
-    assert "Shin de-vigged market" in rule                       # gate 2
+    assert "Shin de-vigged FRIDAY market" in rule                # gate 2
+    assert "CLOSING" in rule and "TWO TRACKS" in rule
     assert "does not degrade" in rule
     assert "Benjamini-Hochberg" in rule                          # gate 3
     assert "SENSITIVITY span does not contradict" in rule        # gate 4
@@ -82,11 +90,16 @@ def test_odds_section(cfg: Config) -> None:
     assert cfg.odds.sum_tolerance > 0
 
 
-def test_gate_benchmark_is_a_closing_line(cfg: Config) -> None:
-    """A pre-close benchmark would measure the model against a stale market."""
+def test_gate_benchmark_is_the_information_matched_friday_line(cfg: Config) -> None:
+    """Changed 2026-11-18 by the owner's decision. The model forecasts without team news, and the
+    closing line carries news that arrives after Friday, so the gate is scored against the Friday
+    line. The close is kept as a reported diagnostic, and it is gate 2 for an arm that reads its
+    own match's pre-close prices, whose input cannot also be its yardstick."""
     from plmodel.data.odds import FAMILIES
 
-    assert FAMILIES[cfg.odds.gate_benchmark].is_closing
+    assert not FAMILIES[cfg.odds.gate_benchmark].is_closing
+    assert FAMILIES[cfg.odds.informed_gate_benchmark].is_closing
+    assert "avg_closing" in cfg.odds.diagnostic_benchmarks
 
 
 def test_backtest_section(cfg: Config) -> None:
