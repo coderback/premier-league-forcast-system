@@ -1,0 +1,440 @@
+{
+  "barrier": "2026-11-21",
+  "frozen_at": "2026-11-21T00:50:39.629267+00:00",
+  "division": "E0",
+  "n_fixtures": 7,
+  "n_train_matches": 12804,
+  "n_excluded_same_day": 0,
+  "n_pending_before_barrier": 0,
+  "train_last_date": "2026-11-08",
+  "staleness_check": {
+    "checked": true,
+    "corpus_last_result": "2026-11-08",
+    "source_last_result": "2026-11-08",
+    "summary": "source has results through 2026-11-08, corpus through 2026-11-08 - current"
+  },
+  "arms": [
+    "dc+sot-form",
+    "odds-ratings",
+    "dixon-coles",
+    "home-rate",
+    "uniform"
+  ],
+  "tracks": {
+    "dc+sot-form": "independent",
+    "odds-ratings": "market-informed",
+    "dixon-coles": "independent",
+    "home-rate": "independent",
+    "uniform": "independent"
+  },
+  "arm_errors": {},
+  "acceptance_rule": "Accept a candidate change iff ALL FOUR:\n  (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable\n      (95% CI excludes 0, OR P(better) >= 0.95), AND\n  (2) its delta vs the Shin de-vigged FRIDAY market (odds.gate_benchmark, priced when the\n      model forecasts) on the odds-covered subset does not degrade (where the market covers\n      no match, this gate is NOT EVALUABLE, which is not a pass and not a failure). An arm\n      that reads the forecast match's own pre-close prices is gated against the CLOSING\n      market (odds.informed_gate_benchmark) instead, because its input cannot be its\n      yardstick. The closing market is reported for every arm, AND\n  (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at\n      backtest.fdr_alpha, on the Diebold-Mariano p-values, AND\n  (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.\n      A single-span run therefore cannot accept anything.\nAn accepted variant earns a hyperparameter retune BEFORE production wiring.\nTWO TRACKS. An arm is INDEPENDENT (goals, shots, dates and other match facts only) or\nMARKET-INFORMED (it reads any bookmaker price). Production is always the best independent\narm. A market-informed arm must beat independent production under these same four gates, is\nalways reported under its track's name, and never becomes production.",
+  "fixtures": [
+    {
+      "date": "2026-11-21",
+      "home_team": "Aston Villa",
+      "away_team": "Sunderland",
+      "forecasts": {
+        "dc+sot-form": [
+          0.4275818312635007,
+          0.2844511815656861,
+          0.2879669871708132
+        ],
+        "odds-ratings": [
+          0.47923539866501114,
+          0.2734080224290372,
+          0.2473565789059517
+        ],
+        "dixon-coles": [
+          0.5045137855956493,
+          0.26825665145942656,
+          0.22722956294492402
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            1.75,
+            3.8,
+            4.5
+          ],
+          "probs": [
+            0.5494581868931203,
+            0.24543348008944352,
+            0.20510833301743606
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            1.76,
+            3.77,
+            4.34
+          ],
+          "probs": [
+            0.543585767987621,
+            0.24533322976175312,
+            0.21108100225062568
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "home_team": "Bournemouth",
+      "away_team": "Nott'm Forest",
+      "forecasts": {
+        "dc+sot-form": [
+          0.45703007297529197,
+          0.2615988664550549,
+          0.2813710605696532
+        ],
+        "odds-ratings": [
+          0.4611436643644559,
+          0.27199688449341375,
+          0.2668594511421303
+        ],
+        "dixon-coles": [
+          0.4376908817194729,
+          0.2626958303494486,
+          0.29961328793107844
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            1.91,
+            3.5,
+            4.0
+          ],
+          "probs": [
+            0.5013378733435776,
+            0.2669156554675476,
+            0.23174647118887481
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            1.93,
+            3.54,
+            3.78
+          ],
+          "probs": [
+            0.4938254138509624,
+            0.26190473902989275,
+            0.24426984711914482
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "home_team": "Chelsea",
+      "away_team": "Leeds",
+      "forecasts": {
+        "dc+sot-form": [
+          0.4764764661363937,
+          0.2555795903625216,
+          0.2679439435010848
+        ],
+        "odds-ratings": [
+          0.566830694976499,
+          0.23523998431431614,
+          0.1979293207091849
+        ],
+        "dixon-coles": [
+          0.5641784256103288,
+          0.23356199007577083,
+          0.20225958431390012
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            1.85,
+            3.7,
+            4.0
+          ],
+          "probs": [
+            0.5175024132997086,
+            0.2512241260139283,
+            0.2312734606863631
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            1.87,
+            3.66,
+            3.89
+          ],
+          "probs": [
+            0.5102324292858695,
+            0.2528250125263702,
+            0.23694255818776025
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "home_team": "Coventry",
+      "away_team": "Crystal Palace",
+      "forecasts": {
+        "dc+sot-form": [
+          0.4818645403691139,
+          0.2653126916505692,
+          0.25282276798031683
+        ],
+        "odds-ratings": [
+          0.3656032555956111,
+          0.2674011544284549,
+          0.36699558997593407
+        ],
+        "dixon-coles": [
+          0.44862920494375425,
+          0.26934118292021353,
+          0.28202961213603217
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            2.5,
+            3.5,
+            2.75
+          ],
+          "probs": [
+            0.3829376003909122,
+            0.27004931328019777,
+            0.3470130863288901
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            2.42,
+            3.5,
+            2.73
+          ],
+          "probs": [
+            0.3905445749353939,
+            0.2650901816344662,
+            0.34436524343013986
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "home_team": "Man City",
+      "away_team": "Fulham",
+      "forecasts": {
+        "dc+sot-form": [
+          0.6752161549440724,
+          0.1968245411971358,
+          0.12795930385879173
+        ],
+        "odds-ratings": [
+          0.717064737580463,
+          0.17083956793107694,
+          0.1120956944884601
+        ],
+        "dixon-coles": [
+          0.7183202387560084,
+          0.17648623492970614,
+          0.10519352631428527
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            1.36,
+            5.25,
+            7.0
+          ],
+          "probs": [
+            0.7061389971845583,
+            0.1702327965137002,
+            0.12362820630174139
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            1.37,
+            5.13,
+            7.17
+          ],
+          "probs": [
+            0.7026442197833953,
+            0.17586281640415619,
+            0.12149296381244849
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "home_team": "Newcastle",
+      "away_team": "Arsenal",
+      "forecasts": {
+        "dc+sot-form": [
+          0.19942789012490675,
+          0.24142663925344549,
+          0.5591454706216478
+        ],
+        "odds-ratings": [
+          0.17156618553290826,
+          0.22469526007217985,
+          0.6037385543949119
+        ],
+        "dixon-coles": [
+          0.2449908907793743,
+          0.255500489972879,
+          0.49950861924774664
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            5.75,
+            4.2,
+            1.57
+          ],
+          "probs": [
+            0.15973967821378843,
+            0.2230700309207127,
+            0.6171902908654988
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            5.46,
+            4.12,
+            1.57
+          ],
+          "probs": [
+            0.164882161838312,
+            0.22342176818420686,
+            0.611696069977481
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-21",
+      "home_team": "Tottenham",
+      "away_team": "Ipswich",
+      "forecasts": {
+        "dc+sot-form": [
+          0.6969708251933315,
+          0.1745172999670601,
+          0.12851187483960852
+        ],
+        "odds-ratings": [
+          0.618940669899053,
+          0.21570679590461078,
+          0.16535253419633617
+        ],
+        "dixon-coles": [
+          0.6775545059195244,
+          0.1811607763904772,
+          0.1412847176899985
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            1.53,
+            4.33,
+            5.5
+          ],
+          "probs": [
+            0.6266845480434305,
+            0.21076648475306245,
+            0.16254896720350695
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            1.52,
+            4.42,
+            5.49
+          ],
+          "probs": [
+            0.630945331300568,
+            0.20616497025401712,
+            0.162889698445415
+          ]
+        }
+      }
+    }
+  ]
+}
