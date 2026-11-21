@@ -8702,3 +8702,75 @@ the descent oscillates.
 - **Rehearsed on the real corpus** with a made-up fixture list in a scratch folder: all five arms
   froze in 11 s, with no errors and the Friday prices recorded. Nothing was committed.
 - Two unit tests cover the skip and the default set. The unit suite passes.
+
+---
+
+## 2026-11-21 — DIAGNOSTIC: why production's gap to the Friday line doubled between the decades
+
+Production's gap to bet365's Friday line is **+0.0019 on 2006-16 and +0.0041 on 2016-26**. The
+question: has the model lost ground, or has the market got sharper? This is a diagnostic only: no
+arm, no gate, nothing changes. Script and outputs are in `docs/plans/2026-11-21-gap-diagnostic/`
+(git-ignored).
+
+### Method
+
+The gap splits into two parts:
+- **strength:** production minus `odds-ratings`. `odds-ratings` knows the market's view of team
+  strength from earlier matches.
+- **news:** `odds-ratings` minus the Friday line, i.e. what the market knows about this match
+  specifically.
+
+"Skill" is a forecast's improvement on a uniform 1/3-1/3-1/3. "Share captured" is the model's skill
+over the market's, which corrects for a league that may simply have become more or less
+predictable. Decade differences come with a season bootstrap.
+
+### Result
+
+| | 2006-16 | 2016-26 | change | season-bootstrap 95% CI |
+|---|---|---|---|---|
+| gap to the Friday line | +0.0019 | +0.0041 | +0.0023 | [−0.0001, +0.0046] |
+| strength part | +0.0008 | +0.0023 | +0.0015 | [−0.0010, +0.0039] |
+| news part | +0.0010 | +0.0019 | +0.0008 | [−0.0006, +0.0021] |
+| market's skill | 0.0415 | 0.0451 | +0.0036 | [−0.0064, +0.0135] |
+| model's skill | 0.0396 | 0.0409 | +0.0013 | [−0.0075, +0.0101] |
+| share of the market's skill captured | 95.5% | 90.8% | −4.6 pts | [−9.4, +0.2] |
+
+**Robustness, against a closing line both decades share** (Pinnacle close, 2012-16 against 2016-26):
+**+0.0030 → +0.0055.** The gap roughly doubles against the close as well. So the change is not an
+artefact of when football-data collected its "Friday" prices.
+
+### What it says
+
+1. **The model has not got worse.** Its own skill is flat to slightly up (0.0396 → 0.0409).
+2. **The market got better faster.** Its skill rose more (0.0415 → 0.0451), and the share the model
+   captures fell from 95.5% to 90.8%.
+3. **Both parts of the gap grew.**
+   - The strength part, which is what the market knows about teams from week to week, grew most:
+     0.0008 → 0.0023.
+   - The news part, which is what it knows about this match, grew from 0.0010 to 0.0019.
+   The market has improved at exactly the two things this project's data cannot see: squad and
+   manager changes, and team news.
+4. **It is borderline, not resolved.** Every change's season-bootstrap interval just includes zero,
+   because ten seasons a side cannot separate a trend from noise. The direction is consistent
+   across both parts and both benchmarks; the size is not established.
+
+### Seasons that stand out (gap to the Friday line)
+
+- **2013-14 (+0.0065), almost all strength (+0.0066).** This is the season of the shots-on-target
+  redefinition (2026-11-18 entry). The form term read two scales that season, and the
+  harmonisation the review measured recovered about −0.0013 of it.
+- **2016-17 (+0.0098), mostly strength (+0.0067).** Every model in this project lags a summer of
+  large managerial change. The market priced it in at once; goals and shots took months.
+- **2022-23 and 2023-24 (+0.0070, +0.0067).** Both parts are elevated.
+- **The model is level with or ahead of the market in 2008-09, 2012-13, 2015-16 and 2019-20.** In
+  2015-16 (Leicester's season) the strength part is −0.0057: the market's view of the clubs was
+  more wrong than the goals were.
+
+### The consequence for what to work on
+
+- **The independent model's gap is not something to fix by modelling goals and shots better.** On
+  that data the model keeps pace with the game, and the evidence of this whole ledger agrees.
+- **What widened the gap is information the project does not hold:** squad and manager changes
+  (the strength part) and team news (the news part).
+- **Line-up data is aimed at both.** It is the one route that could reverse the trend for either
+  track.
