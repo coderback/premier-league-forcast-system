@@ -1,0 +1,150 @@
+{
+  "barrier": "2026-11-22",
+  "frozen_at": "2026-11-21T00:50:47.063082+00:00",
+  "division": "E0",
+  "n_fixtures": 2,
+  "n_train_matches": 12804,
+  "n_excluded_same_day": 0,
+  "n_pending_before_barrier": 7,
+  "train_last_date": "2026-11-08",
+  "staleness_check": {
+    "checked": true,
+    "corpus_last_result": "2026-11-08",
+    "source_last_result": "2026-11-08",
+    "summary": "source has results through 2026-11-08, corpus through 2026-11-08 - current"
+  },
+  "arms": [
+    "dc+sot-form",
+    "odds-ratings",
+    "dixon-coles",
+    "home-rate",
+    "uniform"
+  ],
+  "tracks": {
+    "dc+sot-form": "independent",
+    "odds-ratings": "market-informed",
+    "dixon-coles": "independent",
+    "home-rate": "independent",
+    "uniform": "independent"
+  },
+  "arm_errors": {},
+  "acceptance_rule": "Accept a candidate change iff ALL FOUR:\n  (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable\n      (95% CI excludes 0, OR P(better) >= 0.95), AND\n  (2) its delta vs the Shin de-vigged FRIDAY market (odds.gate_benchmark, priced when the\n      model forecasts) on the odds-covered subset does not degrade (where the market covers\n      no match, this gate is NOT EVALUABLE, which is not a pass and not a failure). An arm\n      that reads the forecast match's own pre-close prices is gated against the CLOSING\n      market (odds.informed_gate_benchmark) instead, because its input cannot be its\n      yardstick. The closing market is reported for every arm, AND\n  (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at\n      backtest.fdr_alpha, on the Diebold-Mariano p-values, AND\n  (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.\n      A single-span run therefore cannot accept anything.\nAn accepted variant earns a hyperparameter retune BEFORE production wiring.\nTWO TRACKS. An arm is INDEPENDENT (goals, shots, dates and other match facts only) or\nMARKET-INFORMED (it reads any bookmaker price). Production is always the best independent\narm. A market-informed arm must beat independent production under these same four gates, is\nalways reported under its track's name, and never becomes production.",
+  "fixtures": [
+    {
+      "date": "2026-11-22",
+      "home_team": "Hull",
+      "away_team": "Brighton",
+      "forecasts": {
+        "dc+sot-form": [
+          0.2318426795523513,
+          0.24780418664334497,
+          0.5203531338043038
+        ],
+        "odds-ratings": [
+          0.18408738251393372,
+          0.22889994139192613,
+          0.5870126760941401
+        ],
+        "dixon-coles": [
+          0.343453631275568,
+          0.26495057078059414,
+          0.39159579794383764
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            6.5,
+            4.33,
+            1.5
+          ],
+          "probs": [
+            0.13923110090159968,
+            0.2152253957196165,
+            0.6455435033787839
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            6.22,
+            4.41,
+            1.48
+          ],
+          "probs": [
+            0.14276040055170514,
+            0.2075565664844034,
+            0.6496830329638914
+          ]
+        }
+      }
+    },
+    {
+      "date": "2026-11-22",
+      "home_team": "Liverpool",
+      "away_team": "Man United",
+      "forecasts": {
+        "dc+sot-form": [
+          0.5189666119274551,
+          0.23568418676702388,
+          0.24534920130552113
+        ],
+        "odds-ratings": [
+          0.5103709946304535,
+          0.24377963617830392,
+          0.24584936919124253
+        ],
+        "dixon-coles": [
+          0.5782562059292135,
+          0.21908618163869462,
+          0.20265761243209188
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            1.7,
+            4.2,
+            4.33
+          ],
+          "probs": [
+            0.5658552538086166,
+            0.22059237569022966,
+            0.21355237050115378
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            1.74,
+            4.14,
+            4.08
+          ],
+          "probs": [
+            0.5509653988724836,
+            0.2227699326952954,
+            0.22626466843222104
+          ]
+        }
+      }
+    }
+  ]
+}
