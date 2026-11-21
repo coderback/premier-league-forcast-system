@@ -1,0 +1,92 @@
+{
+  "barrier": "2026-11-23",
+  "frozen_at": "2026-11-21T00:50:54.237540+00:00",
+  "division": "E0",
+  "n_fixtures": 1,
+  "n_train_matches": 12804,
+  "n_excluded_same_day": 0,
+  "n_pending_before_barrier": 9,
+  "train_last_date": "2026-11-08",
+  "staleness_check": {
+    "checked": true,
+    "corpus_last_result": "2026-11-08",
+    "source_last_result": "2026-11-08",
+    "summary": "source has results through 2026-11-08, corpus through 2026-11-08 - current"
+  },
+  "arms": [
+    "dc+sot-form",
+    "odds-ratings",
+    "dixon-coles",
+    "home-rate",
+    "uniform"
+  ],
+  "tracks": {
+    "dc+sot-form": "independent",
+    "odds-ratings": "market-informed",
+    "dixon-coles": "independent",
+    "home-rate": "independent",
+    "uniform": "independent"
+  },
+  "arm_errors": {},
+  "acceptance_rule": "Accept a candidate change iff ALL FOUR:\n  (1) its paired-bootstrap RPS delta vs baseline on the TEST pool is favourable\n      (95% CI excludes 0, OR P(better) >= 0.95), AND\n  (2) its delta vs the Shin de-vigged FRIDAY market (odds.gate_benchmark, priced when the\n      model forecasts) on the odds-covered subset does not degrade (where the market covers\n      no match, this gate is NOT EVALUABLE, which is not a pass and not a failure). An arm\n      that reads the forecast match's own pre-close prices is gated against the CLOSING\n      market (odds.informed_gate_benchmark) instead, because its input cannot be its\n      yardstick. The closing market is reported for every arm, AND\n  (3) it survives Benjamini-Hochberg across its own pre-registered family of arms, at\n      backtest.fdr_alpha, on the Diebold-Mariano p-values, AND\n  (4) the SENSITIVITY span does not contradict it: P(better) there >= 0.5.\n      A single-span run therefore cannot accept anything.\nAn accepted variant earns a hyperparameter retune BEFORE production wiring.\nTWO TRACKS. An arm is INDEPENDENT (goals, shots, dates and other match facts only) or\nMARKET-INFORMED (it reads any bookmaker price). Production is always the best independent\narm. A market-informed arm must beat independent production under these same four gates, is\nalways reported under its track's name, and never becomes production.",
+  "fixtures": [
+    {
+      "date": "2026-11-23",
+      "home_team": "Brentford",
+      "away_team": "Everton",
+      "forecasts": {
+        "dc+sot-form": [
+          0.40059108113538977,
+          0.2848749378327991,
+          0.31453398103181124
+        ],
+        "odds-ratings": [
+          0.5029790691345795,
+          0.2544570882924819,
+          0.24256384257293861
+        ],
+        "dixon-coles": [
+          0.4802424548454378,
+          0.2714860158446342,
+          0.24827152930992796
+        ],
+        "home-rate": [
+          0.45602936582318027,
+          0.2556232427366448,
+          0.28834739144017496
+        ],
+        "uniform": [
+          0.3333333333333333,
+          0.3333333333333333,
+          0.3333333333333333
+        ]
+      },
+      "market_at_freeze": {
+        "bet365": {
+          "odds": [
+            2.15,
+            3.5,
+            3.3
+          ],
+          "probs": [
+            0.4456609908186175,
+            0.26862926610882293,
+            0.28570974307255964
+          ]
+        },
+        "avg_preclose": {
+          "odds": [
+            2.12,
+            3.51,
+            3.26
+          ],
+          "probs": [
+            0.448769849666132,
+            0.26486616940274643,
+            0.28636398093112153
+          ]
+        }
+      }
+    }
+  ]
+}
