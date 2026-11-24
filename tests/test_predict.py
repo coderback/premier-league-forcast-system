@@ -222,3 +222,37 @@ def test_a_csv_missing_its_columns_says_which(tmp_path) -> None:
     path.write_text("home,away\nArsenal,Coventry\n", encoding="utf-8")
     with pytest.raises(ValueError, match="away_team"):
         _parse_fixtures(_args(file=str(path)))
+
+
+def test_the_market_informed_forecast_matches_what_the_live_freeze_records(tmp_path) -> None:
+    """`pl predict --arm odds-ratings-ou` and the frozen `odds-ratings-ou` forecast are one model:
+    the same ratings at the same date must give the same home/draw/away."""
+    import pandas as pd
+
+    from plmodel.cli import _odds_ratings_fit
+    from plmodel.config import load_config
+    from plmodel.eval.live import freeze_matchday
+
+    cfg = load_config()
+    rng = np.random.default_rng(11)
+    clubs = ["Arsenal", "Chelsea", "Everton", "Fulham"]
+    rows = []
+    for d in range(20):
+        day = pd.Timestamp("2026-08-01") + pd.Timedelta(days=7 * d)
+        for k in range(2):
+            h, a = clubs[(d + 2 * k) % 4], clubs[(d + 2 * k + 1) % 4]
+            rows.append({"date": day, "season": "2026-27", "division": "E0", "home_team": h,
+                         "away_team": a, "result": "H", "home_goals": 1.0, "away_goals": 0.0,
+                         "B365H": rng.uniform(1.6, 3.5), "B365D": 3.4, "B365A": rng.uniform(2.0, 5.0),
+                         "B365>2.5": rng.uniform(1.6, 2.2), "B365<2.5": rng.uniform(1.6, 2.2)})
+    history = pd.DataFrame(rows)
+    barrier = history["date"].max() + pd.Timedelta(days=7)
+    fixture = pd.DataFrame({"date": [barrier], "season": "2026-27", "division": "E0",
+                            "home_team": ["Arsenal"], "away_team": ["Chelsea"], "result": [None]})
+    _, block = freeze_matchday(fixture, history, cfg, tmp_path, arm_names=["odds-ratings-ou"])
+    frozen = np.array(block["fixtures"][0]["forecasts"]["odds-ratings-ou"])
+
+    ratings = _odds_ratings_fit(cfg, history, barrier, use_over_under=True)
+    lam, mu = ratings.rates(fixture["home_team"], fixture["away_team"])
+    grid = scoreline_matrix(lam, mu, np.zeros(1), cfg.model.max_goals)
+    np.testing.assert_allclose(collapse_three_class(grid)[0], frozen, atol=1e-12)

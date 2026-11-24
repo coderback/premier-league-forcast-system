@@ -38,6 +38,8 @@ _STALE_MULTIPLE = 3.0
 # `pl predict`'s derived markets: winning margins are shown up to "by 3 or more", and the
 # total-goals table up to "6 or more". Presentation only; every figure is read from the same grid.
 _MARGIN_CAP = 3
+# `pl predict --arm`: production, or a market-informed model (value: whether it reads over/under).
+_PREDICT_MARKET_ARMS = {"odds-ratings-ou": True, "odds-ratings": False}
 _TOTAL_GOALS_CAP = 6
 
 # `pl live` flags any frozen outcome below this probability. A warning only; the forecast is
@@ -959,7 +961,8 @@ def cmd_predict(args: argparse.Namespace) -> int:
         print("no fixtures given; use --fixtures, --file, or --home/--away", file=sys.stderr)
         return 2
 
-    fit = _season_fit(cfg, matches, ref)
+    market_informed = args.arm in _PREDICT_MARKET_ARMS
+    fit = None if market_informed else _season_fit(cfg, matches, ref)
     known = sorted(set(matches["home_team"]) | set(matches["away_team"]))
     aliases = load_aliases(cfg.static_dir)
     resolved: list[tuple[str, str]] = []
@@ -975,8 +978,13 @@ def cmd_predict(args: argparse.Namespace) -> int:
             print(f"read '{typed_h} v {typed_a}' as '{h} v {a}'")
 
     frame = pd.DataFrame([{"date": ref, "home_team": h, "away_team": a} for h, a in resolved])
-    lam, mu = fit.match_rates(frame, train)
-    rho, _ = clamp_rho_for_rates(lam, mu, fit.rho, margin=_PREDICT_RHO_MARGIN)
+    if market_informed:
+        ratings = _odds_ratings_fit(cfg, train, ref, use_over_under=_PREDICT_MARKET_ARMS[args.arm])
+        lam, mu = ratings.rates(frame["home_team"], frame["away_team"])
+        rho = np.zeros(len(frame))                          # the ratings forecast independent Poisson
+    else:
+        lam, mu = fit.match_rates(frame, train)
+        rho, _ = clamp_rho_for_rates(lam, mu, fit.rho, margin=_PREDICT_RHO_MARGIN)
     grid = scoreline_matrix(lam, mu, rho, cfg.model.max_goals)
     outcome = collapse_three_class(grid)
     over, under = totals_probability(grid, args.line)
@@ -992,10 +1000,19 @@ def cmd_predict(args: argparse.Namespace) -> int:
         handicap_probability(grid[i:i + 1], -args.handicap if home_favoured[i] else args.handicap)
         for i in range(len(resolved))
     ]
-    quality = _team_history(train, fit, ref, cfg)
+    # The evidence notes describe the production fit's cold-start rule, which the ratings do not use.
+    quality = ({c: "" for pair in resolved for c in pair} if market_informed
+               else _team_history(train, fit, ref, cfg))
 
     print(f"as of     : {ref.date()}   ({len(train):,} matches behind the barrier)")
-    print(f"half-life : {fit.half_life_days:.0f} days   home advantage {fit.home_advantage:+.4f}")
+    if market_informed:
+        print(f"model     : {args.arm} - MARKET-INFORMED: ratings from earlier matches' bookmaker "
+              "prices, never this match's; not production")
+        print(f"half-life : {cfg.odds_ratings.half_life_days:.0f} days   home advantage "
+              f"{ratings.home_advantage:+.4f}   ({ratings.n_obs:,} priced matches)")
+    else:
+        print(f"model     : {args.arm} (production, independent: goals, shots and dates only)")
+        print(f"half-life : {fit.half_life_days:.0f} days   home advantage {fit.home_advantage:+.4f}")
     for i, (h, a) in enumerate(resolved):
         print(f"\n{h} v {a}")
         print(f"  expected goals   {lam[i]:.2f} - {mu[i]:.2f}")
@@ -1035,6 +1052,8 @@ def cmd_predict(args: argparse.Namespace) -> int:
         "as_of": str(ref.date()),
         "n_train": int(len(train)),
         "line": args.line,
+        "model": args.arm,
+        "track": "market-informed" if market_informed else "independent",
         "fixtures": [
             {
                 "home_team": h, "away_team": a,
@@ -1089,6 +1108,18 @@ def cmd_predict(args: argparse.Namespace) -> int:
     print(f"\nHalf-time/full-time is not modelled — see `pl predict --help`.")
     print(f"report    : {out_path}")
     return 0
+
+
+def _odds_ratings_fit(cfg, train, ref, *, use_over_under: bool):
+    """The market-informed ratings at ``ref``, from the prices of matches before it only."""
+    from plmodel.model.odds_ratings import fit_odds_ratings, market_rates
+
+    oc = cfg.odds_ratings
+    rates = market_rates(train, oc.families, use_over_under=use_over_under,
+                         max_goals=cfg.model.max_goals, tolerance=oc.inversion_tolerance,
+                         max_iter=oc.inversion_max_iter)
+    return fit_odds_ratings(train, rates, ref_date=ref, half_life_days=oc.half_life_days,
+                            ridge=oc.ridge, lookback_days=oc.lookback_days)
 
 
 def _margin_label(margin: int, home: str, away: str) -> str:
@@ -1360,6 +1391,9 @@ def build_parser() -> argparse.ArgumentParser:
                     help="forecast as of this date (default: after the last match in the corpus)")
     pp.add_argument("--line", type=float, default=2.5, help="total-goals line (default 2.5)")
     pp.add_argument("--top", type=int, default=6, help="how many exact scores to list")
+    pp.add_argument("--arm", default="dc+sot-form",
+                    choices=["dc+sot-form", "odds-ratings-ou", "odds-ratings"],
+                    help="model to forecast with: production (default) or a market-informed model")
     pp.add_argument("--handicap", type=float, default=1.5,
                     help="goal handicap given to the favourite (default 1.5)")
     pp.add_argument("--out", default=None, help="report filename within the output directory")
