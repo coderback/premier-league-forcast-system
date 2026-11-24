@@ -9204,3 +9204,43 @@ same 1e-9 consistency check.
 
 Closed line: "fix the independent model's goal level". It is fixable, and worth a tenth of the
 gate's floor.
+
+---
+
+## 2026-11-24 — DIAGNOSTIC: lower-division markets are not softer for this model
+
+**The question:** the Premier League is the most heavily bet league, so its prices should be the
+sharpest. Is the model closer to the market in the Championship (E1), League One (E2) or League Two
+(E3)?
+
+**Method:**
+- Production (`dc+sot-form`) and `odds-ratings-ou`, walked on each division's own history with every
+  setting unchanged from the Premier League.
+- Each scored against that division's de-vigged bet365 Friday line and closing average.
+- Season-bootstrap intervals on the gaps.
+- Diagnostic only. Script and results in `docs/plans/2026-11-24-lower-divisions/` (git-ignored).
+
+| gap to bet365 Friday | E0 (reference) | E1 | E2 | E3 |
+|---|---|---|---|---|
+| production, test decade | +0.0041 | +0.0047 [+0.0028, +0.0062] | +0.0051 [+0.0037, +0.0065] | +0.0054 [+0.0037, +0.0068] |
+| production, sensitivity decade | +0.0019 | +0.0031 [+0.0015, +0.0047] | +0.0041 [+0.0035, +0.0046] | +0.0040 [+0.0029, +0.0052] |
+| `odds-ratings-ou`, test decade | +0.0018 | +0.0019 | +0.0022 | +0.0018 |
+| `odds-ratings-ou`, sensitivity decade | +0.0012 | +0.0009 | +0.0015 | +0.0017 |
+
+Against the closing average (test decade, 2019-20 on), production is +0.0044 (E1), +0.0069 (E2) and
++0.0066 (E3), against +0.0049 in E0. The market is ahead in 9 or 10 of 10 seasons in every division
+and decade.
+
+### What it shows
+
+1. **No lower division is softer.** Production is further behind the market in all three, on both
+   decades, every interval excluding zero.
+2. **The settings caveat does not rescue it.** `odds-ratings-ou` borrows the market's own view of
+   strength, so it is untouched by Premier League tuning. Its gap is the same size in every division
+   (+0.0018 to +0.0022). The market knows about the same amount of match-week news everywhere; lower
+   divisions are priced as efficiently, relative to what they know, as the top one.
+3. **Lower-division bookmakers take larger margins** (closing average 6.6% in E2 and E3, against
+   5.4% in E1). Once that margin is removed, the price underneath is no less accurate.
+
+**Closed line:** "lower divisions as softer markets". They are not softer for a goals-and-shots
+model, and not softer for the market-informed one either.
