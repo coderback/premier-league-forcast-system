@@ -8855,3 +8855,61 @@ Logs are in `docs/plans/2026-11-24-goal-markets/` (git-ignored); reports are
   cannot see it.
 - **Both teams to score:** there is no skill to protect and no market to judge against, so it is
   not worth targeting directly.
+
+---
+
+## 2026-11-24 — PRE-REGISTRATION: `odds-ratings-ou`, over/under prices in the market-informed ratings (tuning-span falsifier)
+
+Written and committed before any forecast of this candidate is scored. Only the price inversion has
+been run, which reads prices and no results.
+
+### Why
+
+The goal-market baseline (66b8b67) found that `odds-ratings` under-predicts goals by 9-13% and has
+little or no over/under skill, while being the best model on handicaps. The cause is its inversion:
+it fits independent-Poisson rates to each match's home and away probabilities, and independent
+Poisson gives too few draws, so matching the market's draw-heavy prices pulls both rates down.
+
+### The candidate
+
+Identical to `odds-ratings` (half-life 30 days, ridge 0.05, lookback 1,500 days, independent
+Poisson forecast) except for the inversion:
+- **Where a match has both a 1X2 and an over/under price:** the rates are the pair that reproduces
+  the **supremacy**, P(home) − P(away), and **P(over 2.5)**. The level then comes from the market
+  that prices it, and the draw is left to fall where the model puts it. Over/under prices are
+  pre-close (bet365, then Gamebookers, then the Betbrain average, then football-data's average),
+  proportionally de-vigged. They are 100% from 2002-03 and absent before.
+- **Otherwise:** the incumbent's 1X2-only inversion.
+
+The inversion check (prices only): 9,228 matches inverted to 1e-12. The implied goal level is 2.75 a
+match. The implied draw is 22.9% against the market's 24.7%. **That shortfall is the risk this
+candidate carries for home/draw/away.**
+
+### The falsifier, fixed now
+
+**Pool:** 2002-03..2005-06 (1,520 matches), as for the incumbent's falsifier. The incumbent is
+re-run with the same code.
+
+**Withdraw unless ALL THREE hold:**
+1. **Better on over/under:** over-2.5 Brier against the incumbent, delta < 0 with P(better) ≥ 0.5
+   (paired bootstrap).
+2. **No harm on home/draw/away:** RPS against the incumbent, delta ≤ +0.0002. That is the
+   cold-start correction's bar; a market-informed model that trades its 1X2 skill for totals is not
+   an improvement.
+3. **Placebo:** the over/under prices permuted among matches within each season, keeping each
+   match's own 1X2 price. The real candidate must beat the placebo on over-2.5 Brier (delta < 0,
+   P(better) ≥ 0.5).
+   - The placebo still gets the season's *average* goal level right, so it separates "fixing the
+     average level" from "knowing which matches will be high-scoring".
+   - Only the second is market information that the incumbent lacked.
+
+Reported, not gating:
+- the goal level;
+- every yardstick market (both teams to score, each side to score, clean sheets, total-goals RPS,
+  exact score);
+- handicaps against the Friday average where priced;
+- the same figures for production.
+
+**If it passes:** build `odds-ratings-ou` as a registered market-informed arm, then
+`pl compare --arms odds-ratings,odds-ratings-ou` on both decades plus `pl goals` on both. **If it
+fails:** withdrawn and recorded.
