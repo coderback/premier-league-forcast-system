@@ -9071,3 +9071,45 @@ registered bar. This is the draw shortfall the pre-registration named as the ris
   oscillation rule.
 - **Then:** `odds-ratings-ou` replaces `odds-ratings` in `pl live`'s frozen set. `odds-ratings` stays
   registered, so earlier numbers keep their meaning.
+
+---
+
+## 2026-11-24 — PRE-REGISTRATION: the retune `odds-ratings-ou` earned by acceptance
+
+The acceptance rule requires a retune before wiring. This one fixes what went wrong with
+`odds-ratings`' retune (2026-11-18): a cycle cap that was not registered, and no rule for a search
+that oscillates. Both are written here before the search runs.
+
+### The search
+
+- **Pool:** 2002-03..2005-06 (1,520 matches, 398 barriers) at `tuning_min_train_matches`. No
+  evaluation season is read.
+- **Axes:**
+  - half-life: {10, 15, 20, 30, 45, 60, 90} days;
+  - ridge: {0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5}.
+  - Lookback is not an axis (inert at these half-lives).
+- **Selection metric:** pooled home/draw/away RPS, the acceptance rule's metric.
+- **Coordinate descent** from the incumbent (30 days, 0.05): half-life at the current ridge, then
+  ridge at the winning half-life.
+- **Edge rule:** a winner on a grid edge extends that edge by one step, **at most twice per axis per
+  cycle**. A winner still on the edge after two extensions is recorded as "no interior optimum" for
+  that axis, and that axis keeps the incumbent's value.
+- **Stopping rule:** stop when a full cycle moves neither value. **Cycle cap: 4.**
+- **Oscillation rule:** if a cycle lands on a point already visited, or the cap is reached, the
+  search stops. The winner is then the lowest-RPS point among the cycle end-points visited.
+
+### The verdict, fixed now
+
+The winner is compared with the incumbent (30 days, 0.05). **The values move only if all three
+hold:**
+1. **Resolved by the conservative reading:** `selection_is_resolved`'s season-clustered interval
+   AND the t interval on the four season means both exclude zero on the favourable side. With four
+   clusters the percentile bootstrap alone is nearly degenerate (the 2026-11-18 lesson).
+2. **No harm on over/under:** the winner's over-2.5 Brier against the incumbent is ≤ 0 as a point
+   estimate. A retune chosen on home/draw/away must not give back the goal-market gain that earned
+   the acceptance.
+3. **At least one axis moved to an interior optimum.** A value at a grid edge does not move.
+
+**Otherwise the incumbent stands.** Either way, `odds-ratings-ou` then replaces `odds-ratings` in
+`pl live`'s default frozen set. If values move, the replacement uses the moved values, and both
+registered gate runs are repeated with them first.
