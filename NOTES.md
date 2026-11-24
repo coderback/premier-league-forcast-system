@@ -8774,3 +8774,84 @@ artefact of when football-data collected its "Friday" prices.
   (the strength part) and team news (the news part).
 - **Line-up data is aimed at both.** It is the one route that could reverse the trend for either
   track.
+
+---
+
+## 2026-11-24 — INSTRUMENT and BASELINE: the goal-market yardstick (`pl goals`)
+
+Every selection in this project was made on home/draw/away RPS, which is nearly blind to how many
+goals are scored. So the goal markets `pl predict` prints have never been measured. `pl goals`
+(eval/goal_markets.py, 704fef8) measures them for any arm whose forecast is a full scoreline
+distribution. It is measurement only, not a gate.
+
+It rebuilds each arm's scoreline grid from the fit the arm left behind, and checks the grid
+reproduces the arm's own home/draw/away to 1e-9, so the markets scored are the forecast the gates
+judged. "Skill" is improvement in Brier score over climatology, the base rate of the five seasons
+before the pool. Market comparisons use proportionally de-vigged two-way prices. Handicaps are
+scored on half-goal lines only (about 23% of priced matches), because whole and quarter lines can
+refund all or half the stake.
+
+Logs are in `docs/plans/2026-11-24-goal-markets/` (git-ignored); reports are
+`output/goals_<arm>_<span>.json`.
+
+### Baseline, test decade (2016-17..2025-26, 3,800 matches)
+
+| | `dc+sot-form` (production) | `dixon-coles` | `odds-ratings` |
+|---|---|---|---|
+| expected / scored total goals | 2.776 / 2.835 (**−2.1%**) | 2.773 / 2.835 | 2.582 / 2.835 (**−8.9%**) |
+| expected / scored away goals | 1.236 / 1.280 (**−3.4%**) | 1.235 / 1.280 | 1.138 / 1.280 |
+| over 2.5: skill over climatology | +1.8% | +1.7% | +0.4% |
+| both teams to score: skill | **+0.4%** | +0.4% | −0.8% |
+| each side to score / clean sheet: skill | +6.0 to 6.3% | +5.7 to 5.9% | +5.8 to 6.0% |
+| win to nil: skill | +7.0 / 7.9% | +6.5 / 7.4% | +7.0 / 8.2% |
+| total-goals RPS (climatology 0.1470) | 0.1448 | 0.1450 | 0.1463 |
+| exact-score log loss (climatology 3.0894) | **2.9358** | 2.9449 | 2.9388 |
+| over/under vs the Friday average: Brier gap, share of market skill | +0.0030, **60%** | +0.0032, 56% | +0.0065, **13%** |
+| over/under vs the close (n = 2,660) | +0.0030, 62% | +0.0033, 57% | +0.0056, 29% |
+| handicap vs the Friday average (half lines, n = 862) | +0.0052 | +0.0072 | **+0.0042** |
+
+### Baseline, sensitivity decade (2006-07..2015-16, 3,800 matches)
+
+| | production | `dixon-coles` | `odds-ratings` |
+|---|---|---|---|
+| expected / scored total goals | 2.619 / 2.677 (−2.2%) | 2.617 / 2.677 | 2.327 / 2.677 (**−13.1%**) |
+| over 2.5: skill | +0.5% | +0.4% | **−2.4%** |
+| both teams to score: skill | +0.5% | +0.5% | −2.5% |
+| over/under vs the Friday average: gap, share | +0.0038, **24%** | +0.0041, 19% | +0.0111, negative |
+| handicap vs the Friday average (n = 874) | +0.0011 | +0.0038 | **−0.0008** |
+
+### What it shows
+
+1. **Production under-predicts goals by about 2% on both decades, most of it away goals (−3%).**
+   This confirms the 2026-08-21 measurement with a second instrument. It is constant enough to be a
+   level error, not noise.
+2. **Production's over/under skill is small:** 60% of the market's on the test decade, 24% on the
+   sensitivity decade. Its skill over a base rate is 1.8% and 0.5%.
+3. **Both teams to score has essentially no skill for any model** (+0.4%). Nothing here knows more
+   than the base rate about whether both sides score. The data has no market for it to be judged
+   against.
+4. **Each-side-to-score, clean sheets and win to nil do have skill (6-8%).** Who scores against whom
+   is mostly a strength question, which the model answers well.
+5. **Exact scores beat climatology clearly** on both decades.
+6. **`odds-ratings` is good at margins and bad at totals.**
+   - It is the best of the three on handicaps: it beats the Friday market on the sensitivity
+     decade (−0.0008).
+   - It under-predicts goals by 9-13%, and its over/under skill is near zero or negative.
+   - The mechanism is the inversion. It fits independent-Poisson rates to reproduce each match's
+     home and away probabilities. Independent Poisson produces too few draws at realistic rates, so
+     matching the market's draw-heavy prices pulls both rates down. A 1X2 price pins down who is
+     better, but its implied goal level is biased.
+   - This is the clearest case yet for adding over/under prices to it.
+7. **Production beats plain `dixon-coles` on every goal market,** a little. The shots term helps
+   here too.
+
+### What it points at
+
+- **Market-informed track:** invert the over/under price together with the 1X2 price, so the level
+  comes from the market that prices it. The baseline makes the expected gain on totals large
+  (`odds-ratings` sits at 13-30% of the market's skill there).
+- **Independent track:** the 2% goal-level error is now measurable. A level correction, or a faster
+  memory for the level, can be judged on this instrument instead of on home/draw/away RPS, which
+  cannot see it.
+- **Both teams to score:** there is no skill to protect and no market to judge against, so it is
+  not worth targeting directly.
