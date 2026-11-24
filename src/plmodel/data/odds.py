@@ -106,6 +106,25 @@ FAMILIES: dict[str, MarketFamily] = {
 }
 
 
+# Two-way goal markets, for the goal-market yardstick (eval/goal_markets.py). Each family is a tuple
+# of eras, read in order per row; every era in a family has the same settlement timing, so a
+# family never mixes a Friday price with a closing one. Column names are a property of the source.
+#   over/under 2.5: (over, under)
+TOTALS_FAMILIES: dict[str, tuple[tuple[str, ...], ...]] = {
+    # Betbrain's pre-close average 2005/06-2018/19, then football-data's own average 2019/20 on.
+    "friday_average": (("BbAv>2.5", "BbAv<2.5"), ("Avg>2.5", "Avg<2.5")),
+    # bet365 pre-close: 2002/03 on, with gaps (3,763 E0 matches priced).
+    "bet365_friday": (("B365>2.5", "B365<2.5"),),
+    # The closing average, 2019/20 on.
+    "closing_average": (("AvgC>2.5", "AvgC<2.5"),),
+}
+#   Asian handicap: (home handicap line, home price, away price)
+HANDICAP_FAMILIES: dict[str, tuple[tuple[str, ...], ...]] = {
+    "friday_average": (("BbAHh", "BbAvAHH", "BbAvAHA"), ("AHh", "AvgAHH", "AvgAHA")),
+    "closing_average": (("AHCh", "AvgCAHH", "AvgCAHA"),),
+}
+
+
 # --- de-vig (ported verbatim from the WC2026 project) -----------------------------------------
 
 def devig(odds: np.ndarray) -> tuple[np.ndarray, np.ndarray]:

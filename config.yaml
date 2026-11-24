@@ -701,6 +701,24 @@ model:
 # ---------------------------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------------------------
+# GOAL MARKETS: the yardstick for over/under, both teams to score, clean sheets, handicaps and
+# exact scores (eval/goal_markets.py, `pl goals`). Measurement only, never a gate.
+# ---------------------------------------------------------------------------------------------
+goal_markets:
+  # The source publishes over/under prices at 2.5 goals only, so the market comparison is fixed
+  # there; the other markets are scored against results at the same line.
+  over_under_line: 2.5
+  # The total-goals table scores 0..5 and "6 or more": 6+ goals happen in about 8% of matches, so
+  # a finer tail would add classes with too few cases to score.
+  total_goals_cap: 6
+  # Climatology, the forecast every market must beat, is the base rate of the seasons just before
+  # the pool. Five seasons is long enough to be stable and short enough to reflect the era.
+  climatology_seasons: 5
+  # The grid rebuilt from an arm's fit must reproduce the arm's own home/draw/away to this
+  # tolerance, or the goal markets scored would not be the forecast the gates judged.
+  consistency_tolerance: 1.0e-9
+
+# ---------------------------------------------------------------------------------------------
 # ODDS RATINGS: the market-informed track's model (arm `odds-ratings`), never production.
 #
 # Team attack and defence fitted to the goal rates implied by bookmakers' prices of EARLIER

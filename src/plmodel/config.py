@@ -214,6 +214,16 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
+class GoalMarketsConfig:
+    """The goal-market yardstick (eval/goal_markets.py). Measurement only."""
+
+    over_under_line: float
+    total_goals_cap: int
+    climatology_seasons: int
+    consistency_tolerance: float
+
+
+@dataclass(frozen=True)
 class OddsRatingsConfig:
     """The market-informed `odds-ratings` arm: ratings fitted to earlier matches' prices."""
 
@@ -333,6 +343,7 @@ class Config:
     # The market-informed track's model. Defaulted only so hand-built configs in tests need not
     # name it; load_config always sets it from config.yaml and refuses a file without it.
     odds_ratings: OddsRatingsConfig | None = None
+    goal_markets: GoalMarketsConfig | None = None
 
 
 def _require(raw: dict[str, Any], key: str) -> Any:
@@ -432,6 +443,12 @@ def load_config(path: Path | str | None = None) -> Config:
     if missing_drift:
         raise ConfigError(f"config.yaml season.drift missing: {missing_drift}")
 
+    gmk = _section(raw, "goal_markets")
+    gm_keys = ("over_under_line", "total_goals_cap", "climatology_seasons", "consistency_tolerance")
+    missing_gm = [k for k in gm_keys if k not in gmk]
+    if missing_gm:
+        raise ConfigError(f"config.yaml goal_markets section missing: {missing_gm}")
+
     orr = _section(raw, "odds_ratings")
     missing_orr = [k for k in ("families", "half_life_days", "ridge", "lookback_days",
                                          "inversion_tolerance", "inversion_max_iter") if k not in orr]
@@ -518,5 +535,11 @@ def load_config(path: Path | str | None = None) -> Config:
             lookback_days=float(orr["lookback_days"]),
             inversion_tolerance=float(orr["inversion_tolerance"]),
             inversion_max_iter=int(orr["inversion_max_iter"]),
+        ),
+        goal_markets=GoalMarketsConfig(
+            over_under_line=float(gmk["over_under_line"]),
+            total_goals_cap=int(gmk["total_goals_cap"]),
+            climatology_seasons=int(gmk["climatology_seasons"]),
+            consistency_tolerance=float(gmk["consistency_tolerance"]),
         ),
     )

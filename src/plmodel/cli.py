@@ -293,6 +293,62 @@ def _print_compare(payload: dict, report) -> None:
                     print(f"  {'':7} {'':16}   {verdict[key]}")
 
 
+def cmd_goals(args: argparse.Namespace) -> int:
+    """Score an arm's goal markets against results, climatology and the bookmakers."""
+    from plmodel.config import SeasonSpan
+    from plmodel.eval.goal_markets import GoalMarketError, score_goal_markets, walk_grids
+
+    cfg = load_config(args.config)
+    _, matches = _load_corpus(cfg)
+    span = cfg.backtest.sensitivity_span if args.sensitivity else cfg.backtest.test_span
+    if args.first_season or args.last_season:
+        span = SeasonSpan(args.first_season or span.first_season,
+                          args.last_season or span.last_season)
+    splits = _build_splits(cfg, matches, span=span)
+    try:
+        walk = walk_grids(args.arm, matches, splits, cfg)
+    except GoalMarketError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    report = score_goal_markets(walk, matches[matches["date"] < splits[0].barrier], cfg)
+    _print_goals(report, span)
+    cfg.output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = cfg.output_dir / (args.out or f"goals_{args.arm}.json")
+    out_path.write_text(json.dumps(report, indent=2, default=float), encoding="utf-8")
+    print(f"\nreport    : {out_path}")
+    return 0
+
+
+def _print_goals(report: dict, span) -> None:
+    level = report["goal_level"]
+    print(f"arm       : {report['arm']}   {span.first_season}..{span.last_season}, "
+          f"{report['n']:,} matches")
+    print(f"baseline  : climatology of {', '.join(report['climatology_seasons'])}")
+    print("\ngoal level      expected   scored")
+    for side in ("home", "away", "total"):
+        e, a = level[f"expected_{side}"], level[f"scored_{side}"]
+        print(f"  {side:13} {e:9.3f} {a:8.3f}   ({(e - a) / a:+.1%})")
+    print(f"\n{'market':24}{'Brier':>9}{'climat.':>9}{'skill':>8}{'forecast':>10}{'observed':>10}")
+    for key, block in report["binary"].items():
+        print(f"  {key:22}{block['brier']:>9.4f}{block['brier_climatology']:>9.4f}"
+              f"{block['skill']:>8.1%}{block['forecast_rate']:>10.3f}{block['observed_rate']:>10.3f}")
+    rps, ll = report["total_goals_rps"], report["exact_score_log_loss"]
+    print(f"\n  total goals RPS    model {rps['model']:.4f}   climatology {rps['climatology']:.4f}")
+    print(f"  exact score loss   model {ll['model']:.4f}   climatology {ll['climatology']:.4f}")
+    print("\nagainst the bookmakers (Brier gap = model - market; share = model skill / market skill)")
+    for title, blocks in (("over/under", report["over_under_vs_market"]),
+                          ("handicap, half lines", report["handicap_vs_market"])):
+        for name, block in blocks.items():
+            if not block.get("n"):
+                print(f"  {title:21} {name:16} not priced on this span")
+                continue
+            share = block.get("share_of_market_skill")
+            extra = ("" if "share_of_priced_rows_on_half_lines" not in block else
+                     f"   ({block['share_of_priced_rows_on_half_lines']:.0%} of priced matches)")
+            print(f"  {title:21} {name:16} n={block['n']:>5,}   gap {block['gap']:+.4f}"
+                  + (f"   share {share:.0%}" if title == "over/under" else "") + extra)
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     """Calibration slices for one arm: promoted-team, big-six, favourite, by season."""
     from plmodel.eval.compare import registered_arms, run_compare
@@ -1235,6 +1291,15 @@ def build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--paper", required=True, help=f"paper id; available: {list(_REPRODUCIBLE)}")
     pr.add_argument("--market", default=None, help="override the market family")
     pr.set_defaults(func=cmd_reproduce)
+
+    pg = sub.add_parser("goals", help="score an arm's goal markets against results and the market")
+    pg.add_argument("--arm", default="dc+sot-form", help="arm to score (default: production)")
+    pg.add_argument("--sensitivity", action="store_true",
+                    help="score the earlier decade instead of the test span")
+    pg.add_argument("--first-season", default=None, help="override the pool's first season")
+    pg.add_argument("--last-season", default=None, help="override the pool's last season")
+    pg.add_argument("--out", default=None, help="report filename within the output directory")
+    pg.set_defaults(func=cmd_goals)
 
     pa = sub.add_parser("audit", help="calibration slices for one arm")
     pa.add_argument("--arm", default="uniform", help="arm to audit")
