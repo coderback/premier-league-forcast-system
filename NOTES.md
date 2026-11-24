@@ -8957,3 +8957,50 @@ Build `odds-ratings-ou` as a market-informed arm, then:
 - `pl goals --arm odds-ratings-ou` on both decades, judged against the incumbent's baseline.
 
 To be pre-registered before it runs.
+
+---
+
+## 2026-11-24 — PRE-REGISTRATION: the full test of `odds-ratings-ou`, to replace `odds-ratings` as the market-informed model
+
+Written and committed before the arm is built or either decade is walked with it.
+
+### The arm
+
+`odds-ratings-ou` is the falsifier's candidate, unchanged: the incumbent's estimator (30 days, ridge
+0.05, lookback 1,500 days, independent Poisson forecast) with the two-market inversion.
+- **Matches priced on both markets:** rates from P(home) − P(away) and P(over 2.5).
+- **Matches priced on 1X2 only:** the 1X2-only inversion.
+
+**Track:** market-informed, `reads_match_prices=False`. It reads only earlier matches' prices.
+
+### What it must show, fixed now
+
+It is a candidate to **replace `odds-ratings`** as the market-informed track's model. It has to
+clear every one of these:
+
+1. **The track's entry rule:** all four gates against independent production:
+   ```
+   pl compare --arms dc+sot-form,odds-ratings-ou --family-size 1 --sensitivity --out gate_ou_sens.json
+   pl compare --arms dc+sot-form,odds-ratings-ou --family-size 1 --against-span output/gate_ou_sens.json --out gate_ou_test.json
+   ```
+2. **No harm on home/draw/away against the incumbent:** the paired RPS delta against `odds-ratings`
+   is ≤ +0.0002 on the test decade and ≤ +0.0002 on the sensitivity decade.
+3. **Better on over/under than the incumbent:** over-2.5 Brier against `odds-ratings`.
+   - On the test decade: a 95% interval excluding zero on the favourable side, or P(better) ≥ 0.95.
+     The season-clustered interval is quoted beside it.
+   - On the sensitivity decade: P(better) ≥ 0.5.
+
+**If all three pass:**
+- `odds-ratings-ou` replaces `odds-ratings` in `pl live`'s frozen set;
+- `odds-ratings` stays registered, so every number already recorded keeps its meaning;
+- the retune the rule requires before wiring comes first, pre-registered with a cycle cap and an
+  oscillation rule (the lesson of 2026-11-18).
+
+**If any fails:** the incumbent stays and the result is recorded.
+
+### Expectations, stated so they can be wrong
+
+- **Over/under:** a large gain against the incumbent, since its goal level is 9-13% short on both
+  decades.
+- **Home/draw/away:** a delta near zero; the falsifier measured −0.00007.
+- **Against production:** about the incumbent's −0.0023 on the test decade.
