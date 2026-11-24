@@ -62,6 +62,15 @@ goal rates implied by earlier matches' prices and never reads the forecast match
 
 It passes all four gates, never becomes production, and still sits behind the market.
 
+**Replaced 2026-11-24 by `odds-ratings-ou`.** It takes the goal level from earlier matches'
+over/under prices.
+- **Goal markets:** it captures 92% of the market's over/under skill (84% on 2006-16), against 13%
+  for `odds-ratings`, and predicts the right number of goals.
+- **Home/draw/away:** level with `odds-ratings` (test −0.0023 against production; gap to bet365
+  Friday +0.0018).
+
+`odds-ratings` stays registered for the record.
+
 A market-informed candidate is now judged against `odds-ratings` as well as against independent
 production. **"Use the market's view of strength" is answered;** what remains open on that track is
 match-specific news.

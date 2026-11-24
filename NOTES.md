@@ -9004,3 +9004,70 @@ clear every one of these:
   decades.
 - **Home/draw/away:** a delta near zero; the falsifier measured −0.00007.
 - **Against production:** about the incumbent's −0.0023 on the test decade.
+
+---
+
+## 2026-11-24 — RESULT: `odds-ratings-ou` passes every registered condition and is accepted as the market-informed track's model
+
+Run as pre-registered (7474605) against code committed before the run (50e9370). Reports:
+- `output/gate_ou_{sens,test}.json`;
+- `output/goals_odds-ratings-ou_{sens,test}.json`;
+- `docs/plans/2026-11-24-odds-ratings-ou/versus_incumbent.json` (git-ignored).
+
+### Condition 1: all four gates against production — PASS
+
+| | test decade | sensitivity decade |
+|---|---|---|
+| RPS, production → candidate | 0.1981 → **0.1958** | 0.1952 → 0.1945 |
+| gate 1 | **pass**: CI excludes 0. By season: [−0.0040, −0.0005]; t interval [−0.0045, −0.0002]; 8/10 seasons | P(better) 0.830, 7/10 seasons |
+| gate 2: gap to bet365 Friday | **+0.0018** against production's +0.0041 | +0.0012 against +0.0019 |
+| gate 3 | pass (family of 1) | |
+| gate 4 | pass, sensitivity P 0.830 | |
+
+### Condition 2: no harm on home/draw/away against `odds-ratings` — PASS
+
+| | delta | bar |
+|---|---|---|
+| test decade | −0.00003, P(better) 0.62 | ≤ +0.0002: **pass** |
+| sensitivity decade | **+0.00018**, P(better) 0.04 | ≤ +0.0002: **pass, close to the bar** |
+
+On the earlier decade it is slightly worse than the incumbent on home/draw/away, inside the
+registered bar. This is the draw shortfall the pre-registration named as the risk.
+
+### Condition 3: better on over/under than `odds-ratings` — PASS, decisively
+
+| | over-2.5 Brier delta | by-match CI | by season | seasons |
+|---|---|---|---|---|
+| test decade | **−0.0059** | [−0.0080, −0.0038] | [−0.0083, −0.0036] | 10/10 |
+| sensitivity decade | **−0.0103** | [−0.0131, −0.0075] | [−0.0135, −0.0072] | 10/10 |
+
+### The goal markets, now (test decade; sensitivity decade in brackets)
+
+| | `odds-ratings` (was) | **`odds-ratings-ou`** | production |
+|---|---|---|---|
+| goals expected / scored | 2.58 / 2.84 (−9%) | **2.84 / 2.84** (2.67 / 2.68) | 2.78 / 2.84 (−2%) |
+| over/under: share of the market's skill (Friday average) | 13% | **92%** (84%) | 60% (24%) |
+| over-2.5 skill over climatology | +0.4% | **+2.7%** (+1.7%) | +1.8% (+0.5%) |
+| both teams to score: skill | −0.8% | +0.9% (+1.0%) | +0.4% |
+| each side to score / clean sheet: skill | about 6% | **about 7%** | about 6% |
+| exact-score log loss | 2.9388 | **2.9228** | 2.9358 |
+| handicap gap to Friday (half lines) | +0.0042 | +0.0043 (−0.0008) | +0.0052 |
+
+### What it means
+
+- **`odds-ratings-ou` is now the market-informed track's model.** Production stays `dc+sot-form`, by
+  the two-track rule.
+- **On over/under it now captures 92% of the market's skill** (84% on 2006-16), against 13% before
+  and 60% for production. It predicts the right number of goals on both decades.
+- **On home/draw/away it equals the incumbent:** test −0.0023 against production, the same as
+  before. It is fractionally worse on the earlier decade.
+- **The tuning-span placebo's lesson holds.** Most of the over/under gain is the market's level for
+  the season rather than match-by-match information. That is still information the incumbent
+  lacked.
+
+### Next, as registered
+
+- **Before wiring:** the retune the acceptance rule requires, pre-registered with a cycle cap and an
+  oscillation rule.
+- **Then:** `odds-ratings-ou` replaces `odds-ratings` in `pl live`'s frozen set. `odds-ratings` stays
+  registered, so earlier numbers keep their meaning.
