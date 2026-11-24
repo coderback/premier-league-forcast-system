@@ -1311,9 +1311,10 @@ def build_parser() -> argparse.ArgumentParser:
     # FITTED model's belief before kickoff cannot be reconstructed afterwards.
     # `dixon-coles` stays on the list after `dc+sot-form` replaced it in production, so the frozen
     # ledger carries the old and new production models head to head on matches neither has seen.
-    # `odds-ratings` is the market-informed track's model (accepted 2026-11-18): frozen beside
-    # production under its own name, never in its place.
-    pl_.add_argument("--arms", default="dc+sot-form,odds-ratings,dixon-coles,home-rate,uniform",
+    # `odds-ratings-ou` is the market-informed track's model (accepted 2026-11-24, replacing
+    # `odds-ratings`, which froze the first round): frozen beside production under its own name,
+    # never in its place.
+    pl_.add_argument("--arms", default="dc+sot-form,odds-ratings-ou,dixon-coles,home-rate,uniform",
                      help="comma-separated arms to freeze")
     pl_.add_argument("--score", action="store_true",
                      help="score previously frozen forecasts instead of freezing")

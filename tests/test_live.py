@@ -228,4 +228,4 @@ def test_the_market_informed_model_is_frozen_by_default() -> None:
 
     args = build_parser().parse_args(["live"])
     arms = args.arms.split(",")
-    assert arms[0] == "dc+sot-form" and "odds-ratings" in arms
+    assert arms[0] == "dc+sot-form" and "odds-ratings-ou" in arms and "odds-ratings" not in arms

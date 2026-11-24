@@ -9113,3 +9113,43 @@ hold:**
 **Otherwise the incumbent stands.** Either way, `odds-ratings-ou` then replaces `odds-ratings` in
 `pl live`'s default frozen set. If values move, the replacement uses the moved values, and both
 registered gate runs are repeated with them first.
+
+---
+
+## 2026-11-24 — RETUNE: `odds-ratings-ou` keeps 30 days and ridge 0.05; WIRED into `pl live`
+
+Run exactly as pre-registered (137b7f5); script and log in `docs/plans/2026-11-24-odds-ratings-ou/`.
+
+```
+cycle 1  HL at ridge 0.05      10 0.20056  15 0.19922  20 0.19864  30 0.19852  45 0.19857  60 0.19865  90 0.19889
+         ridge at HL 30        0.00125 0.19846 ... 0.05 0.19852  0.1 0.19858  0.5 0.19923
+cycle 2  HL at ridge 0.00125   10 0.19878  15 0.19839  20 0.19840  30 0.19846  45 0.19852  60 0.19859  90 0.19883
+         ridge at HL 15        0.00125 0.19839  0.0025 0.19842  0.005 0.19847 ... 0.05 0.19922
+cycle 3  identical to cycle 2: converged
+```
+
+- **The search converged** at (15 days, ridge 0.00125), within the cycle cap and with no
+  oscillation.
+- **The ridge has no interior optimum again:** smaller is better down to the extended edge, exactly
+  as for `odds-ratings` (2026-11-18). By rule 3 the ridge keeps the incumbent's 0.05.
+- **That leaves a winner of (15 days, 0.05).** It is worse than the incumbent: +0.0007, by-season
+  CI [+0.0005, +0.0009], t interval [+0.0003, +0.0011], and +0.0002 on over/under Brier.
+- **Values move: no.** The incumbent stands at 30 days and ridge 0.05.
+
+Recorded and not acted on, for the second time: the ridge buys nothing on these ratings.
+- At ridge ≈ 0 the best half-life shortens to 15-20 days and RPS improves by 0.00013, a tenth of
+  anything gateable.
+- Dropping the ridge would be a change of estimator, and would need its own registration.
+- A note on the rules: the edge rule paired the half-life chosen at ridge ≈ 0 with the incumbent's
+  ridge, a combination the search never chose. It did not change the outcome, since the converged
+  point would not have resolved either, but the next retune's edge rule should say what happens to
+  the other axis.
+
+### Wired
+
+- **`pl live`'s default frozen set** is now `dc+sot-form, odds-ratings-ou, dixon-coles, home-rate,
+  uniform`.
+- **`odds-ratings` stays registered.** It froze the first round, 2026-11-21..23, and those files are
+  never rewritten.
+- **Rehearsed on the real corpus** with a made-up fixture in a scratch folder: all five arms froze in
+  9 s with no errors. Nothing was committed from the rehearsal.
