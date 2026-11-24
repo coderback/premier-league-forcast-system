@@ -8913,3 +8913,47 @@ Reported, not gating:
 **If it passes:** build `odds-ratings-ou` as a registered market-informed arm, then
 `pl compare --arms odds-ratings,odds-ratings-ou` on both decades plus `pl goals` on both. **If it
 fails:** withdrawn and recorded.
+
+---
+
+## 2026-11-24 — RESULT: `odds-ratings-ou` passes its tuning-span falsifier, but almost all of the gain is the average goal level
+
+Run as pre-registered (d1addc2) on 2002-03..2005-06, 1,520 matches. The script, inversion and
+result are in `docs/plans/2026-11-24-odds-ratings-ou/` (git-ignored).
+
+| | delta | 95% CI | P(better) | registered bar |
+|---|---|---|---|---|
+| over-2.5 Brier, candidate vs incumbent | **−0.0064** | [−0.0110, −0.0019] | 0.998 | < 0, P ≥ 0.5: **pass** |
+| home/draw/away RPS, candidate vs incumbent | −0.00007 | [−0.0004, +0.0003] | 0.661 | ≤ +0.0002: **pass** |
+| over-2.5 Brier, candidate vs placebo | −0.00008 | [−0.0017, +0.0014] | 0.542 | < 0, P ≥ 0.5: **pass, barely** |
+
+| | goals expected / scored | over-2.5 skill | total-goals RPS | exact-score loss |
+|---|---|---|---|---|
+| incumbent `odds-ratings` | 2.264 / 2.586 (−12%) | −2.2% | 0.1499 | 2.8609 |
+| **candidate** | **2.596 / 2.586** | +0.4% | **0.1469** | **2.8359** |
+| placebo (over/under shuffled) | 2.591 / 2.586 | +0.4% | 0.1469 | 2.8373 |
+| production `dc+sot-form` | 2.588 / 2.586 | −0.7% | 0.1481 | 2.8468 |
+
+Against production on the same pool, the candidate is better on over/under (−0.0028, P 0.978) and on
+home/draw/away (−0.0016, P 0.943).
+
+### Verdict: PASSES all three registered conditions
+
+**Read honestly:**
+- **The goal-level bias is gone.** 2.596 expected against 2.586 scored, where the incumbent was 12%
+  short.
+- **Home/draw/away is not harmed.** The feared draw shortfall cost nothing measurable.
+- **But the placebo condition passed only at P = 0.542.** Shuffling the over/under prices within a
+  season does almost as well. Nearly all of the gain therefore comes from the market's *average*
+  goal level for the season. Very little comes from knowing which matches will be high-scoring.
+- The placebo also scores slightly better on home/draw/away (+0.0002 to the candidate, P 0.10).
+- The bar is met as written, so the candidate proceeds. The finding stands beside the result: what
+  over/under prices mainly fix is the level.
+
+### Next, as registered
+
+Build `odds-ratings-ou` as a market-informed arm, then:
+- `pl compare --arms odds-ratings,odds-ratings-ou` on both decades;
+- `pl goals --arm odds-ratings-ou` on both decades, judged against the incumbent's baseline.
+
+To be pre-registered before it runs.
