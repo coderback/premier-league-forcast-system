@@ -131,3 +131,61 @@ def test_the_arm_never_reads_a_later_price_in_a_walk(cfg) -> None:
 
     track = arm_track("odds-ratings")
     assert track.track == "market-informed" and track.reads_match_prices is False
+
+
+# --- the two-market inversion (`odds-ratings-ou`) ------------------------------------------------
+
+def test_the_two_market_inversion_recovers_the_rates_from_supremacy_and_over() -> None:
+    from plmodel.model.odds_ratings import _marginals, _over_parts, two_market_rates
+
+    rng = np.random.default_rng(7)
+    lam, mu = rng.uniform(0.4, 3.2, 400), rng.uniform(0.3, 2.6, 400)
+    probs = three_way(lam, mu, MAX_GOALS)
+    over, _ = _over_parts(_marginals(lam, MAX_GOALS), _marginals(mu, MAX_GOALS))
+    rates = two_market_rates(probs[:, 0] - probs[:, 2], over, max_goals=MAX_GOALS,
+                             tolerance=1e-12, max_iter=100)
+    np.testing.assert_allclose(rates[:, 0], lam, rtol=1e-8)
+    np.testing.assert_allclose(rates[:, 1], mu, rtol=1e-8)
+
+
+def test_rows_without_an_over_under_price_fall_back_to_the_1x2_inversion() -> None:
+    from plmodel.model.odds_ratings import market_rates
+
+    frame = pd.DataFrame({
+        "B365H": [2.0, 2.0], "B365D": [3.4, 3.4], "B365A": [3.8, 3.8],
+        "B365>2.5": [1.80, np.nan], "B365<2.5": [2.05, np.nan],
+    })
+    kw = dict(max_goals=MAX_GOALS, tolerance=1e-12, max_iter=100)
+    with_ou = market_rates(frame, ("bet365",), use_over_under=True, **kw)
+    without = market_rates(frame, ("bet365",), use_over_under=False, **kw)
+    np.testing.assert_allclose(with_ou[1], without[1])          # no over/under price: unchanged
+    assert with_ou[0].sum() > without[0].sum()                   # priced over: a higher level
+
+
+def test_the_over_under_arm_never_reads_a_later_price_in_a_walk(cfg) -> None:
+    """Poison the last matchday's 1X2 and over/under prices: every earlier forecast is unchanged."""
+    from plmodel.eval.backtest import walk_forward
+    from plmodel.eval.compare import ArmSpec, arm_track, run_arm
+
+    rng = np.random.default_rng(3)
+    clubs = ["Arsenal", "Chelsea", "Everton", "Fulham"]
+    rows = []
+    for d in range(16):
+        day = pd.Timestamp("2024-08-01") + pd.Timedelta(days=7 * d)
+        for k in range(2):
+            h, a = clubs[(d + 2 * k) % 4], clubs[(d + 2 * k + 1) % 4]
+            rows.append({"date": day, "season": "2024-25", "division": "E0", "home_team": h,
+                         "away_team": a, "result": rng.choice(["H", "D", "A"]),
+                         "home_goals": 1.0, "away_goals": 1.0,
+                         "B365H": rng.uniform(1.6, 3.5), "B365D": 3.4, "B365A": rng.uniform(2.0, 5.0),
+                         "B365>2.5": rng.uniform(1.6, 2.2), "B365<2.5": rng.uniform(1.6, 2.2)})
+    matches = pd.DataFrame(rows).sort_values("date", kind="stable").reset_index(drop=True)
+    splits = walk_forward(matches, min_train_matches=4)
+    clean, _ = run_arm(ArmSpec.parse("odds-ratings-ou"), matches, splits, cfg)
+    poisoned = matches.copy()
+    last = poisoned["date"] == poisoned["date"].max()
+    poisoned.loc[last, ["B365H", "B365D", "B365A", "B365>2.5", "B365<2.5"]] = [1.05, 15.0, 30.0, 1.01, 20.0]
+    dirty, _ = run_arm(ArmSpec.parse("odds-ratings-ou"), poisoned, splits, cfg)
+    np.testing.assert_array_equal(clean, dirty)
+    assert arm_track("odds-ratings-ou").track == "market-informed"
+    assert arm_track("odds-ratings-ou").reads_match_prices is False

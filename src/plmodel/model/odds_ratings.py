@@ -136,6 +136,102 @@ def implied_rates(
     )
 
 
+# --- the two-market inversion (`odds-ratings-ou`) ----------------------------------------------
+
+def over_under_prices(frame: pd.DataFrame) -> np.ndarray:
+    """(N,) proportionally de-vigged P(over 2.5) from the first pre-close source that priced each
+    row; NaN where none did."""
+    from plmodel.data.odds import OVER_UNDER_PRECLOSE
+
+    out = np.full(len(frame), np.nan)
+    for over, under in OVER_UNDER_PRECLOSE:
+        if over not in frame.columns or under not in frame.columns:
+            continue
+        odds = frame[[over, under]].to_numpy(dtype=float)
+        take = np.isfinite(odds).all(axis=1) & (odds > 1.0).all(axis=1) & np.isnan(out)
+        implied = 1.0 / odds[take]
+        out[take] = implied[:, 0] / implied.sum(axis=1)
+    return out
+
+
+def _over_parts(p: np.ndarray, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """P(total goals > 2) and P(total goals == 2) from the two marginals."""
+    total_two = p[:, 0] * q[:, 2] + p[:, 1] * q[:, 1] + p[:, 2] * q[:, 0]
+    at_most_one = p[:, 0] * q[:, 0] + p[:, 0] * q[:, 1] + p[:, 1] * q[:, 0]
+    return 1.0 - at_most_one - total_two, total_two
+
+
+def two_market_rates(
+    supremacy: np.ndarray, over: np.ndarray, *, max_goals: int, tolerance: float, max_iter: int
+) -> np.ndarray:
+    """(N, 2) rates with P(home) - P(away) = ``supremacy`` and P(over 2.5) = ``over``.
+
+    The 1X2 price says who is better; the over/under price says how many goals. Fitting both rates
+    to the 1X2 price alone, as :func:`implied_rates` does, also forces the draw to match, and an
+    independent Poisson model can only produce the market's draw rate by pulling both rates down:
+    the 9-13% goal shortfall the goal-market yardstick measured. Here the draw falls where the model
+    puts it. Newton on log rates with exact untruncated derivatives, each row stopping on its own
+    convergence; raises rather than returning a row that did not converge.
+    """
+    target_s = np.asarray(supremacy, dtype=float)
+    target_o = np.asarray(over, dtype=float)
+    z = np.zeros((len(target_s), 2))
+    active = np.ones(len(target_s), dtype=bool)
+    for _ in range(max_iter):
+        if not active.any():
+            return np.exp(z)
+        za = z[active]
+        lam, mu = np.exp(za[:, 0]), np.exp(za[:, 1])
+        home, draw, away, home_one_more, away_one_more = _three_way_parts(lam, mu, max_goals)
+        over_p, total_two = _over_parts(_marginals(lam, max_goals), _marginals(mu, max_goals))
+        r_s = (home - away) - target_s[active]
+        r_o = over_p - target_o[active]
+        done = np.maximum(np.abs(r_s), np.abs(r_o)) < tolerance
+        # d(home - away)/d log rate, and d P(over)/d log rate = rate * P(total == 2).
+        a, b = lam * (draw + away_one_more), -mu * (draw + home_one_more)
+        c, d = lam * total_two, mu * total_two
+        det = a * d - b * c
+        step_lam = (d * r_s - b * r_o) / det
+        step_mu = (a * r_o - c * r_s) / det
+        za[:, 0] -= np.where(done, 0.0, np.clip(step_lam, -1.0, 1.0))
+        za[:, 1] -= np.where(done, 0.0, np.clip(step_mu, -1.0, 1.0))
+        z[active] = za
+        active[np.flatnonzero(active)[done]] = False
+    if not active.any():
+        return np.exp(z)
+    raise OddsRatingsError(
+        f"two-market inversion did not converge in {max_iter} steps for {int(active.sum())} row(s)"
+    )
+
+
+def market_rates(
+    frame: pd.DataFrame, families: tuple[str, ...], *, use_over_under: bool, max_goals: int,
+    tolerance: float, max_iter: int,
+) -> np.ndarray:
+    """(N, 2) implied rates for every priced row of ``frame``; NaN where unpriced.
+
+    With ``use_over_under``, rows priced on both markets use the two-market inversion and rows
+    priced on 1X2 only fall back to the 1X2 inversion. Each row depends on its own prices alone.
+    """
+    prices = price_table(frame, families)
+    rates = np.full((len(frame), 2), np.nan)
+    has_1x2 = ~np.isnan(prices).any(axis=1)
+    both = np.zeros(len(frame), dtype=bool)
+    if use_over_under:
+        over = over_under_prices(frame)
+        both = has_1x2 & ~np.isnan(over)
+        if both.any():
+            rates[both] = two_market_rates(
+                prices[both, 0] - prices[both, 2], over[both],
+                max_goals=max_goals, tolerance=tolerance, max_iter=max_iter,
+            )
+    only = has_1x2 & ~both
+    if only.any():
+        rates[only] = implied_rates(prices[only], max_goals=max_goals, tolerance=tolerance,
+                                    max_iter=max_iter)
+    return rates
+
+
 # --- the ratings -------------------------------------------------------------------------------
 
 @dataclass(frozen=True)

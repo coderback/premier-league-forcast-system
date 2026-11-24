@@ -485,7 +485,7 @@ def test_the_season_clustered_interval_is_wider_when_the_gain_comes_in_season_bl
 
 # The arms that read bookmaker prices. Anything else registering on the market-informed track, or
 # anything here drifting off it, is a change to this list made on purpose.
-MARKET_INFORMED_ARMS = {"odds-ratings"}
+MARKET_INFORMED_ARMS = {"odds-ratings", "odds-ratings-ou"}
 
 
 def test_only_the_named_arms_are_market_informed() -> None:

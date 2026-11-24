@@ -759,15 +759,34 @@ def _dc_sot_form(ctx: ArmContext) -> np.ndarray:
 
 @register("odds-ratings", track=TRACK_MARKET_INFORMED)
 def _odds_ratings(ctx: ArmContext) -> np.ndarray:
-    """Ratings fitted to the goal rates implied by EARLIER matches' prices (market-informed track).
+    """Ratings fitted to the goal rates implied by EARLIER matches' 1X2 prices (market-informed).
 
     The forecast match's own price is never read, so ``reads_match_prices`` stays False and gate 2
-    is the Friday line as for every arm. Prices are de-vigged and inverted once per walk, over the
-    walk's whole frame, because de-vigging every barrier would cost 12 s x 1,153; each barrier then
-    reads only the rows of its own training prefix, and the fit itself refuses any row dated on or
-    after the barrier. In the live path there is no walk frame and the training rows are used.
+    is the Friday line as for every arm.
     """
-    from plmodel.model.odds_ratings import fit_odds_ratings, implied_rates, price_table
+    return _odds_ratings_arm(ctx, use_over_under=False)
+
+
+@register("odds-ratings-ou", track=TRACK_MARKET_INFORMED)
+def _odds_ratings_ou(ctx: ArmContext) -> np.ndarray:
+    """`odds-ratings` with the goal level taken from earlier matches' over/under prices.
+
+    Matches priced on both markets are inverted from the 1X2 supremacy and P(over 2.5), so the
+    level comes from the market that prices it; the 1X2-only inversion under-states goals by 9-13%
+    (NOTES.md, 2026-11-24). Everything else is the incumbent's, shared through one body.
+    """
+    return _odds_ratings_arm(ctx, use_over_under=True)
+
+
+def _odds_ratings_arm(ctx: ArmContext, *, use_over_under: bool) -> np.ndarray:
+    """Shared body of the odds-ratings arms.
+
+    Prices are de-vigged and inverted once per walk, over the walk's whole frame, because doing it
+    every barrier would cost 12 s x 1,153; each barrier then reads only the rows of its own training
+    prefix, and the fit itself refuses any row dated on or after the barrier. In the live path
+    there is no walk frame and the training rows are used.
+    """
+    from plmodel.model.odds_ratings import fit_odds_ratings, market_rates
 
     oc = ctx.cfg.odds_ratings
     if oc is None:
@@ -778,16 +797,13 @@ def _odds_ratings(ctx: ArmContext) -> np.ndarray:
     ):
         source = ctx.train                                  # live path: the training rows only
     cache = ctx.state.setdefault("odds_rates", {})
-    key = (id(source), len(source))
+    key = (id(source), len(source), use_over_under)
     if key not in cache:
-        prices = price_table(source, oc.families)
-        rates = np.full((len(source), 2), np.nan)
-        priced = ~np.isnan(prices).any(axis=1)
-        rates[priced] = implied_rates(
-            prices[priced], max_goals=ctx.cfg.model.max_goals,
-            tolerance=oc.inversion_tolerance, max_iter=oc.inversion_max_iter,
+        cache[key] = market_rates(
+            source, oc.families, use_over_under=use_over_under,
+            max_goals=ctx.cfg.model.max_goals, tolerance=oc.inversion_tolerance,
+            max_iter=oc.inversion_max_iter,
         )
-        cache[key] = rates
     rates = cache[key][: len(ctx.train)]                    # the training prefix, nothing after it
     ratings = fit_odds_ratings(
         ctx.train, rates, ref_date=ctx.split.barrier, half_life_days=oc.half_life_days,

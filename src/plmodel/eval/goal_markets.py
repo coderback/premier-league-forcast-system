@@ -95,7 +95,7 @@ def _grid_from_state(arm: str, state: dict, test: pd.DataFrame, train: pd.DataFr
     from plmodel.model.scoreline import clamp_rho_for_rates
 
     max_goals = cfg.model.max_goals
-    if state.get("odds_fits") and arm == "odds-ratings":
+    if state.get("odds_fits") and arm in ("odds-ratings", "odds-ratings-ou"):
         ratings = state["odds_fits"][-1]
         lam, mu = ratings.rates(test["home_team"], test["away_team"])
         return scoreline_matrix(lam, mu, np.zeros(len(test)), max_goals)

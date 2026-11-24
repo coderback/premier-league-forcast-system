@@ -118,6 +118,14 @@ TOTALS_FAMILIES: dict[str, tuple[tuple[str, ...], ...]] = {
     # The closing average, 2019/20 on.
     "closing_average": (("AvgC>2.5", "AvgC<2.5"),),
 }
+# The pre-close over/under 2.5 prices `odds-ratings-ou` reads from EARLIER matches, in order of
+# preference per row: bet365 (2002/03 on, with gaps), Gamebookers (2002/03-2004/05), Betbrain's
+# average (2005/06-2018/19), football-data's average (2019/20 on). All pre-close; together they
+# price 100% of E0 matches from 2002/03 and none before.
+OVER_UNDER_PRECLOSE: tuple[tuple[str, str], ...] = (
+    ("B365>2.5", "B365<2.5"), ("GB>2.5", "GB<2.5"), ("BbAv>2.5", "BbAv<2.5"),
+    ("Avg>2.5", "Avg<2.5"),
+)
 #   Asian handicap: (home handicap line, home price, away price)
 HANDICAP_FAMILIES: dict[str, tuple[tuple[str, ...], ...]] = {
     "friday_average": (("BbAHh", "BbAvAHH", "BbAvAHA"), ("AHh", "AvgAHH", "AvgAHA")),
