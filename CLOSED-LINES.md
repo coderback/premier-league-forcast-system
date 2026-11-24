@@ -147,6 +147,7 @@ and the log score 8.2–10.7%, non-monotone in family size, i.e. noise.
 |---|---|---|
 | **Half-time goals** | **CLOSED** | team-specific 1H/2H variance measured at **zero** — excess variance negative, p = 0.881. Disattenuated 1H/2H correlation 1.03: one parameter with noise |
 | **Referee as a 1X2 feature** | **CLOSED** | between-referee variance in home-win residual is *below* the permutation null, p = 0.850. Largest effect the corpus could hide ≈ 0.00027 RPS, half the floor |
+| **Fixing the independent model's goal level** (2026-11-24) | **CLOSED** | per-parameter decay removes the −2% / away −3% bias but moves over/under share only 56% → 62%; dynamic states overshoot (+1.5%) and lose skill; decay cannot run with the shots seam anyway. Goal markets are served by `odds-ratings-ou` (92%) |
 | **Totals (over/under 2.5) and Asian handicap as softer targets** | **not softer** | over/under 2.5 Brier: model 0.24352, closing market 0.24032. The model has 55% of the market's skill on totals against 86% on 1X2, and it under-predicts goals. Independent review's measurement, 2026-11-18, not re-run here |
 | Asian-handicap / over-under odds as a market family | no gain | reach back less far than the 1X2 families already parsed; add no sensitivity-span coverage; de-vigged AH+OU is *less* sharp than the direct 1X2 (0.17970 vs 0.17937) |
 | **Backward xG (2006–2016)** | **CLOSED** | no free per-match xG or shot-location series exists. Earliest free shot coordinates are 2014-15, which only overlaps the Understat mirror already held |

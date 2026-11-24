@@ -99,14 +99,19 @@ def _grid_from_state(arm: str, state: dict, test: pd.DataFrame, train: pd.DataFr
         ratings = state["odds_fits"][-1]
         lam, mu = ratings.rates(test["home_team"], test["away_team"])
         return scoreline_matrix(lam, mu, np.zeros(len(test)), max_goals)
-    fit = state.get("fit")
-    if isinstance(fit, DixonColesFit) and fit.family is None:
+    # The latest fit the arm made: the Dixon-Coles family keeps it under "fit", and the dynamic and
+    # per-parameter-decay arms append a wrapper to "fits" that exposes the same rates and rho.
+    fit = (state.get("fits") or [None])[-1] or state.get("fit")
+    level = getattr(fit, "fit", fit)                    # a dynamic fit wraps a Dixon-Coles level
+    if (fit is not None and hasattr(fit, "match_rates") and isinstance(level, DixonColesFit)
+            and level.family is None):
         lam, mu = fit.match_rates(test, train)
         rho, _ = clamp_rho_for_rates(lam, mu, fit.rho, margin=_RHO_CLAMP_MARGIN)
         return scoreline_matrix(lam, mu, rho, max_goals)
     raise GoalMarketError(
         f"arm {arm!r} does not leave a Poisson-and-tau fit in its state, so its scoreline "
-        "distribution cannot be read; supported: the Dixon-Coles family and odds-ratings"
+        "distribution cannot be read; supported: the Dixon-Coles family, its dynamic and decay "
+        "variants, and the odds-ratings arms"
     )
 
 

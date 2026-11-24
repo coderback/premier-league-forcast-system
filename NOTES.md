@@ -9153,3 +9153,54 @@ Recorded and not acted on, for the second time: the ridge buys nothing on these 
   never rewritten.
 - **Rehearsed on the real corpus** with a made-up fixture in a scratch folder: all five arms froze in
   9 s with no errors. Nothing was committed from the rehearsal.
+
+---
+
+## 2026-11-24 — DIAGNOSTIC: fixing production's 2% goal shortfall is possible and worth almost nothing on goal markets
+
+Production predicts about 2% too few goals on both decades, mostly away goals (−3%). Before
+pre-registering a fix, the yardstick was run on the three level-tracking arms this project already
+built. They had only ever been judged on home/draw/away, which is blind to the level:
+- `dc-decay`: separate memories for team strength, the league level and home advantage;
+- `dc-gas`: score-driven dynamic states;
+- `dc-gas-decay`: both.
+
+This is a diagnostic on evaluation spans, used to decide whether to pre-register anything, not to
+select a value. `goal_markets.py` was widened to read the dynamic and decay arms' fits, under the
+same 1e-9 consistency check.
+
+| test decade (sensitivity in brackets) | total goals bias | away bias | over-2.5 skill | over/under share of market skill | total RPS |
+|---|---|---|---|---|---|
+| `dixon-coles` | −2.2% (−2.2%) | −3.5% (−3.0%) | +1.7% (+0.4%) | 56% (19%) | 0.1450 |
+| `dc+sot-form` (production) | −2.1% (−2.2%) | −3.4% (−3.0%) | +1.8% (+0.5%) | 60% (24%) | 0.1448 |
+| `dc-decay` | **−1.2% (−1.4%)** | **−0.8% (+0.1%)** | +1.8% (+0.4%) | 62% (21%) | 0.1447 |
+| `dc-gas` | +1.5% (+1.5%) | −2.3% (+0.5%) | +1.4% (−0.2%) | 45% (negative) | 0.1455 |
+| `dc-gas-decay` | +1.3% (+1.4%) | +1.1% (+2.2%) | +1.4% (−0.2%) | 47% (negative) | 0.1453 |
+| `odds-ratings-ou` (market-informed) | +0.1% (−0.5%) | −2.0% (−0.8%) | **+2.7% (+1.7%)** | **92% (84%)** | **0.1438** |
+
+### What it shows
+
+1. **Per-parameter decay fixes the bias's shape.** It removes the away-goal shortfall (−3.5% →
+   −0.8%) and halves the total one.
+2. **But it buys almost nothing on goal markets:** over/under share 56% → 62% on the test decade and
+   19% → 21% on the sensitivity decade, Brier gap +0.0032 → +0.0028. A 2% mean error is a small part
+   of over/under error. What limits the model there is not knowing which matches will be
+   high-scoring, not the average.
+3. **The dynamic arms overshoot.** They put the level 1.5% too high and make every goal market worse,
+   negative skill on the sensitivity decade. Fast-moving states chase noise in the scoring level.
+4. **The market-informed model is far ahead on every goal market.** The over/under gap the
+   independent track could close by fixing the level (about 0.0004) is a fraction of the gap
+   `odds-ratings-ou` has already closed (+0.0030 → +0.0006).
+
+### Decision: no arm is pre-registered
+
+- **The independent track's only working mechanism is not buildable as it stands.** Per-parameter
+  decay cannot run with the covariate seam: the code refuses, because its block layout has nowhere
+  to put the shots coefficient. Building it would take real engineering.
+- **The prize is about 0.0003-0.0004 in over/under Brier.** `dc-decay` was also +0.0003 *worse* on
+  home/draw/away and failed all four gates on 2026-08-25.
+- **The goal markets are served by `odds-ratings-ou`,** now available through
+  `pl predict --arm odds-ratings-ou`.
+
+Closed line: "fix the independent model's goal level". It is fixable, and worth a tenth of the
+gate's floor.
