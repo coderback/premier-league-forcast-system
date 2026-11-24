@@ -173,6 +173,60 @@ def both_teams_to_score(joint: np.ndarray) -> np.ndarray:
     return joint.sum(axis=(1, 2), where=((x > 0) & (y > 0)))
 
 
+def scoring_markets(joint: np.ndarray) -> dict[str, np.ndarray]:
+    """Each side to score, each side's clean sheet, and each side to win to nil.
+
+    A clean sheet for one side is the other side failing to score, so the four scoring figures
+    are two numbers read both ways; they are named separately because that is how the markets are
+    quoted.
+    """
+    x, y = _goal_axes(joint)
+    home_scores = joint.sum(axis=(1, 2), where=(x > 0))
+    away_scores = joint.sum(axis=(1, 2), where=(y > 0))
+    return {
+        "home_scores": home_scores,
+        "away_scores": away_scores,
+        "home_clean_sheet": 1.0 - away_scores,
+        "away_clean_sheet": 1.0 - home_scores,
+        "home_win_to_nil": joint.sum(axis=(1, 2), where=((x > 0) & (y == 0))),
+        "away_win_to_nil": joint.sum(axis=(1, 2), where=((y > 0) & (x == 0))),
+    }
+
+
+def margin_distribution(joint: np.ndarray, cap: int) -> np.ndarray:
+    """(N, 2*cap + 1) probabilities of the home margin from ``-cap`` (away by ``cap`` or more)
+    through 0 (a draw) to ``+cap`` (home by ``cap`` or more)."""
+    x, y = _goal_axes(joint)
+    margin = np.clip(x - y, -cap, cap)
+    return np.stack(
+        [joint.sum(axis=(1, 2), where=(margin == m)) for m in range(-cap, cap + 1)], axis=1
+    )
+
+
+def handicap_probability(
+    joint: np.ndarray, handicap: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """``(home covers, push, away covers)`` with ``handicap`` added to the home side's goals.
+
+    A home handicap of -1.5 asks the home side to win by two or more. A whole-number handicap can
+    land exactly level, which returns the stake (the push); a .5 handicap cannot.
+    """
+    x, y = _goal_axes(joint)
+    adjusted = x + handicap - y
+    return (
+        joint.sum(axis=(1, 2), where=(adjusted > 0)),
+        joint.sum(axis=(1, 2), where=(adjusted == 0)),
+        joint.sum(axis=(1, 2), where=(adjusted < 0)),
+    )
+
+
+def total_goals_distribution(joint: np.ndarray, cap: int) -> np.ndarray:
+    """(N, cap + 1) probabilities of 0, 1, ..., cap - 1 total goals, and ``cap`` or more last."""
+    x, y = _goal_axes(joint)
+    total = np.minimum(x + y, cap)
+    return np.stack([joint.sum(axis=(1, 2), where=(total == t)) for t in range(cap + 1)], axis=1)
+
+
 def top_scorelines(joint: np.ndarray, n: int) -> list[list[tuple[int, int, float]]]:
     """The ``n`` most likely exact scores per match, most likely first."""
     out: list[list[tuple[int, int, float]]] = []

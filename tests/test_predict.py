@@ -19,8 +19,12 @@ from plmodel.data.teams import AmbiguousTeamError, resolve_team
 from plmodel.model.scoreline import (
     both_teams_to_score,
     collapse_three_class,
+    handicap_probability,
+    margin_distribution,
     scoreline_matrix,
+    scoring_markets,
     top_scorelines,
+    total_goals_distribution,
     totals_probability,
 )
 
@@ -81,6 +85,34 @@ def test_a_stronger_home_side_shifts_every_market_the_same_way() -> None:
     weak, strong = _grid(lam=(1.0,), mu=(1.5,)), _grid(lam=(2.5,), mu=(0.8,))
     assert collapse_three_class(strong)[0, 0] > collapse_three_class(weak)[0, 0]
     assert top_scorelines(strong, 1)[0][0][0] > top_scorelines(weak, 1)[0][0][0]
+
+
+def test_the_derived_markets_agree_with_the_core_ones() -> None:
+    """Every derived market is the same grid read another way, so each must agree exactly with a
+    market that already existed: margins with home/draw/away, totals with over/under, handicaps
+    with margins, clean sheets with scoring, win to nil with both."""
+    grid = _grid()
+    outcome = collapse_three_class(grid)
+    margins = margin_distribution(grid, 3)                 # away 3+ ... draw ... home 3+
+    assert np.allclose(margins.sum(axis=1), 1.0)
+    assert np.allclose(margins[:, 4:].sum(axis=1), outcome[:, 0])
+    assert np.allclose(margins[:, 3], outcome[:, 1])
+    assert np.allclose(margins[:, :3].sum(axis=1), outcome[:, 2])
+
+    totals = total_goals_distribution(grid, 6)
+    assert np.allclose(totals.sum(axis=1), 1.0)
+    assert np.allclose(totals[:, 3:].sum(axis=1), totals_probability(grid, 2.5)[0])
+
+    covers, push, against = handicap_probability(grid, -1.5)
+    assert np.allclose(covers, margins[:, 5:].sum(axis=1)) and np.allclose(push, 0.0)
+    covers, push, against = handicap_probability(grid, -1.0)
+    assert np.allclose(push, margins[:, 4]) and np.allclose(covers + push + against, 1.0)
+
+    scoring = scoring_markets(grid)
+    assert np.allclose(scoring["home_clean_sheet"], 1.0 - scoring["away_scores"])
+    btts = both_teams_to_score(grid)
+    # Home scores = home scores while away also scores, plus home wins to nil.
+    assert np.allclose(scoring["home_scores"], btts + scoring["home_win_to_nil"])
 
 
 def test_market_helpers_reject_a_frame_that_is_not_a_grid() -> None:

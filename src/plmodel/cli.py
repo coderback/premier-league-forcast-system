@@ -35,6 +35,11 @@ _PREDICT_RHO_MARGIN = 0.01
 # confident and are not. Hull's 2017 rating is the case this exists to surface.
 _STALE_MULTIPLE = 3.0
 
+# `pl predict`'s derived markets: winning margins are shown up to "by 3 or more", and the
+# total-goals table up to "6 or more". Presentation only; every figure is read from the same grid.
+_MARGIN_CAP = 3
+_TOTAL_GOALS_CAP = 6
+
 # `pl live` flags any frozen outcome below this probability. A warning only; the forecast is
 # frozen as fitted.
 _LOW_PROBABILITY = 0.02
@@ -872,8 +877,12 @@ def cmd_predict(args: argparse.Namespace) -> int:
         both_teams_to_score,
         clamp_rho_for_rates,
         collapse_three_class,
+        handicap_probability,
+        margin_distribution,
         scoreline_matrix,
+        scoring_markets,
         top_scorelines,
+        total_goals_distribution,
         totals_probability,
     )
 
@@ -917,6 +926,16 @@ def cmd_predict(args: argparse.Namespace) -> int:
     over, under = totals_probability(grid, args.line)
     btts = both_teams_to_score(grid)
     scores = top_scorelines(grid, args.top)
+    scoring = scoring_markets(grid)
+    margins = margin_distribution(grid, _MARGIN_CAP)
+    totals = total_goals_distribution(grid, _TOTAL_GOALS_CAP)
+    # The handicap goes to whichever side the model favours: "home -1.5" means little when the
+    # away side is the stronger one. Read from the home side, a favourite away side is +line.
+    home_favoured = lam >= mu
+    handicaps = [
+        handicap_probability(grid[i:i + 1], -args.handicap if home_favoured[i] else args.handicap)
+        for i in range(len(resolved))
+    ]
     quality = _team_history(train, fit, ref, cfg)
 
     print(f"as of     : {ref.date()}   ({len(train):,} matches behind the barrier)")
@@ -930,6 +949,27 @@ def cmd_predict(args: argparse.Namespace) -> int:
               f"        both to score  {btts[i]:.3f} / {1.0 - btts[i]:.3f}")
         print("  likeliest scores " + ",  ".join(
             f"{x}-{y} {p:.3f}" for x, y, p in scores[i]))
+        home, draw, away = outcome[i]
+        print(f"  double chance   home or draw {home + draw:.3f}   draw or away {draw + away:.3f}"
+              f"   no draw {home + away:.3f}")
+        print(f"  draw no bet     {h} {home / (home + away):.3f}   {a} {away / (home + away):.3f}")
+        print(f"  to score        {h} {scoring['home_scores'][i]:.3f}   "
+              f"{a} {scoring['away_scores'][i]:.3f}")
+        print(f"  clean sheet     {h} {scoring['home_clean_sheet'][i]:.3f}   "
+              f"{a} {scoring['away_clean_sheet'][i]:.3f}")
+        print(f"  win to nil      {h} {scoring['home_win_to_nil'][i]:.3f}   "
+              f"{a} {scoring['away_win_to_nil'][i]:.3f}")
+        print("  winning margin  " + "  ".join(
+            f"{_margin_label(m, h, a)} {margins[i, m + _MARGIN_CAP]:.3f}"
+            for m in range(_MARGIN_CAP, -_MARGIN_CAP - 1, -1)))
+        covers, push, against = (float(v[0]) for v in handicaps[i])
+        fav, dog = (h, a) if home_favoured[i] else (a, h)
+        fav_p, dog_p = (covers, against) if home_favoured[i] else (against, covers)
+        print(f"  handicap        {fav} -{args.handicap:g} {fav_p:.3f}   {dog} +{args.handicap:g} "
+              f"{dog_p:.3f}" + (f"   push {push:.3f}" if push > 0 else ""))
+        print("  total goals     " + "  ".join(
+            f"{t}{'+' if t == _TOTAL_GOALS_CAP else ''} {totals[i, t]:.3f}"
+            for t in range(_TOTAL_GOALS_CAP + 1)))
         for club in (h, a):
             note = quality[club]
             if note:
@@ -947,6 +987,33 @@ def cmd_predict(args: argparse.Namespace) -> int:
                 "away": float(outcome[i, 2]),
                 "over": float(over[i]), "under": float(under[i]),
                 "both_teams_to_score": float(btts[i]),
+                "double_chance": {
+                    "home_or_draw": float(outcome[i, 0] + outcome[i, 1]),
+                    "draw_or_away": float(outcome[i, 1] + outcome[i, 2]),
+                    "no_draw": float(outcome[i, 0] + outcome[i, 2]),
+                },
+                "draw_no_bet": {
+                    "home": float(outcome[i, 0] / (outcome[i, 0] + outcome[i, 2])),
+                    "away": float(outcome[i, 2] / (outcome[i, 0] + outcome[i, 2])),
+                },
+                **{key: float(values[i]) for key, values in scoring.items()},
+                "winning_margin": {
+                    _margin_label(m, "home", "away"): float(margins[i, m + _MARGIN_CAP])
+                    for m in range(-_MARGIN_CAP, _MARGIN_CAP + 1)
+                },
+                "handicap": {
+                    "favourite": h if home_favoured[i] else a,
+                    "line": args.handicap,
+                    "favourite_covers": float(handicaps[i][0][0] if home_favoured[i]
+                                              else handicaps[i][2][0]),
+                    "push": float(handicaps[i][1][0]),
+                    "underdog_covers": float(handicaps[i][2][0] if home_favoured[i]
+                                             else handicaps[i][0][0]),
+                },
+                "total_goals": {
+                    f"{t}{'+' if t == _TOTAL_GOALS_CAP else ''}": float(totals[i, t])
+                    for t in range(_TOTAL_GOALS_CAP + 1)
+                },
                 "top_scorelines": [
                     {"home_goals": x, "away_goals": y, "p": p} for x, y, p in scores[i]
                 ],
@@ -966,6 +1033,15 @@ def cmd_predict(args: argparse.Namespace) -> int:
     print(f"\nHalf-time/full-time is not modelled — see `pl predict --help`.")
     print(f"report    : {out_path}")
     return 0
+
+
+def _margin_label(margin: int, home: str, away: str) -> str:
+    """'draw', '<home> by 2', '<away> by 3+' for a home margin capped at _MARGIN_CAP."""
+    if margin == 0:
+        return "draw"
+    side = home if margin > 0 else away
+    size = abs(margin)
+    return f"{side} by {size}{'+' if size == _MARGIN_CAP else ''}"
 
 
 def _parse_fixtures(args: argparse.Namespace) -> list[tuple[str, str]]:
@@ -1218,6 +1294,8 @@ def build_parser() -> argparse.ArgumentParser:
                     help="forecast as of this date (default: after the last match in the corpus)")
     pp.add_argument("--line", type=float, default=2.5, help="total-goals line (default 2.5)")
     pp.add_argument("--top", type=int, default=6, help="how many exact scores to list")
+    pp.add_argument("--handicap", type=float, default=1.5,
+                    help="goal handicap given to the favourite (default 1.5)")
     pp.add_argument("--out", default=None, help="report filename within the output directory")
     pp.set_defaults(func=cmd_predict)
 
