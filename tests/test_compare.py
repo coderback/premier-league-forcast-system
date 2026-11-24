@@ -312,7 +312,10 @@ def test_the_first_milestone(cfg, real) -> None:
     assert payload["acceptance_rule"] == cfg.acceptance_rule
     assert payload["splits"]["n_splits"] == 1153
     assert report.arms[0].pooled["n"] == 3800
-    assert payload["market"]["n_covered"] == 2660
+    # Gate 2 is scored against bet365's Friday line since 2026-11-18, which prices the whole test
+    # decade; the closing average it replaced (2,660 matches from 2019/20) is still reported.
+    assert payload["market"]["n_covered"] == 3800
+    assert payload["market"]["diagnostics"]["avg_closing"]["n_covered"] == 2660
     assert payload["arms"]["home-always"]["vs_baseline"]["delta_rps"] > 0  # far worse, as it must be
     assert payload["verdicts"]["home-always"]["accepted"] is False
 
